@@ -1,0 +1,48 @@
+# A simple regular expression language.
+
+# alternation has lowest precedence
+Regexp    <- Concat *(:'|' Concat)
+
+
+# then concatenation
+Concat    <- +Rep
+
+
+# then repitition
+Rep       <- Unit ?[*+?]
+
+
+# then parentheses
+Unit    <- :'(' Regexp :')'
+           | CharClass
+           | Wild
+           | Start
+           | End
+           | Literal
+
+
+Literal   <- '\\' Escaped
+           | '\\' !Escaped .
+           | !Escaped .
+
+
+Escaped   <- [*?+.^$\\|()[\]]
+
+
+CharClass <- :'[' +(!']' Range) :']'
+
+
+Range     <- Char ?(:'-' Char)
+
+
+Char      <- '\\' [\-\]\\]
+           | !'\\' .
+
+
+Wild      <- :'.'
+
+
+Start     <- :'^'
+
+
+End       <- :'$'

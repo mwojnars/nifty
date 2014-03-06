@@ -1,0 +1,9 @@
+Waxeye Parser Generator
+www.waxeye.org
+Copyright (C) 2008-2010 Orlando Hill
+Licensed under the MIT license. See 'LICENSE' for details.
+
+------------------------------------------------------------------------------
+
+This is the parser for Waxeye grammar files. It was generated from the grammar
+'grammars/waxeye.waxeye'.

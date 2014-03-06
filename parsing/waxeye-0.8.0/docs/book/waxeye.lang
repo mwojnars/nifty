@@ -1,0 +1,22 @@
+# Waxeye Parser Generator
+# www.waxeye.org
+# Copyright (C) 2008-2010 Orlando Hill
+# Licensed under the MIT license. See 'LICENSE' for details.
+
+include "c_string.lang"
+
+comment start "#"
+
+comment delim "/*" "*/" multiline nested
+
+environment symbol delim "[" "]" begin
+  specialchar = '\\.'
+end
+
+cbracket = "(|)"
+
+keyword = '[[:alpha:]][[:alnum:]_-]*[[:blank:]]*(?=<[:=-])'
+
+function = '<[:=-]'
+
+preproc = '[!&*+?|]'

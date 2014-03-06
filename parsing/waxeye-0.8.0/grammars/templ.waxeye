@@ -1,0 +1,7 @@
+# A grammar for code generation templates.
+
+template    <- *(code | string)
+
+code        <- :'${' *(:'\\' '}' | !'}' !'\\}' .) :'}'
+
+string      <- +(:'\\' '$' | !code .)

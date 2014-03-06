@@ -1,0 +1,54 @@
+# The JSON data format
+
+Json    <- Ws Value
+
+
+Value   <- ( Object
+           | Array
+           | Number
+           | String
+           | Literal)
+           Ws
+
+
+Object  <- :'{' Ws
+           ?( Member *(Com Member))
+           :'}'
+
+
+Member  <- String Ws Col Value
+
+
+Array   <- :'[' Ws
+           ?( Value *(Com Value))
+           :']'
+
+
+Number  <- ?'-'
+           ('0' | [1-9] *[0-9])
+           ?('.' +[0-9])
+           ?([eE] ?[+-] +[0-9])
+
+
+String  <- :'"'
+           *( :'\\' Escaped
+            | !'\\' !'"' . )
+           :'"'
+
+
+Escaped <- 'u' [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]
+         | ["/\\bfnrt]
+
+
+Literal <- 'true'
+         | 'false'
+         | 'null'
+
+
+Ws      <: *[ \t\n\r]
+
+
+Com     <: ',' Ws
+
+
+Col     <: ':' Ws

@@ -1,5 +1,8 @@
 *.py[cod]
 
+# Drafts
+*.draft.*
+
 # C extensions
 *.so
 
