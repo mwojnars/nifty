@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 '''
-Collection of short but frequently used routines and classes - short-hands for different daily tasks.
+Collection of short but frequently used routines and classes - shorthands for different daily tasks.
 
 ---
 This file is part of Nifty python package. Copyright (c) 2009-2014 by Marcin Wojnarski.
@@ -366,7 +366,7 @@ def printJson(*objs):
 jsondump = dumpjson = jsonDump = dumpJson
 jsonprint = printjson = jsonPrint = printJson
 
-class JsonReversibleEncoder(json.JSONEncoder):      # DRAFT
+class JsonReversibleEncoder(json.JSONEncoder):      ###  DRAFT
     def default(self, obj):
         self.classesHandled = {}
         if isinstance(obj, self.classesHandled.values()):
@@ -375,7 +375,7 @@ class JsonReversibleEncoder(json.JSONEncoder):      # DRAFT
             d.update(obj.__dict__)
             return d
         return json.JSONEncoder.default(self, obj)
-class JsonReversibleDecoder(json.JSONDecoder):      # DRAFT
+class JsonReversibleDecoder(json.JSONDecoder):      ###  DRAFT
     pass
 
 class JsonDict(dict):
@@ -398,7 +398,7 @@ class JsonDict(dict):
     def close(self): self.save()
 
 
-class JSON(object):
+class JSON(object):         ###  DRAFT
     "JSON printer & parser. Customizable."
     
     metadata = False        # if True, printing includes additional info in JSON output, to enable proper restoring of all classes and objects from primitives 
@@ -667,7 +667,9 @@ class Tee(object):
 ###   Concurrency
 ###
 
-class Lock(object):                         # built-in lock is of type thread.LockType, but that type can't be inherited from
+class Lock(object):
+    """Built-in lock is of type thread.LockType, which can't be inherited from. 
+       If you need to subclass LockType, use this class as a base instead."""
     def __init__(self):
         self.lock = threading.Lock()
     def acquire(self): self.lock.acquire()

@@ -18,7 +18,7 @@ from collections import namedtuple
 from datetime import datetime
 
 import nifty.util as util
-from nifty.util import isstring, islist, isdict, istuple, setattrs, prefix, ObjDict, lowerkeys, classname
+from nifty.util import isstring, islist, isdict, istuple, issubclass, setattrs, prefix, ObjDict, lowerkeys, classname
 from nifty.text import merge_spaces, decode_entities
 from nifty.web import urljoin, xdoc
 
@@ -210,6 +210,8 @@ class Tree(BaseTree):
         try:
             #regex = re.compile(regpat, re.DOTALL)       # DOTALL: dot will match newline, too
             # (!) correct pattern which causes error in standard 're' module: re.compile("((?P<TIME>[^<>]*?))?")
+            leadingSpace = r"\s*"
+            if not regpat.startswith(leadingSpace): regpat = leadingSpace + regpat
             regex2 = re2.compile(regpat, re2.DOTALL | re2.VERSION1)
         except:
             print "exception raised when compiling regex:"
@@ -264,11 +266,27 @@ class Pattern(object):
     Tips & tricks:
      - when extracting URLs or their portions, ALWAYS use either url() or url_unquote() converters, to provide proper unquoting of extracted strings (!)
 
-    Pattern behavior:
+    Pattern syntax:
+        .              [^<>]*       all except tags (entirely inside or entirely outside tags)
+        ... or ..      ???          tag-aware "all": '<' and '>' can only go together (complete tags)
+        space          \s+          if surrounded by static text
+        space          \s*          between non-static elements (max 1 static)
+        _              _|\s*
+        <xxx>          ~= <xxx .>     <xxx\s*(\s[^>]*)?>       match tag name as given, and any attributes that exist; like <xxx.> with obligatory \s after xxx  
+        <.xxx>         ~= <.xxx.>     <\w+\s[^>]*xxx[^>]*>     match substring anywhere inside attribute list
+        <xxx.yyy.zzz>  == <xxx yyy zzz> == <xxx .yyy.zzz.>
+        <xxx.../>      == <xxx.>...</xxx> | <xxx./>
+        <xxx y z .../> == <xxx y z.>...</xxx>   -- ... means not .* but (.(?!<xxx(\s|/|>)))* -- not allowed to open the same tag 2nd time inside ...
+        {VAR} -> {VAR.}         extract text up to the 1st tag
+        {VAR...}                extract text with tags
+        - spaces around < and >
+
+    The matching behavior:
      - leading and trailing whitespaces in the pattern are removed
-     - pattern match must occur from the *beginning* of the text, but don't need to match the end
+     - pattern must occur at the *beginning* of the text, except for possibly a sequence of leading whitespaces (\s* at the beginning of the pattern regex)
+     - pattern does NOT have to match the end of the text, matching can terminate at any earlier point
      - whitespace in the pattern matches:
-       - outside tags: 1+ spaces if inside static text; 0+ spaces otherwise (e.g., on tag boundary)
+       - outside tags: 1+ spaces if surrounded by static text; 0+ spaces otherwise (e.g., on tag boundary)
        - inside tags: 0+ non-tag (<> excluded) characters, but 1st and last char being a space if present
      - {var} converted to (?P<var>.*) (a named group that will be available under the name 'var' after matching)
      - {var expr}, where expr is interpreted like any top-level expression 
@@ -282,26 +300,22 @@ class Pattern(object):
      - ~ (tilde) converted into a wordfill [^<>\s]*? (lazy matching of a word, no tags and no spaces) 
      - after parsing, all variable names will be returned as lowercase, so in pattern and epilog() you can use uppercase names for better readability
     
+    Value convertion. Nested patterns:
+     - 'convert' is a dict of converters or types that the extracted values shall be casted onto (type(val), only not-None values!); dict;
+     - can contain multikeys: "key1 key2 key3":value ; keys may contain wildcard '*' to match many variable names, like "URL_*":url
+     - converter can be a Pattern object: it will be applied to extracted text and a sub-dict/obj will be returned instead
+     - it's more efficient to supply Pattern object than class, though, to avoid multiple compilation of the same pattern string
+    
+    Embedded unit tests:
+     - autotest
+     - verbose
+     - testN, goalN
+    
     Practical guidelines for writing Patterns:
      * REFERENCE POINTS - characteristic and *always* present (non-optional) substrings in several different places of the pattern, 
         which help situate optional subpatterns relative to each other.
      * GUARDS around variables - to precisely position the variable; avoid *over-matching*; kill spaces!
      * CLOSING ANCHOR inside optional blocks - to force maximum match of the last included optional/variable; avoid *under-matching* 
-     
-    TAG MODE:
-    .              [^<>]*   all except tags (entirely inside or entirely outside tags)
-    ... or ..      ???      tag-aware "all": '<' and '>' can only go together (complete tags)
-    space          \s+      - between 2 statics
-    space          \s*      - between non-static elements (max 1 static)
-    _              _|\s*
-    <xxx>          ~= <xxx .>     <xxx\s*(\s[^>]*)?>       match tag name as given, and any attributes that exist; like <xxx.> with obligatory \s after xxx  
-    <.xxx>         ~= <.xxx.>     <\w+\s[^>]*xxx[^>]*>     match substring anywhere inside attribute list
-    <xxx.yyy.zzz>  == <xxx yyy zzz> == <xxx .yyy.zzz.>
-    <xxx.../>      == <xxx.>...</xxx> | <xxx./>
-    <xxx y z .../> == <xxx y z.>...</xxx>   -- ... means not .* but (.(?!<xxx(\s|/|>)))* -- not allowed to open the same tag 2nd time inside ...
-    {VAR} -> {VAR.}         extract text up to the 1st tag
-    {VAR...}                extract text with tags
-    - spaces around < and >
      
     Pattern class uses an extended version of 're' module, the 'regex' - see http://pypi.python.org/pypi/regex
 
@@ -329,10 +343,7 @@ class Pattern(object):
     regex     = None    # compiled regex object, generated from pattern using the exnhanced 're2' ('regex') module
     semantics = None    # Context.Data object with global information about the pattern tree, collected during semantic analysis
     variables = None    # list of names of variables present in the pattern, extracted from 'semantics'
-    convert   = {}      # converters or types that the extracted values shall be casted onto (type(val), only not-None values!); dict;
-                        # ... can contain multikeys: "key1 key2 key3":value ; keys may contain wildcard '*' to match many variable names, like "URL_*":url
-                        # ... converter can be a Pattern object: it will be applied to extracted text and a sub-dict/obj will be returned instead
-                        # ... it's more efficient to supply Pattern object than class, though, to avoid multiple compilation of the same pattern string
+    convert   = {}      # dict of converters or types that the extracted values shall be casted onto
     extract   = {}      # stand-alone extractors: functions that take an entire document and return extracted value or object for a given item; dict
     html      = True    # shall match() perform HTML entity decoding and normalization of spaces in extracted items? (done before extractors/converters)
     tolower   = False   # shall all item names be converted to lowercase at the end of parsing?
@@ -348,7 +359,7 @@ class Pattern(object):
     # TODO: implement error detection: binary search for the smallest element of the pattern that causes it to break on a given input string
 
     def __init__(self, pattern = None, extract = None, convert = None, html = None, tolower = None):
-        if self.verbose: print util.classname(self)
+        if self.verbose: print classname(self)
         
         if pattern is not None: self.pattern = pattern
         if self.pattern is None: self.pattern = self.__class__.__doc__          # subclasses can define patterns in pydocs, for convenience
@@ -364,6 +375,7 @@ class Pattern(object):
         self.convert = util.splitkeys(self.convert)
         self.variables = self.semantics.variables.keys()
         for name, conv in self.convert.items():
+            if issubclass(conv, Pattern): raise Exception("A Pattern class used as a converter: %s. Use an instance instead: %s()." % ((conv.__name__,)*2))
             if '*' not in name: continue
             pat = name.replace('*', '.*') + "$"
             for name2 in self.variables:
@@ -425,7 +437,7 @@ class Pattern(object):
         # is OK?
         if out == goal: return True
         
-        print "%s.test%s," % (util.classname(self), testID),
+        print "%s.test%s," % (classname(self), testID),
         
         # if no goal provided, print all extracted data, in a form suitable for inclusion in the code: strings as list, other values as dict, on new line
         if goal is self.MISSING:

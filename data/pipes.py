@@ -682,7 +682,7 @@ class Buffer(DataPipe):
 
 class Sort(DataPipe):
     """Total or partial in-memory heap sort of the input stream. Buffer items in a heap and when the heap is full, output them in sorted order. 
-    Heap size can be unlimited (total sorting, output items appear only after all input data was consumed) 
+    Heap size can be unlimited (default), which results in total sorting: output items appear only after all input data was consumed; 
     or limited to a predefined maximum size (partial sort, generation of output items begins as soon as the heap achieves its maximum size).
     >>> Collection([2,7,3,6,8,3]) >> Sort(2) >> List >> Print >> RUN
     [2, 3, 6, 7, 3, 8]
@@ -1091,7 +1091,8 @@ class Zip(MultiSource):
     def __iter__(self): pass
     
 class MergeSort(MultiSource):
-    "Merge multiple sorted inputs into a single sorted output. Like heapq.merge(), but wrapped up in a DataPipe."
+    """Merge multiple sorted inputs into a single sorted output. Like heapq.merge(), but wrapped up in a DataPipe. 
+    If only the input streams were fully sorted, the result stream is guaranteed to be fully sorted, too."""
     def __init__(self, *sources):
         if len(sources) == 1 and islist(sources[0]):
             self.sources = sources[0]
