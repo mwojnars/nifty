@@ -311,6 +311,10 @@ class Pattern(object):
      - verbose
      - testN, goalN
     
+    Usage:
+     - methods: match, match1, matchAll
+     - functions: matchPattern, matchPattern1
+    
     Practical guidelines for writing Patterns:
      * REFERENCE POINTS - characteristic and *always* present (non-optional) substrings in several different places of the pattern, 
         which help situate optional subpatterns relative to each other.

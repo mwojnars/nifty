@@ -14,15 +14,14 @@ You should have received a copy of the GNU General Public License along with Nif
 '''
 
 from __future__ import absolute_import
-import sys, heapq, math, numpy as np, jsonpickle, itertools
+import sys, heapq, math, numpy as np, jsonpickle, itertools, threading
 from copy import copy, deepcopy
 from itertools import islice
 from time import time, sleep
-
-from threading import Thread, Lock
 from Queue import Queue
 
-from nifty.util import isint, islist, isstring, issubclass, isfunction, iscontainer, istype, unique, classname, getattrs, setattrs, divup, Tee, NoneLock
+from nifty.util import isint, islist, isstring, issubclass, isfunction, iscontainer, istype, classname, getattrs, setattrs, divup, Tee
+from nifty.util import Object, __Object__, NoneLock
 from nifty.files import GenericFile, File as files_File, SafeRewriteFile, ObjectFile, JsonFile, DastFile
 
 
@@ -126,7 +125,7 @@ class Grid(Space):
         stop = (d[0].move(d[1], d[2]) for d in dims)
         if None in stop: return None
         return stop
-            
+        
     
 #####################################################################################################################################################
 ###
@@ -175,26 +174,69 @@ class Grid(Space):
 #         
 
 """
-Special class attributes that can be read/written in massive way (in one go) in nested structures (pipelines, metapipes, ...).
+Special class properties that can be extracted or assigned in a massive way (in one go) in nested structures (pipelines, metapipes, ...),
+without the need to specify exact access paths to target objects, only with global addressing (naming) of the elements of the structure.
  - Knobs:    (input parameters) passed from outside to inside; allow for massive write in.
  - Signals:  (output parameters) passed from inside to outside; allow for massive read out
  - Controls: (input meta-parameters) like knobs, but not directly involved in data processing, only controling the environment of algorithm execution; e.g., no. of threads to use, log file, ...
- - Labels:   (output meta-parameters) like signals, but containing meta-information unrelated to data processing
+ - Labels:   (output meta-parameters) like signals, but containing meta-information unrelated to data processing itself
 
 An attribute can serve as a knob and as a label at the same time.
 """
 
-class Signaling(object):
-    """Base class for all classes that contain labels or knobs and thus enable reporting (of labels) and parameterization with meta optimizers (of knobs).
-       Subclasses should treat incoming knobs (passed from client in setKnobs) as *immutable* and must not make any modifications,
-       since a given knobs instance can be reused multiple times by the client.
-    """
+#####################################################################################################################################################
+###
+###   DATA CELL
+###
+
+class __Cell__(__Object__):
+    "Metaclass for generating Cell subclasses. Sets up the lists of knobs and inner cells."
+    def __init__(cls, *args):
+        super(__Cell__, cls).__init__(*args)
+        cls.label('__knobs__')
+        cls.label('__inner__')
+
+
+class Cell(Object):
+    """Element of a data processing network. Participates in signalling pathways.
+    Typically most cells are Pipes and can appear in vertical (pipelines) as well as horizontal (nesting) relationships with other cells.
+    Sometimes, there can be cells that are not pipes - they participate only in vertical relationships 
+    and exhibit their own custom API for data input/output (instead of Pipe's API).
     
+    Pipes are elements of horizontal structures of data flow. Typically 1-1 or many-1 relationships.
+    Cells are elements of vertical structures of control. Typically 1-1 or 1-many relationships.
+    
+    Every cell can contain "knobs": parameters configured from the outside by other cells, e.g., by meta-optimizers; input parameters of the cell.
+    Every cell can produce "signals" that can be read by other cells in DPN; output parameters of the cell. 
+    Knobs and signals have a form of attributes located in a particular cell and identified by cell's name/path and attribute's name.
+    Knobs and signals enable implementation of generic meta-algorithms which operate on inner structures without exact knowledge of their identity,
+    only by manipulation of knobs and signals.
+    
+    Things to keep in mind:
+    - properties defined inside inner classes, __knobs__ and __inner__, are automatically copied to parent class level after class definition
+    """
+    __metaclass__ = __Cell__
+
     __labels__ = []         # names of attributes that serve as labels of a given class
     __knobs__  = []         # names of attributes that serve as knobs of a given class
+    __signals__ = []
+    __inner__ = []
+
+    name = None                 # optional label, not necessarily unique, that identifies this cell instance or a group of cells in signal routing
+    owner = None                # the cell which owns 'self' and creates an environment where 'self' lives; typically 'self' is present in owner.__inner__
+
+    printlock = threading.Lock()          # mutual exclusion of printing (on stdout); assign NoneLock to switch synchronization off
+
+    def __init__(self, **knobs):
+        "The client can pass knobs already in __init__, without manual call to setKnobs."
+        if knobs: self.setKnobs(knobs)
 
     def setKnobs(self, knobs, strict = False):
-        "Set given dict of 'knobs' onto 'self' and sub-cells. In strict mode, all 'knobs' must be recognized (declared as knobs) in self."
+        """Set given dict of 'knobs' onto 'self' and sub-cells. In strict mode, all 'knobs' must be recognized (declared as knobs) in self.
+        Subclasses should treat objects inside 'knobs' as *immutable* and must not make any modifications,
+        since a given knob instance can be reused multiple times by the client.
+        """
+        for cell in self.inner(): cell.setKnobs(knobs, strict)          # walk the tree of all inner cells first
         if not self.__knobs__ and not strict: return
         for address, value in knobs.iteritems():
             attr = self.findAttr(address)
@@ -203,6 +245,26 @@ class Signaling(object):
             else:
                 setattr(self, attr, value)
     
+    def findAttr(self, addr):
+        """Find attribute name in 'self' that corresponds to a given knob. None if the knob doesn't belong to self 
+        (mismatch of class/instance specifier), or is undefined in self."""
+        obj, attr = addr.rsplit('.', 1) if '.' in addr else ('', addr)          # knob's owner object name is the substring up to the last dot '.' of 'name'
+        if obj and obj not in (classname(self), classname(self, full=True)): return None
+        if attr not in self.__knobs__: return None
+        return attr
+    
+    def inner(self):
+        "A generator or a list of all cells contained in (owned by) this one. Used in methods that need to apply a given operation to all subcells."
+        for name in self.__inner__: 
+            if not hasattr(self, name): continue
+            cell = getattr(self, name)
+            if cell is not None: yield cell
+    
+    # DRAFT
+    def walkInner(self, oper, **kwargs):
+        "Executes given 'oper' in self and all inner cells, visiting cells in post-order."
+    def walkOuter(self, oper, **kwargs): pass
+    
     def getInnerSignals(self, names = None):
         "Return dictionary of signals and their values present in 'self' or below."
     def getOuterSignals(self, names = None):
@@ -210,99 +272,43 @@ class Signaling(object):
     def getSignals(self, names = None):
         return self.getInnerSignals(names) + self.getOuterSignals(names)
         
-    def findAttr(self, addr):
-        """Find attribute name in 'self' that corresponds to a given knob. None if the knob doesn't belong to self 
-        (mismatch of class/instance specifier), or is undefined in self."""
-        owner, attr = addr.rsplit('.', 1) if '.' in addr else ('', addr)        # owner name is the substring up to the last dot '.' of 'name'
-        if owner and owner not in (classname(self), classname(self, full=True)): return None
-        if attr not in self.__knobs__: return None
-        return attr
-    
-#####################################################################################################################################################
-###
-###   DATA CELL
-###
 
-class __DataCell__(type):
-    "Metaclass that generates DataCell subclasses, with reorganization of signals when needed."
-    def __init__(cls, *args):
-        cls.arrange('__knobs__')
-        cls.arrange('__inner__')
-        
-    def arrange(cls, attrname):
-        # create list of knobs/signals/... declared in this class
-        items = getattr(cls, attrname, [])                          # list of attribute names representing items of a given type (knobs/signals/inner-cells...)
-        if istype(items):                                           # inner class instead of a list?
-            attrs = getattrs(items)
-            setattrs(cls, attrs)                                    # copy all attrs from the inner class to top class level
-            items = attrs.keys()                                    # collect attr names
-        elif isstring(items):                                       # space-separated list of knob names?
-            items = items.split()
-    
-        # append all declarations of knobs/signals/... from superclasses
-        baseitems = [getattr(base, attrname, []) for base in cls.__bases__]
-#         print cls.__name__, baseitems, items
-        items = reduce(lambda x,y:x+y, baseitems) + items
-        items = unique(items, order = True)
-#        print cls.__name__, items
-        setattr(cls, attrname, items)
-
-class DataCell(Signaling):
-    """Element of a data processing network. Participates in signalling pathways.
-    Typically most cells are DataPipes and can appear in vertical (pipelines) as well as horizontal (nesting) relationships with other cells.
-    Sometimes, there can be cells that are not pipes - they participate only in vertical relationships 
-    and exhibit their own custom API for data input/output (instead of DataPipe's API).
-    
-    Pipes are elements of horizontal structures of data flow. Typically 1-1 or many-1 relationships.
-    Cells are elements of vertical structures of control. Typically 1-1 or 1-many relationships.
-    
-    Every cell can contain "knobs": parameters configured from the outside by other cells (input parameters of the cell).
-    Every cell can produce "signals" that can be read by other cells in DPN (output parameters of the cell). 
-    Knobs and signals have a form of attributes located in a particular cell and identified by cell's name/path and attribute's name.
-    """
-    __metaclass__ = __DataCell__
-
-    __signals__ = []
-    __inner__ = []
-
-    name = None                 # optional label, not necessarily unique, that identifies this cell instance or a group of cells during signal routing
-    owner = None                # the cell that owns this one and which creates an environment where 'self' lives
-
-    printlock = Lock()          # mutual exclusion of printing (on stdout); assign NoneLock to switch synchronization off
-
-    def inner(self):
-        "A generator or a list of all cells contained in (owned by) this one. Used in methods that need to apply a given operation to all subcells."
+    def save(self):
+        "Serialization of the cell."
+        raise NotImplemented()
+    def load(self):
+        raise NotImplemented()
     
     def __str__(self):
         if not self.name: return classname(self)
         return "%s[%s]" % (self.name, classname(self))
 
-    def _logStackTrace(self, method = None):
-        dataStackTrace.log(self, method)
-    def _sealStackTrace(self):
-        dataStackTrace.dirty = True
+#     def _logStackTrace(self, method = None):
+#         dataStackTrace.log(self, method)
+#     def _sealStackTrace(self):
+#         dataStackTrace.dirty = True
     
-class DataStackTrace(object):
-    def __init__(self):
-        self.dirty = False
-        self.stack = []         # stack is a list of entries, one for each traced data cell + method
-        self.exception = None   # the current exception being propagated right now; if a log with another exception comes in, the stack is reset to empty list
-    def log(self, obj, method = None):
-        #if ex is not self.exception: self.stack = []
-        if self.dirty: 
-            self.stack = []
-            self.dirty = False
-        entry = (obj, method)
-        self.stack.append(entry)
-    def __str__(self):
-        if not self.stack: return "  Empty stack trace"
-        def compile(entry):
-            obj, method = entry
-            if method is None: method = "<unknown>"
-            return "  %s.%s" % (classname(obj), method)
-        return '\n'.join(map(compile, self.stack))
-    
-dataStackTrace = DataStackTrace()
+# class DataStackTrace(object):
+#     def __init__(self):
+#         self.dirty = False
+#         self.stack = []         # stack is a list of entries, one for each traced data cell + method
+#         self.exception = None   # the current exception being propagated right now; if a log with another exception comes in, the stack is reset to empty list
+#     def log(self, obj, method = None):
+#         #if ex is not self.exception: self.stack = []
+#         if self.dirty: 
+#             self.stack = []
+#             self.dirty = False
+#         entry = (obj, method)
+#         self.stack.append(entry)
+#     def __str__(self):
+#         if not self.stack: return "  Empty stack trace"
+#         def compile(entry):
+#             obj, method = entry
+#             if method is None: method = "<unknown>"
+#             return "  %s.%s" % (classname(obj), method)
+#         return '\n'.join(map(compile, self.stack))
+#     
+# dataStackTrace = DataStackTrace()
 
     
 #####################################################################################################################################################
@@ -310,7 +316,7 @@ dataStackTrace = DataStackTrace()
 ###   DATA PIPE
 ###
 
-class __DataPipe__(__DataCell__):
+class __Pipe__(__Cell__):
     "Enables chaining of pipe classes (automatically instantiated without args), not only pipe instances."
     def __rshift__(cls, other):
         return cls() >> other
@@ -318,7 +324,7 @@ class __DataPipe__(__DataCell__):
         return cls() << other
 
 
-class DataPipe(DataCell):
+class Pipe(Cell):
     """Base class for data processing objects (pipes) that can be chained together to perform pipelined processing, 
     each one performing an atomic operation on the data received from preceding pipe(s), or being an initial source of data (loader, generator).
     Every iterable type - a collection, a generator or any type that implements __iter__() - can be used as a source pipe, too.
@@ -328,9 +334,10 @@ class DataPipe(DataCell):
     - use classes, not only instances, with >>
     - use collections, functions, ... with >> 
     """
-    __metaclass__ = __DataPipe__
+    __metaclass__ = __Pipe__
+    __transient__ = "source"    # don't serialize 'source' attribute
     
-    source = None               # source DataPipe or iteratable from which input data for 'self' will be pulled
+    source = None               # source Pipe or iteratable from which input data for 'self' will be pulled
     count  = None               # number of input items read so far in a given execution, or 1-based index of the item currently being processed; tracked in most standard pipes (not all)
     iterating = False           # flag that protects against multiple iteration of the same pipe, at the same time
     
@@ -357,13 +364,13 @@ class DataPipe(DataCell):
         if self.iterating: raise Exception("Data pipe %s opened for iteration twice, before previous iteration has been closed" % self)
         self.iterating = True
         self.count = 0
-        self._logStackTrace("__iter__")
+        #self._logStackTrace("__iter__")
         
         self.open()
 
     def _epilog(self):
         self.close()
-        self.iterating = False
+        del self.iterating                  # could set self.iterating=False instead, but deleting is more convenient for serialization
 
     def open(self):
         "Called at the beginning of __iter__(). Can be overloaded in subclasses to perform per-cycle initialization."
@@ -371,8 +378,9 @@ class DataPipe(DataCell):
         "Called at the end of __iter__(). Can be overloaded in subclasses to perform per-cycle clean-up."
     
     def copy(self, deep = True):
+        "self.source is excluded from copying and the returned pipe has source UNassigned, even when deep copy (that's how __getstate__ is implemented)."
         if deep: 
-            if self.source: raise Exception("Deep copy called for a data pipe of %s class with source already assigned." % classname(self))
+            #if self.source: raise Exception("Deep copy called for a data pipe of %s class with source already assigned." % classname(self))
             return deepcopy(self) 
         return copy(self)
         
@@ -402,7 +410,7 @@ class DataPipe(DataCell):
     def __rshift__(self, other):
         """'>>' operator overloaded, enables pipeline creation via 'a >> b >> c' syntax. Returned object is a Pipeline.
         Put RUN token at the end: a >> b >> RUN - to execute the pipeline immediately after creation."""
-        # 'self' is a regular DataPipe; specialized implementation for Pipeline defined in the subclass
+        # 'self' is a regular Pipe; specialized implementation for Pipeline defined in the subclass
         if other is RUN:
             Pipeline(self).execute()
         else:
@@ -427,7 +435,7 @@ class DataPipe(DataCell):
 
 # TOKENS
 
-class _PIPE(DataPipe):
+class _PIPE(Pipe):
     def __rshift__(self, other): return Pipeline(other)
 
 # Starts a pipeline. For easy appending of other pipes with automatic type casting: PIPE >> a >> b >> ...
@@ -435,7 +443,7 @@ class _PIPE(DataPipe):
 PIPE = _PIPE()
 
 # Invokes execution of a pipeline. When put at the end of a pipeline (a >> b >> ... >> RUN) indicates that it should be executed now. 
-RUN = DataPipe()
+RUN = Pipe()
 
 
 #####################################################################################################################################################
@@ -443,7 +451,7 @@ RUN = DataPipe()
 ###   Functional Pipes (base abstract classes)
 ###
 
-class Operator(DataPipe):
+class Operator(Pipe):
     """Plain item-wise processing & filtering function, implemented in the subclass by overloading process() and possibly also open/close().
     Method process(item) returns modified version of the item or None to indicate that the item should be dropped (filtered out).
     For operators that only perform filtering, with no modification of items, see Filter class."""
@@ -521,24 +529,24 @@ class Filter(Operator):
         return self.oper(item)
 
 
-# class Sink(DataPipe):
+# class Sink(Pipe):
 #     "A pipe that only consumes data and never outputs any items."
 #     def __iter__(self):
 #         self.run()
 #     def run(self):
 #         "This method shall be overloaded in subclasses. You must iterate yourself over input items from self.source."
 # 
-# class Capacitor(DataPipe):
+# class Capacitor(Pipe):
 #     "Consumes all input data and only then starts producing output data, possibly of a different type, e.g. aggregates of input items."
 
-class DataPile(DataPipe):
-    """Permanent (buffered) storage of data, in memory or filesystem, that can be reused many times after one-time creation.
-    Can provide random access to items via index (dict) or multiple indices.
-    It's intentional that the term 'pile' resembles both 'pipe' and 'file'."""
-    def build(self): pass
-    def append(self): pass
-    def load(self): pass
-    def __getitem__(self, key): pass
+# class DataPile(Pipe):
+#     """Permanent (buffered) storage of data, in memory or filesystem, that can be reused many times after one-time creation.
+#     Can provide random access to items via index (dict) or multiple indices.
+#     It's intentional that the term 'pile' resembles both 'pipe' and 'file'."""
+#     def build(self): pass
+#     def append(self): pass
+#     def load(self): pass
+#     def __getitem__(self, key): pass
 
 
 #####################################################################################################################################################
@@ -548,7 +556,7 @@ class DataPile(DataPipe):
 
 ###  Wrappers for standard Python objects
 
-class Collection(DataPipe):
+class Collection(Pipe):
     """Wrapper for plain collections or iterators, to turn them into DataPipes that can be used as sources in a pipeline. 
     In subclasses, set 'self.data' with the iterable to take data from; optionally override open() to initialize 'data' just before iteration starts,
     but note that close() is not called (this would require control over iteration process and yielding items one-by-one, 
@@ -560,7 +568,7 @@ class Collection(DataPipe):
         self.open()
         return iter(self.data)
 
-class File(DataPipe):
+class File(Pipe):
     """Wrapper for a file object opened for reading. Iteration delegates to file.__iter__(). 
     Transparently repositions file pointer when iteration restarts. The file is never closed."""
     def __init__(self, file):
@@ -587,12 +595,12 @@ class Function(Operator):
 
 ###  Generators
 
-class Empty(DataPipe):
+class Empty(Pipe):
     "Generates an empty output stream. Useful as an initial pipe in an incremental sum of pipes: p = Empty; p += X[0]; p += X[1] ..."
     def __iter__(self):
         return; yield
 
-class Repeat(DataPipe):
+class Repeat(Pipe):
     "Returns a given item for the specified number of times, or endlessly if times=None. Like itertools.repeat()"
     def __init__(self, item, times = None):
         self.item = item
@@ -604,7 +612,7 @@ class Repeat(DataPipe):
         else:
             for _ in xrange(self.times): yield item
     
-class Range(DataPipe):
+class Range(Pipe):
     "Generator of consecutive integers, equivalent to xrange(), same parameters."
     def __init__(self, *args):
         self.args = args
@@ -614,14 +622,14 @@ class Range(DataPipe):
 
 ###  Filters
 
-class Slice(DataPipe):
+class Slice(Pipe):
     "Like slice() or itertools.islice(), same parameters. Transmits only a slice of the input stream to the output."
     def __init__(self, *args):
         self.args = args
     def __iter__(self):
         return islice(self.source, *self.args)
 
-class Offset(DataPipe):
+class Offset(Pipe):
     "Drop a predefined number of initial items"
     def __init__(self, offset):
         self.offset = offset
@@ -632,7 +640,7 @@ class Offset(DataPipe):
             if count <= self.offset: continue
             yield item
 
-class Limit(DataPipe):
+class Limit(Pipe):
     "Terminate the data stream after a predefined number of items. 'Head' is an alias."
     def __init__(self, limit):
         self.limit = limit
@@ -645,16 +653,16 @@ class Limit(DataPipe):
             if count >= self.limit: return
 Head = Limit
 
-class DropWhile(DataPipe):
+class DropWhile(Pipe):
     "Like itertools.dropwhile()."
-class TakeWhile(DataPipe):
+class TakeWhile(Pipe):
     "Like itertools.takewhile()."    
-class StopOn(DataPipe):
+class StopOn(Pipe):
     """Terminate the data stream when a given condition becomes True. Condition is a function that takes current item as an argument. 
     This function can also keep an internal state (memory)."""
 
 
-class Subset(DataPipe):
+class Subset(Pipe):
     """Selects every 'fraction'-th item from the stream, equally spaced, yielding <= 1/fraction of all data. Deterministic subset, no randomization.
     >>> Range(7) >> Subset(3) >> Print >> RUN
     2
@@ -671,16 +679,16 @@ class Subset(DataPipe):
                 yield item
                 count = 0
 
-class Sample(DataPipe):
+class Sample(Pipe):
     "Random sample of input items. Every input item is decided independently with a given probability, unconditional on what items were chosen earlier."
     
 
 ###  Buffers
 
-class Buffer(DataPipe):
+class Buffer(Pipe):
     "Upon build(), buffer all input data in memory. Then, when data is buffered, can iterate (multiple times) over it and yield from memory."
 
-class Sort(DataPipe):
+class Sort(Pipe):
     """Total or partial in-memory heap sort of the input stream. Buffer items in a heap and when the heap is full, output them in sorted order. 
     Heap size can be unlimited (default), which results in total sorting: output items appear only after all input data was consumed; 
     or limited to a predefined maximum size (partial sort, generation of output items begins as soon as the heap achieves its maximum size).
@@ -865,8 +873,8 @@ class Save(Monitor):
         self.outfile.write(item)
         
 
-class Pile(DataPile):
-    """DataPipe wrapper around file objects, for use of files in pipelines and with pipe operators.
+class Pile(Pipe):
+    """Pipe wrapper around file objects, for use of files in pipelines and with pipe operators.
     Sequence of data items stored in a file. During iteration, either reads and outputs items from the file (if no source pipe connected) 
     or takes items from source, saves to the file (override or append) and outputs unchanged to the caller."""
     
@@ -946,7 +954,7 @@ class DastPile(Pile):
 
 ###  Other
 
-class List(DataPipe):
+class List(Pipe):
     "Combines all input items into a list. At the end, this list is output as the only output item; it's also directly available as self.items property."
     def __iter__(self):
         self.items = []
@@ -960,7 +968,7 @@ class List(DataPipe):
 ###   Structural Pipes
 ###
 
-class MetaPipe(DataPipe):
+class MetaPipe(Pipe):
     "Wraps up a number of pipes to provide meta-operations on them."
 
 class Container(MetaPipe):
@@ -997,7 +1005,7 @@ class Wrapper(MetaPipe):
 #####################################################################################################################################################
 
 class Pipeline(Container):
-    "Sequence of data pipes connected sequentially, one after another. Pipeline is a MetaPipe and a DataPipe itself."
+    "Sequence of data pipes connected sequentially, one after another. Pipeline is a MetaPipe and a Pipe itself."
     
     def __init__(self, *pipes, **kwargs):
         "'kwargs' may contain connected=True to indicate that pipes are already connected into a list or a tree (must be sorted in topological order!)."
@@ -1029,7 +1037,7 @@ class Pipeline(Container):
         self.pipes = _normalize(self.pipes)
         prev = self.source
         for next in self.pipes:
-            if prev is not None: next.source = prev         # 1st pipe can be a generator or collection, not necessarily a DataPipe (no .source attribute)
+            if prev is not None: next.source = prev         # 1st pipe can be a generator or collection, not necessarily a Pipe (no .source attribute)
             prev = next
             
         # pull data
@@ -1042,7 +1050,7 @@ class Pipeline(Container):
 
 #####################################################################################################################################################
 
-class MultiSource(DataPipe):
+class MultiSource(Pipe):
     def copy(self, deep = True):
         "Shallow copy does copy the list of pipes too (list can be modified afterwards without affecting the original)."
         if deep: return deepcopy(self)
@@ -1091,7 +1099,7 @@ class Zip(MultiSource):
     def __iter__(self): pass
     
 class MergeSort(MultiSource):
-    """Merge multiple sorted inputs into a single sorted output. Like heapq.merge(), but wrapped up in a DataPipe. 
+    """Merge multiple sorted inputs into a single sorted output. Like heapq.merge(), but wrapped up in a Pipe. 
     If only the input streams were fully sorted, the result stream is guaranteed to be fully sorted, too."""
     def __init__(self, *sources):
         if len(sources) == 1 and islist(sources[0]):
@@ -1207,7 +1215,7 @@ class GridSearch(MetaOptimize):
         threads = []                                            # list of pairs: (knobs, pipe_thread)
         for knobs in knobsGroup:                                # create a copy of the template for each combination of knob values; wrap up in threads
             pipe = self.createPipe(knobs)
-            thread = DataThread(pipe, self.threadBuffer)
+            thread = Thread(pipe, self.threadBuffer)
             thread.start()
             threads.append((knobs, thread))
         return threads
@@ -1238,14 +1246,13 @@ class Evolution(MetaOptimize):
 ###   Functional wrappers (operators)
 ###
 
-# def pipeline(*pipes):
-#     "Connect the pipeline and execute it, in one step."
-#     Pipeline(pipes).execute()
-
-class NoData(Exception):
-    "Raised to indicate that there is no input data to fulfill the request in operator()."
-
-class DataFeed(DataPipe):
+class Feed(Pipe):
+    """A proxy that enables the external operator to supply input data to the pipeline 1 item at a time, or in multiple separate batches of arbitrary size.
+    When the pipeline reads the data, operator must supply new batch with set() or setList(), otherwise the Feed.NoData exception will be raised."""
+    
+    class NoData(Exception):
+        "Raised when there is no input data to fulfill the request in operator()."
+    
     data = None
     def set(self, *items):
         self.data = items
@@ -1255,20 +1262,8 @@ class DataFeed(DataPipe):
         while True:
             items = self.data
             self.data = None
-            if items is None: raise NoData
+            if items is None: raise Feed.NoData()
             for item in items: yield item
-
-# def operator(*pipes):
-#     """Functional wrapper for a pipe or pipeline that enables manual pushing of items to the pipe input, 1 at a time. Can be used in the same thread as a caller. 
-#     Pipes must pull exactly 1 item at a time from the pipeline source. If they pull more or less than this, exception will be raised.
-#     Pipes must not rely on being properly closed, as operator access prevents correct closing of the pipeline.
-#     """
-#     feed = DataFeed()
-#     pipeline = Pipeline([feed] + pipes).__iter__()
-#     def process(item):
-#         feed.set(item)
-#         return pipeline.next()
-#     return process
 
 class operator(object):
     """Functional wrapper for a pipe or pipeline: enables manual pushing of items to pipe input, 1 at a time, like to a function (operator),
@@ -1276,7 +1271,7 @@ class operator(object):
     Pipes must pull exactly 1 item at a time from the pipeline source. If they pull more or less than this, exception will be raised.
     """
     def __init__(self, *pipes):
-        self.feed = DataFeed()
+        self.feed = Feed()
         self.pipeline = Pipeline([self.feed] + pipes)
         self.process = self.pipeline.__iter__()
     def __call__(item):
@@ -1293,10 +1288,13 @@ class operator(object):
 
 #####################################################################################################################################################
 
-class DataThread(Thread, Wrapper):
+class Thread(threading.Thread, Wrapper):
+    """A thread object that executes given pipe(line) in a separate thread.
+    Can serve also as a pipe and be included in a pipeline, if only the inner pipe takes no input data (has no source)."""
+    
     END = object()      # token to be put into a queue (input or output) to indicate end of data stream
     
-    class Feed(DataPipe):
+    class Feed(Pipe):
         "A data-pipe wrapper around threading queue for input data."
         def __init__(self, queue):
             self.queue = queue
@@ -1304,7 +1302,7 @@ class DataThread(Thread, Wrapper):
             while True: 
                 item = self.queue.get()
                 self.queue.task_done()
-                if item is DataThread.END: break
+                if item is Thread.END: break
                 yield item
         def join(self):
             "Block until all items in the feed have been retrieved. Note: more items can still be added afterwards."
@@ -1315,7 +1313,7 @@ class DataThread(Thread, Wrapper):
         If insize=None, input items must be generated by the 'pipe' itself.
         If outsize=None, output items are dropped.
         """
-        Thread.__init__(self)
+        threading.Thread.__init__(self)
         self.pipe = pipe                # pipe(line) to be executed in the thread
         self.input = Queue(insize) if insize is not None else None
         self.output = Queue(outsize) if outsize is not None else None
@@ -1324,7 +1322,7 @@ class DataThread(Thread, Wrapper):
     def run(self):
         # connect the pipe with input data feed
         if self.input:
-            self.feed = DataThread.Feed(self.input)
+            self.feed = Thread.Feed(self.input)
             pipeline = Pipeline(self.feed, self.pipe)
         else:
             pipeline = self.pipe
@@ -1332,7 +1330,7 @@ class DataThread(Thread, Wrapper):
         # run the pipeline, optionally pushing output items to self.output
         if self.output:
             for item in pipeline: self.output.put(item)
-            self.output.put(DataThread.END)
+            self.output.put(Thread.END)
         else:
             for item in pipeline: pass
     
@@ -1342,18 +1340,26 @@ class DataThread(Thread, Wrapper):
     def get(self, *args): return self.output.get(*args)
     def end(self): 
         "Terminates the stream of input data"
-        self.input.put(DataThread.END)                      # put a token that marks end of input data
+        self.input.put(Thread.END)                          # put a token that marks end of input data
     
     def emptyFeed(self): self.feed.join()
+    
+    def __iter__(self):
+        if self.source: raise Exception("Pipe of class Thread can't be used with a source attached. It can't synchronize input and output by itself.")
+        while True:
+            item = self.get()
+            if item is Thread.END: break
+            yield item
+        
     
 
 #####################################################################################################################################################
 
 def _normalize(pipes):
     """Normalize a given list of pipes. Remove None's and strings (used for commenting out), 
-    instantiate DataPipe classes if passed instead of an instance, wrap up functions, collections and files."""
+    instantiate Pipe classes if passed instead of an instance, wrap up functions, collections and files."""
     def convert(h):
-        if issubclass(h, DataPipe): return h()
+        if issubclass(h, Pipe): return h()
         if isfunction(h): return Function(h)
         if iscontainer(h): return Collection(h)
         if isinstance(h, (file, GenericFile)): return File(h)

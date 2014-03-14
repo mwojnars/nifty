@@ -3,6 +3,135 @@
 DAST (DAta STorage) file format. 
 Allows easy, object-oriented, stream-oriented, human-readable serialization and de-serialization of any data structures.
 
+3 types of value formatting: inline (bounded), endline (unbounded/open, occupies line up to the nearest \n), outline (multiline; possibly mixed with endline)
+
+Indented format:
+- atomic values, inline:
+  123  123.45  123.  True/False  None/null/-/~           -- float always with a dot . to discern from int
+
+- strings:
+  "longer text"  u"unicode text"  'text'
+
+  multi-line, no \n encoding, newlines preserved during decoding:
+  |this and
+     this
+    and ...
+
+  newlines removed during decoding (but other spaces except indent preserved!):
+  >this and
+     this
+    and ...
+
+- binary:
+  b"R0lGODlhDAAMAIQAAP"         -- values are base64 encoded
+  |R0lGODlhDAAMAIQAAP
+    ...
+
+- list bounded (space-delimited, tab-delimited, comma-delimited ...):
+  [x1, x2, x3, ...]
+
+  unbounded:
+  list x1, x2, x3, ...
+
+  multi-line:
+  list:
+    x1
+    x2
+    ...
+
+- tuple: (x1 x2 x3)
+- set:
+  set()
+  {x1, x2, x3, ...}
+  set x1, x2, x3, ...
+
+- dictionary, bounded; pairs delimited by space/tab/comma, key/value separated by ':' or ': ' or '=' or ' ':
+  {k1:v1 k2:v2 k3:v3}
+  [k1:v1 k2:v2 k3:v3]            -- to enforce OrderedDict upon load
+  dict(k1=v1, k2=v2)
+
+  unbounded:
+  dict k1:v1 k2:v2 k3:v3
+  odict ...                      -- to enforce OrderedDict upon load
+
+  multi-line:
+  dict:
+    w1: v1                    -- key can be any value of any type, but strings must be quoted:  "thisIsKey": "thisIsValue"
+    w2: v2
+    k1 = v3                   -- key is an identifier (string with only alpha-num chars and '.'), thus unquoted:  thisIsKey = "thisIsValue"
+    k2 = v4
+    ...
+
+- date/time:
+  datetime "2013-8-17 16:40:34 [TMZ?]"
+  dttm "2013-8-17 16:40:34"
+  date "2013-8-17"
+  time "16:40:34"
+
+- numpy array:
+  array "float" x1 x2 x3 ...      -- 1D array with dtype=float, "float" is optional (default float if missing)
+  array "float":                  -- 2D array
+    x11 x12 ...
+    x21 x22 ...
+    ...
+
+  array:                          -- multi-dimensional array, decomposed
+    array:
+      x111 x112 ...
+      x121 x122 ...
+    array:
+      ...
+
+- custom-class object; arguments to be passed in *args and **kwargs:
+
+  module.classname()  OR  module.classname          -- empty instance (inline or endline), no args  
+  module.classname(w1, w2, k1=v1, k2=v2)            -- inline; NO SPACE between classname and '(', otherwise will be treated as a single tuple
+  module.classname w1, w2, k1=v1, k2=v2             -- endline
+  module.classname w1, w2, k1=v1, k2=v2 ...         -- endline + outline; list of items continued on subsequent lines...
+    q1 = x1
+    q2 = x2
+
+  module.classname:  OR  module.classname ...       -- outline
+    q1 = x1
+    q2 = x2
+
+- tokens (reserved words): True, False, str, uni, list, dict, set, datetime, date, time, array, ...
+
+- hooks (custom tokens with user-defined decoders, with mapping defined on app level, in both the reader and the writer):
+    MyClass, ...     -- shorthand for package.module.MyClass, for use with frequent classes or mapping functions (any callable can be assigned)
+
+- rewrites: mappings can be defined to reinterpret mod.class calls and replace them with any custom class or callable, on runtime during data read;
+    this allows reading code to be reorganized after data being written, without losing access to data that used old code structure
+
+- object IDs for de-duplication:
+  &123 "my string"        -- assignment of ID to a new object
+  &123 mod.cls x y z ...
+  *123                    -- reference to a previously defined object; in YAML: & and *
+
+- comments:
+  # a comment until newline ...
+  
+
+>>> in1  = [1,2,3,['ala','kot','pies'],5,6]
+>>> out1 = encode(in1, mode = 1)
+>>> out1
+'list 1, 2, 3, ["ala", "kot", "pies"], 5, 6'
+
+>>> print encode({1:'ala', 2:'kot', 3:['ala',{'i','kot'}, {'jaki':'burek',10:'as'}], 4:None}, mode = 2)
+dict:
+  1: "ala"
+  2: "kot"
+  3: list:
+    "ala"
+    set:
+      "i"
+      "kot"
+    dict:
+      10: "as"
+      "jaki": "burek"
+  4: -
+
+
 ---
 This file is part of Nifty python package. Copyright (c) 2009-2014 by Marcin Wojnarski.
 
@@ -14,13 +143,13 @@ You should have received a copy of the GNU General Public License along with Nif
 """
 
 
-import re
+import re, numpy as np
 from StringIO import StringIO
 from itertools import izip
 from datetime import datetime, date, time
 from collections import OrderedDict, defaultdict, namedtuple, Iterator
 
-from nifty.util import isstring, classname, subdict, Object
+from nifty.util import isstring, isdict, classname, subdict, Object
 from nifty.text import regex
 
 ########################################################################################################################################################
@@ -52,7 +181,7 @@ class Tokenizer(object):
 
     # Tokens and their corresponding regexes...
     
-    _noalpha = r'(%s)(?!\w)'                                        # checks that no alpha-numeric character follows after the match (expected whitespace or special)
+    _noalpha = r'(%s)(?!\w)'                    # checks that no alpha-numeric character follows after the match (expected whitespace or special)
     tokens = [
         # all special chars: newline, parentheses, separators
         ('SPEC' , r'[\n\(\)\[\]\{\}:,=]'),
@@ -136,17 +265,16 @@ class Analyzer(object):
         indent = next()
         assert indent[0] == "INDENT"
         indent = indent[1]
-        if len(indent) == len(line) - 1: 
-            assert line[-1] == '\n'
+        if len(indent) >= len(line) - 1 and (len(indent) == len(line) or line[-1] == '\n'):
             return indent, False, False, self.EMPTY
         
         item = self.lineitem(next())
         
         # try reading the terminating \n, sometimes it remains in the input stream despite the item being parsed
-        #try: end = next()
-        #except StopIteration, e: end = None
-        end = next()
-        if end[1] != '\n': raise DAST_SyntaxError("Too many elements in line, expected newline instead of '%s'", end)
+        try: 
+            end = next()
+            if end[1] != '\n': raise DAST_SyntaxError("Too many elements in line, expected newline instead of '%s'", end)
+        except StopIteration, e: pass
         
         self.linenum += 1
         return (indent, self.isopen) + item
@@ -163,7 +291,7 @@ class Analyzer(object):
         return True, (val1, val2)
     
     def value(self, token):
-        "Returns the object (atomic or composite value, but NOT a pair) that starts with 'token' at the current position."
+        "Parses an object (atomic or composite value, but NOT a pair) that starts with 'token' at the current position."
         name, val = token[:2]
         n = name[0]
         
@@ -185,20 +313,24 @@ class Analyzer(object):
         # collection
         if val in '([{':
             if val == '(':
-                items = self.sequence(self.value, ')')
+                items = self.valueSeq(')')
                 return tuple(items)
             if val == '[':
-                return self.sequence(self.value, ']')
+                return self.valueSeq(']')
             if val == '{':
-                pairs = self.sequence(self.pair, '}')
-                return dict(pairs)
+                #pairs = self.valueSeq(self.pair, '}')
+                token = self.next()
+                vals, pairs = self.itemSeq(token, '}')
+                if not vals: return dict(pairs)
+                if pairs: raise DAST_SyntaxError("mixed atomic values and key-value pairs inside {...} expression (%s)", token)
+                return set(vals)
         
         # closed object
         if name == 'OBJ':
             token = self.next()
             assert token[1] == '('
             token = self.next()
-            args, kwargs = self.itemseq(token, ')')
+            args, kwargs = self.itemSeq(token, ')')
             return self.decode(val, args, kwargs)
         
         # open object
@@ -210,12 +342,13 @@ class Analyzer(object):
                 #if token[1] != '\n': raise DAST_SyntaxError("Open object of the form 'typename:' followed by a token other than newline: '%s',", token)
                 return val, [], {}                          # (typename, args, kwargs)
             else:
-                args, kwargs = self.itemseq(token, '\n')
+                args, kwargs = self.itemSeq(token, '\n')
                 return val, args, kwargs                    # (typename, args, kwargs)
         
-        raise DAST_SyntaxError("malformed expression (%s)" % (token,))
+        raise DAST_SyntaxError("malformed expression", token)
 
     def pair(self, token):
+        "Parses a key:value or key=value pair."
         iskey = (token[0] == 'KEY')
         key = self.value(token)
         sep = self.next()
@@ -224,31 +357,33 @@ class Analyzer(object):
         val = self.value(self.next())
         return (key, val)
     
-    def sequence(self, parseFun, stop):
+    def valueSeq(self, stop):
+        "Sequence of atomic values (no pairs) returned as a list."
         out = []
         token = self.next()
         while token[1] != stop:
-            out.append(parseFun(token))
+            val = self.value(token)
+            out.append(val)
             token = self.next()
             if token[1] == ',': token = self.next()
         return out
 
-    def itemseq(self, token, stop):
+    def itemSeq(self, token, stop):
         "Sequence of items: values and/or pairs, mixed, returned in two separate lists."
         vals = []
         pairs = {}
         while token[1] != stop:
+            #print token
             iskey = (token[0] == 'KEY')
             val1 = self.value(token)
-            #print token, val1
             token = self.next()
-            if token[1] == '=':
-                if not iskey: raise self.IncorrectKey(val1)
+            if token[1] in ':=':                                    # key-value pair?
+                if token[1] == '=' and not iskey: raise self.IncorrectKey(val1)
                 token = self.next()
                 val2 = self.value(token)
                 token = self.next()
                 pairs[val1] = val2
-            else:
+            else:                                                   # atomic value
                 vals.append(val1)
             if token[1] == ',': token = self.next()
         return vals, pairs
@@ -262,7 +397,7 @@ class Analyzer(object):
 class Encoder(object):
     """New encoder is created for every new record, to enable use of instance variables as current state of the encoding, in thread-safe way."""
     
-    _params = "indent listsep dictsep maxindent mode1".split()          # only these parameters will be copied during initialization, for later use
+    _params = "indent listsep dictsep keysep0 keysep2 maxindent mode1".split()          # only these parameters will be copied during initialization, for later use
     
     def __init__(self, out, params): #indent, listsep, dictsep, maxindent, mode1):
         #self.indent, self.listsep, self.dictsep, self.maxindent, self.mode1  =  indent, listsep, dictsep, maxindent, mode1
@@ -306,7 +441,7 @@ class Encoder(object):
     def _str(self, s, mode, level):
         if mode == 0: self._write('"' + encode_basestring(s) + '"')
         else:
-            s = encode_basestring_multiline(s)
+            s = encode_basestring(s) #encode_basestring_multiline(s)
             s = s.replace('\n', '\n' + self.indent * level + ' ')
             self._write('"' + s + '"')
     
@@ -319,7 +454,7 @@ class Encoder(object):
             self._write('list ')
             self._sequence0(x)
         else:
-            self._write('list:\n')
+            self._write('list:')
             self._sequence2(x, level + 1)
     
     def _tuple(self, x, mode, level):
@@ -331,7 +466,7 @@ class Encoder(object):
             self._write('tuple ')
             self._sequence0(x)
         else:
-            self._write('tuple:\n')
+            self._write('tuple:')
             self._sequence2(x, level + 1)
     
     def _set(self, x, mode, level):
@@ -346,15 +481,70 @@ class Encoder(object):
             self._write('set ')
             self._sequence0(x)
         else:
-            self._write('set:\n')
+            self._write('set:')
             self._sequence2(x, level + 1)
     
     def _dict(self, d, mode, level):
-        if mode <= 1: self._dict0(d)
-        else: self._dict2(d, level)
+        if mode <= 1:                           # {k1:v1, k2:v2, ...}
+            self._write('{')
+            self._pairs0(d)
+            self._write('}')
+        else:                                   # multiline encoding
+            self._write("dict:")
+            self._pairs2(d, level + 1)
         
-    def _dict0(self, d):
-        self._write('{')
+    def _obj(self, x, mode, level):
+        "Encode object of an arbitrary class."
+        typename = classname(x, full=True)
+        if hasattr(x, '__getstate__'):          # pick object's state, either from __getstate__ or from __dict__          
+            state = x.__getstate__()            # watch out: returned state must be a dict (!), other cases are not handled currently
+            if not isdict(state):
+                state = {'__state__': state}
+        else:
+            try: 
+                state = x.__dict__
+            except:
+                raise Exception("dast.Encoder, can't encode object %s of type <%s>, unable to retrieve its __dict__ property" % (repr(x), typename))
+        
+        self._write(typename)
+        if mode <= 1: self._state0(None, state, mode)
+        else:
+            fmt = getattr(x, '__dast_format__', {})
+            self._state2(level, kwargs2 = state, fmt = fmt)
+        
+    def _array(self, x, mode, level):
+        dtype = str(x.dtype)
+        data = x.tolist()
+        self._write("array")
+        if mode <= 1: self._state0([dtype, data], None, mode)
+        else:
+            self._state2(level, args0 = [dtype], args2 = data)
+
+    # for internal use
+    
+    def _state0(self, args, kwargs, mode):
+        "Encode state of an arbitrary object (everything after typename), mode 0 or 1."
+        if mode == 0:
+            self._write("(")
+            self._arglist0(args, kwargs)
+            self._write(")")
+        elif args or kwargs:
+            self._write(" ")
+            self._arglist0(args, kwargs)
+    def _state2(self, level, args0 = [], args2 = [], kwargs0 = {}, kwargs2 = {}, fmt = {}):
+        "Encode state of an arbitrary object, mode 2, with selected arguments (args0, kwargs0) encoded in mode 1"
+        inline = (args0 or kwargs0)
+        outline = (args2 or kwargs2)
+        if inline:
+            self._write(" ")
+            self._arglist0(args0, kwargs0)
+        if outline:
+            if not inline: self._write(":")
+            self._sequence2(args2, level + 1)
+            self._keywords2(kwargs2, level + 1, fmt)
+
+    def _pairs0(self, d):
+        "Encode list of pairs given as a dictionary 'd', in mode 0, without boundaries: k1:v1, k2:v2, ..."
         lsep, dsep = self.listsep, self.dictsep
         first = True
         for k, v in d.iteritems():
@@ -363,66 +553,91 @@ class Encoder(object):
             self._write(dsep)
             self._encode(v)
             first = False
-        self._write('}')
-    
-    def _dict2(self, d, level, typename = 'dict', fmt = {}):
-        "Optional fmt[key] is mode number (0/1/2) that shall be used for the value of a given key."
-        self._write(typename + ":\n")
-        level += 1
+    def _pairs2(self, d, level):
+        """Encode list of pairs given as a dict, in mode 2, without header but including leading newline:
+                k1: v1
+                k2: v2
+                ...
+        """
         sep = self.dictsep
         indent = self.indent * level
+        for key, val in d.iteritems():
+            self._write('\n' + indent)
+            self._encode(key)
+            self._write(sep)
+            self._encode(val, 2, level)
+    
+    def _keywords0(self, d):
+        """Like _pairs0, but uses keyword notation for each pair: k1=v1, k2=v2, ... 
+        All keywords must be proper identifiers, otherwise the output will be syntactically incorrect."""
+        if not d: return
+        lsep, dsep = self.listsep, self.keysep0
         first = True
         for k, v in d.iteritems():
-            if not first: self._write('\n')
-            self._write(indent)
-            self._encode(k)
-            self._write(sep)
-            mode = fmt.get(k, 2)
-            self._encode(v, mode, level)
+            if not first: self._write(lsep)
+            self._write(k)
+            self._write(dsep)
+            self._encode(v)
             first = False
+    def _keywords2(self, d, level, fmt = {}):
+        """Like _pairs2, but uses keyword notation for each pair: k=v.
+        Optional fmt[key] is mode number (0/1/2) that shall be used for the value of a given key.
+        """
+        if not d: return
+        sep = self.keysep2
+        indent = self.indent * level
+        for key, val in d.iteritems():
+            self._write('\n' + indent)
+            self._write(key)
+            self._write(sep)
+            mode = fmt.get(key, 2)
+            self._encode(val, mode, level)    
     
-    def _obj(self, x, mode, level):
-        typename = classname(x, full=True)
-        try: xrepr = x.__dict__
-        except:
-            raise Exception("dast.Encoder, can't encode object of type <%s>, unable to retrieve its __dict__ property" % typename)
-        if mode <= 1: 
-            self._write(typename + " ")
-            self._dict0(xrepr)
-        else: 
-            fmt = getattr(x, '__dast_format__', {})
-            self._dict2(xrepr, level, typename, fmt)
+    def _arglist0(self, args, kwargs):
+        "Encodes argument list, with unnamed and keyword arguments, mode 0 or 1, no boundaries: v1, v2, k1=w1, k2=w2, ..."
+        if args:
+            self._sequence0(args)
+            if kwargs: self._write(self.listsep)
+        self._keywords0(kwargs)
 
-    
     def _sequence0(self, l):
+        "Encode a sequence of items 'l' in mode 0/1 (a list without boundaries): x1, x2, x3, ..."
         first = True
         for i in l:
             if not first: self._write(self.listsep)
             self._encode(i)
             first = False
     def _sequence2(self, l, level):
+        """Encode a sequence of items 'l' in mode 2, without header but with leading newline:
+            x1
+            x2
+            ...
+        """
         indent = self.indent * level
-        first = True
         for i in l:
-            if not first: self._write('\n')
+            self._write('\n')
             self._write(indent)
             self._encode(i, 2, level)
-            first = False
 
 
     def _datetime(self, d, m, l):
-        self._write('datetime "' + str(d) + '"')
+        fmt = 'datetime "%s"' if m >= 1 else 'datetime("%s")'
+        self._write(fmt % d)
     def _date(self, d, m, l):
-        self._write('date "' + str(d) + '"')
+        fmt = 'date "%s"' if m >= 1 else 'date("%s")'
+        self._write(fmt % d)
     def _time(self, t, m, l):
-        self._write('time "' + str(t) + '"')
-        
+        fmt = 'time "%s"' if m >= 1 else 'time("%s")'
+        self._write(fmt % t)
 
     # encoders for standard types
-    encoders = {int:_int, float:_float, bool:_bool, str:_str, unicode:_str, type(None):_none, 
-                list:_list, tuple:_tuple, set:_set, 
-                dict:_dict, OrderedDict:_dict, defaultdict:_dict,
-                datetime:_datetime, date:_date, time:_time}
+    encoders = { int:_int, long:_int, float:_float, bool:_bool, str:_str, unicode:_str, type(None):_none, 
+                 list:_list, tuple:_tuple, set:_set, 
+                 dict:_dict, OrderedDict:_dict, defaultdict:_dict,
+                 datetime:_datetime, date:_date, time:_time,
+                 np.float16:_float, np.float32:_float, np.float64:_float, np.float128:_float,
+                 np.ndarray:_array,
+                }
 
 
 ########################################################################################################################################################
@@ -432,7 +647,7 @@ class Encoder(object):
 
 def _tuple(*args): return args
 def _list(*args): return list(args)
-def _dict(*pairs): return dict(pairs)
+#def _dict(*pairs): return dict(pairs)
 def _set(*args): return set(args)
 
 def _datetime(s): 
@@ -443,14 +658,15 @@ def _date(s):
 def _time(s):
     if '.' in s: return datetime.strptime(s, '%H:%M:%S.%f').time()
     return datetime.strptime(s, '%H:%M:%S').time()
-
+def _array(dtype, *data):
+    return np.array(data, dtype = dtype)
 
 class Decoder(object):
     "Decoder of a particular encoded string (file or list of DAST-encoded lines). Creates buffer on top of the string to easily iterate over lines with 1 line lookahead."
 
     #EOF = object()              # token that indicates end of file OR end of current block during decoding
     dicttype = OrderedDict
-    decoders = {'tuple':_tuple, 'list':_list, 'dict':_dict, 'set':_set, 'datetime':_datetime, 'date':_date, 'time':_time}
+    decoders = {'tuple':_tuple, 'list':_list, 'set':_set, 'datetime':_datetime, 'date':_date, 'time':_time, 'array':_array}
 
     #nocompile = False           # if True, decode() will return syntax trees instead of compiled objects
 
@@ -483,10 +699,13 @@ class Decoder(object):
         "Load next line to the buffer."
         try:
             line = self.input.next()
-            self.linenum += 1
-            self.line = self.parser.parse(line)                 # a tuple: (indent, isopen, ispair, value)
         except StopIteration, e:
             self.line = None
+            return
+        #print '--', line
+        self.linenum += 1
+        self.line = self.parser.parse(line)                 # a tuple: (indent, isopen, ispair, value)
+        #print '++', self.line
 
     def hasnext(self, indent):
         "Check if the buffered line (next to be parsed) exists AND is indented MORE than 'indent' (part of a block with header's indentation of 'indent')."
@@ -536,9 +755,13 @@ class Decoder(object):
     
     def decodeType(self, typename, args, kwargs):
         "Decode typename extracted from a DAST file (map to a corresponding type or callable), and instantiate with given arguments."
+        
+        if typename == 'dict':                                      # 'dict' is special: may have arbitrary objects as keys (non-identifiers), so we can't do **kwargs to call decoder
+            return kwargs
+        
         # find the right decoder for a given class
         decoder, isclass = self.decoders.get(typename, (None,None))
-        if decoder is None:                                         # decoder not found? must load a class
+        if decoder is None:                                         # decoder not found? must import appropriate class first
             decoder = _import(typename)
             isclass = True
             self.decoders[typename] = (decoder, isclass)            # keep the loaded type for future reference
@@ -550,32 +773,38 @@ class Decoder(object):
             # if you need something special to be done both for __init__ and DAST loading, try to put it inside custom __new__() of the class,
             # as *args are passed to new(), while **kwargs are copied directly to __dict__.
             obj = decoder.__new__(decoder, *args)
-            obj.__dict__.update(kwargs)
+            state = kwargs.pop('__state__', None)
+            if kwargs: obj.__dict__.update(kwargs)
+            if state: obj.__setstate__(state)
             return obj
         else:
             return decoder(*args, **kwargs)                         # decoder is a function, don't bother with __new__ and __dict__
-        
-        return decoder(*args, **kwargs)
     
     def decode(self):
         while True:
             item = self.decodeItem(None)
             if item is None: break
             yield item[0]
-    
+        
 
 def _import(path):
     """Load the module and return the class/function/var, given its full package/module path (there always must be a module name in the path).
 
-    >>> _import('nifty.data.dast.Decoder')
-    <class 'nifty.data.dast.Decoder'>
+    >>> _import('nifty.util.Object')
+    <class 'nifty.util.Object'>
     >>> _import('__builtin__.int')()
     0
     """
     if '.' not in path: raise Exception("Can't import an object without module/package name: %s" % path)
     mod, name = path.rsplit('.', 1)
-    module = __import__(mod)
+    module = __import__(mod, fromlist = [mod])
+    #print mod, name
+    #print module
+    #print module.__dict__
     return getattr(module, name)
+
+
+#_import('nifty.util.Object')
 
 
 ########################################################################################################################################################
@@ -596,9 +825,11 @@ class DAST(object):
     """
     
     # basic parameters
-    indent = "  "
+    indent  = "  "
     listsep = ", "
     dictsep = ": "
+    keysep0  = "="          # separator for keyword notation of pairs: key=value, used in modes 0 and 1 
+    keysep2  = " = "        # separator for keyword notation of pairs: key=value, used in mode 2
     maxindent = 3
     mode1 = True            # use mode-1 when possible (True) or mode-0 instead (False)
 
@@ -638,7 +869,10 @@ class DAST(object):
 
     def decode1(self, input):
         "Decode only the 1st object, ignore the rest. Exception if no object present."
-        return self.decode(input).next()
+        try:
+            return self.decode(input).next()
+        except StopIteration, e:
+            raise Exception("No object decoded")
 
     
 #####################################################################################################################################################
@@ -732,11 +966,12 @@ FLOAT_REPR = repr
 
 #####################################################################################################################################################
 
-# for testing...
+# testing...
 
 class RichText(Object):
     def __init__(self, text):
         self.content = text
+        self.info = "nothing special"
 
 class Comment(Object):
     def __init__(self, text, dt):
@@ -745,37 +980,58 @@ class Comment(Object):
         
 class User(Object):
     def __init__(self):
-        comm1 = Comment("Ala ma kota", datetime(2013,4,20,10,10,10))
-        comm2 = Comment("Ala ma kota", datetime(2013,4,20,10,10,10))
-        comm3 = Comment("Ala ma kota", datetime(2013,4,20,10,10,10))
+        comm1 = Comment("Ala ma kota", datetime(2013,1,20,10,10,10))
+        comm2 = Comment("Ala ma kota", datetime(2013,2,20,10,10,10))
+        comm3 = Comment("Ala ma kota", datetime(2013,3,20,10,10,10))
         self.comments = [comm1, comm2, comm3]
         self.pagesVisited = {123,643,76554}
 
+def test1(x, verbose = False, **kwargs):
+    "Test that consists of encoding 'x' and then decoding back from the resulting code."
+    if verbose: print "input:   ", x
+    y = encode(x, **kwargs)
+    if verbose: 
+        print "encoded: ",
+        if '\n' in y: print
+    print y
+    z = decode1(y)
+    if verbose: print "decoded: ", z
+
+    same = (x == z)
+    if isinstance(same, np.ndarray): same = np.all(same)
+    if verbose: 
+        print "OK" if same else "DIFFERENT"
+        print
+    if not same:
+        raise Exception("test1, decoded object differs from the original one")
+
+def test(x):
+    print
+    test1(x, mode=0)
+    test1(x, mode=1)
+    test1(x, mode=2)
 
 if __name__ == "__main__":
-    from nifty.util import printjson
-    
-    in1  = [1,2,3,['ala','kot','pies'],5,6]
-    out1 = encode(in1, mode = 1)
-    print out1
-    print encode({1:'ala', 2:'kot', 3:['ala',{'i','kot'}, {'jaki':'burek',10:'as'}], 4:None}, mode = 2)
+    import doctest
+    print doctest.testmod()
 
-    print "---"
-    x = {3,5,7,'ala'}
-    y = encode(x, mode=1);      print y
-    z = decode1(y);     print z
-    print
-    
-    x = User()
-    y = encode(x);      print y
-    z = decode1(y);     print z
-    print
-    
-    y = encode(x, mode = 1);    print y
-    z = decode1(y);             print z
-    print
+#     class _ndarray_(object):
+#         def __eq__(self, other):
+#             boolarray = np.ndarray.__eq__(self, other)
+#             return np.all(boolarray)
+#     np.ndarray.__eq__ = _ndarray_.__eq__
+
+    test([True, 8.23, "x y z \n abc"])
+    test({3,5,7,'ala'})
+    test({5: 643, "pies i kot": None, None: True})
+    test(Comment("Ala ma kota", datetime(2013,4,20,10,10,10)))
+    test(User())
+    test(np.array([1, 2, 3.0]))
+    test(np.array([[]]))
+    test(np.array([[3, 4], [2, 1], [8, 9]]))
 
     print "\ndone"
     
+#__main__.Comment(date = datetime "2013-04-20 10:10:10", text = __main__.RichText(content = "Ala ma kota"))
 
-    
+

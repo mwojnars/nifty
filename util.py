@@ -98,37 +98,9 @@ def subclasses(cls, include_self=False):
 
 #####################################################################################################################################################
 ###
-###   Objects, Collections & Data Structures
+###   Collections & Data Structures
 ###
 
-class Object(object):
-    """For easy creation of objects that can have assigned any fields, unlike <object> instances. For example: 
-         obj = Object(); obj.x = 21
-         obj = Object(x = 21, y = 'ala')
-         obj = Object({'x':21, 'y':'ala'}) 
-       With base <object> this is impossible, a subclass is required to assign any fields.
-       
-       Additionally, Object provides:
-       - an equality '==' operator __eq__ that compares respective __dict__ dictionaries.
-       - __str__ that prints the class name and its __dict__, with full recursion like for nested dict's (__repr__ == __str__)
-    """
-    def __init__(self, __dict__ = {}, **kwargs):
-        self.__dict__.update(__dict__)
-        self.__dict__.update(kwargs)
-    def __eq__(self, other): 
-        return self.__dict__ == other.__dict__
-    def __str__(self):
-        items = ["%s = %s" % (k,repr(v)) for k,v in self.__dict__.iteritems()]
-        return "%s(%s)" % (self.__class__.__name__, ', '.join(items))        #str(self.__dict__)
-    __repr__ = __str__
-        
-
-class NoneObject(Object):
-    "Class for mock-up objects that - like None - evaluate to False in bool(), but additionally can hold any data inside or provide other custom behavior."
-    def __bool__(self): return False
-    __nonzero__ = __bool__
-    
-    
 def unique(seq, order = False):
     "List of elements of 'seq' with duplicates removed. If order=True, preserves original order (from: http://stackoverflow.com/a/480227/1202674)."
     if not seq: return []
@@ -318,6 +290,96 @@ def heapmerge(*inputs):
     return heapq.merge(*iterables)
 
 
+#####################################################################################################################################################
+###
+###   Objects
+###
+
+class __Object__(type):
+    def __init__(cls, *args):
+        cls.__labels__ = []                         # names of attributes that represent labels in this class
+        cls.label('__transient__')                  # declare '__transient__' as a label and set up the list of labelled attributes, cls.__transient__
+
+    def label(cls, name):
+        "Declare 'name' as a label and set up the list of labelled attributes, the list to be stored under 'name'."
+        cls.normLabel(name)                         # convert cls's own labelling to canonical representation
+        cls.inheritList(name)                       # inherit labellings from superclasses
+        cls.__labels__.append(name)                 # mark 'name' as a label
+
+    def normLabel(cls, label):
+        "Normalize a list of labelled attributes declared in this class, by converting it from a string or inner class if necessary."
+        attrs = getattr(cls, label, [])                             # list of names of attributes labelled by 'label'
+        if istype(attrs):                                           # inner class instead of a list?
+            attrs = getattrs(attrs)
+            setattrs(cls, attrs)                                    # copy all attrs from the inner class to top class level
+            attrs = attrs.keys()                                    # collect attr names
+        elif isstring(attrs):                                       # space-separated list of knob names?
+            attrs = attrs.split()
+        setattr(cls, label, attrs)
+
+    def inheritList(cls, attr, order = True):
+        "If 'attr' is the name of a special attribute containing a list of items, append lists from base classes to cls's list."
+        #"""Find out what attributes are labelled by 'label' in superclasses and label them in this class, too. 
+        #'label' is the name of attribute that keeps a list of labelled attrs of a given class."""
+        baseitems = [getattr(base, attr, []) for base in cls.__bases__]         # get lists defined in base classes
+        baseitems = reduce(lambda x,y:x+y, baseitems)                           # combine into one list
+        items = getattr(cls, attr)
+        combined = unique(baseitems + items, order = order)                     # add cls's items and uniqify
+        setattr(cls, attr, combined)
+        
+
+class Object(object):
+    """For easy creation of objects that can have assigned any attributes, unlike <object> instances. For example: 
+         obj = Object(); obj.x = 21
+         obj = Object(x = 21, y = 'ala')
+         obj = Object({'x':21, 'y':'ala'}) 
+       With base <object> this is impossible - a subclass, even if with empty implementation, is required to assign to attributes.
+       
+       Additionally, Object implements:
+       - equality '==' operator __eq__ that performs deep comparison by comparing __dict__ dictionaries, not only object IDs.
+       - __str__ that prints the class name and its __dict__, with full recursion like for nested dict's (__repr__ == __str__).
+       - __getstate__ that understands the __transient__ list of attributes and excludes them from serialization.
+       
+       When subclassing Object:
+       - Some attributes can be labelled as "transient", by adding their names to subclass'es __transient__ list.
+         __transient__ can also be given as a space-separated string "name1 name2 ...", which will be converted automatically into a list 
+         by the metaclass, after subclass definition. Additionally, the metaclass automatically extends the list 
+         with names declared as transient in superclasses.
+         __transient__ is typically a class-level attribute, but can be overriden in instances to modify serialization behavior on per-instance basis.
+       - If you provide custom metaclass for your Object subclass, remember to inherit that metaclass from __Object__ and call
+         super(X, cls).__init__ in your __init__(cls).
+       - Subclasses can easily add their own labels, by implementing a metaclass that subclasses __Object__ and invokes cls.label('labelName') in __init__.
+         New labels will be automatically provided with conversions and inheritance, like __transient__ does.
+    """
+    __metaclass__ = __Object__
+    __transient__ = []                      # list of names of attributes to be excluded from serialization 
+    
+    def __init__(self, __dict__ = {}, **kwargs):
+        self.__dict__.update(__dict__)
+        self.__dict__.update(kwargs)
+    def __eq__(self, other): 
+        return self.__dict__ == other.__dict__
+    def __str__(self):
+        items = ["%s = %s" % (k,repr(v)) for k,v in self.__dict__.iteritems()]
+        return "%s(%s)" % (self.__class__.__name__, ', '.join(items))        #str(self.__dict__)
+    __repr__ = __str__
+    
+    def __getstate__(self):
+        """Representation of this object for serialization. Returns a copy of __dict__ with transient attributes removed, 
+        or just original __dict__ if no transient attrs defined."""
+        if self.__transient__:
+            state = self.__dict__.copy()
+            for attr in self.__transient__: state.pop(attr, None)
+            return state
+        return self.__dict__
+    
+
+class NoneObject(Object):
+    "Class for mock-up objects that - like None - evaluate to False in bool(), but additionally can hold any data inside or provide other custom behavior."
+    def __bool__(self): return False
+    __nonzero__ = __bool__
+    
+    
 #####################################################################################################################################################
 ###
 ###   Strings and Text
