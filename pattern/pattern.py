@@ -64,7 +64,7 @@ class Tree(BaseTree):
     Parser = pattern_parser.PatternParser
     Context = Context
 
-    class _node_(BaseTree._node_):
+    class node(BaseTree.node):
         def analyse(self, ctx):
             if len(self.children) == 0: return ctx
             if len(self.children) == 1: return self.children[0].analyse(ctx)
@@ -75,23 +75,23 @@ class Tree(BaseTree):
             ctx.longfill = longfill
             return ctx
 
-    _static_ = BaseTree._static_
-    _expr_ = _node_                                 # "Generic expression - a sequence of subnodes. Consecutive expressions can be flatten: merged into one."
+    static = BaseTree.static
+    expr = node                                     # "Generic expression - a sequence of subnodes. Consecutive expressions can be flatten: merged into one."
 
-    class xwordfill(_node_):
+    class xwordfill(node):
         def compile(self): return r'[^<>\s]*?'                                                      #@ReservedAssignment
-    class xshortfill(_node_):
+    class xshortfill(node):
         def compile(self): return r'[^<>]*?'                                                        #@ReservedAssignment
-    class xlongfill(_node_):
+    class xlongfill(node):
         display = "..."
         def compile(self): return r'.*?'                                                            #@ReservedAssignment
         def analyse(self, ctx):
             ctx.longfill = True
             return ctx
-    class xjustadot(_static_):
+    class xjustadot(static):
         def compile(self): return r'\.'                                                             #@ReservedAssignment
 
-    class space(_node_):
+    class space(node):
         display = " "
     class xspace0(space):
         "Maybe-space. Can match some spaces, but not obligatory"
@@ -103,15 +103,15 @@ class Tree(BaseTree):
         """Filler-space. Like short-filler, but 1st and last char must be one of ['"\s=]; or empty."""
         def compile(self): return r'''(\s*|(['"\s=][^<>]*?['"\s=]))'''                                           #@ReservedAssignment
 
-    class xword(_static_):
+    class xword(static):
         "Static string without spaces. In regex, special characters are escaped, non-printable characters are encoded."
         def compile(self):                                                                          #@ReservedAssignment
             s = self.value.encode('string_escape')
             escape = r".^$*+?{}()[]|"       # no backslash \, it's handled in encode() above
             s = ''.join('\\' + c if c in escape else c for c in s)
             return s
-    class xstatic(_expr_): pass
-    class xwordB(_expr_):
+    class xstatic(expr): pass
+    class xwordB(expr):
         """Like 'word', but modifies output regex to allow spaces around '=' and substitution of " with ' or the other way round."""
         def compile(self):                                                                          #@ReservedAssignment
             r = super(Tree.xwordB, self).compile()
@@ -120,15 +120,15 @@ class Tree(BaseTree):
             r = r.replace("'", r'''("|')''')
             return r
 
-    class xexpr(_expr_): pass
+    class xexpr(expr): pass
     xexprA = xexprB = xexpr
     
-    class xtagname(_node_): pass
-    class xnoname(_node_):
+    class xtagname(node): pass
+    class xnoname(node):
         "Match any word as a tag name, with optional leading '/'; 'tag' node below will ensure that the name matched here is followed only by space or end of tag."
         display = "."
         def compile(self): return r'/?\w+'                                                            #@ReservedAssignment
-    class xtag(_node_):
+    class xtag(node):
         name = expr = closing = None
         def __init__(self, waxnode, tree):
             self.init(waxnode, tree)
@@ -145,10 +145,10 @@ class Tree(BaseTree):
             expr = spaceL + expr if expr else ''
             return r'(|(?<=>)\s*)' + '<' + comp(self.name) + gap + expr + spaceR + comp(self.closing)
     
-    class xrepeat(_static_): pass
-    class xregex(_static_): pass
-    class xvarname(_static_): pass
-    class xvar(_node_):
+    class xrepeat(static): pass
+    class xregex(static): pass
+    class xvarname(static): pass
+    class xvar(node):
         "A {xxx} element - named group and/or raw regex. If doesn't contain any expression, a shortfill '.' is used; put '...' inside {} to get a longfill."
         repeat = name = regex = expr = None
         
@@ -181,7 +181,7 @@ class Tree(BaseTree):
             return r'(%s%s)%s' % (name, expr, repeat)
     xvarA = xvarB = xvar
     
-    class xoptional(_node_):
+    class xoptional(node):
         "A [xxx] element. Resolves into a *greedy* optional match of 'xxx' pattern."
         def __init__(self, waxnode, tree):
             self.init(waxnode, tree)
@@ -192,7 +192,7 @@ class Tree(BaseTree):
             return r'(%s)?' % self.expr.compile()
     xoptionalA = xoptionalB = xoptional
 
-    class xatomic(_node_):
+    class xatomic(node):
         "A {> xxx} element. Resolves into atomic grouping (?>...) that limits backtracking during regex matching, see: www.regular-expressions.info/atomic.html."
         def __init__(self, waxnode, tree):
             self.init(waxnode, tree)
@@ -328,11 +328,11 @@ class Pattern(object):
     >>> A.longfill, A.repeated, B.longfill, B.repeated
     (False, True, False, False)
     >>> print p.regex.pattern
-    (.*?(?P<A>[^<>]*?))*(?P<B>[^<>]*?)
+    \s*(.*?(?P<A>[^<>]*?))*(?P<B>[^<>]*?)
     
     >>> p2 = Pattern("{> [ala]} ala")
     >>> print p2.regex.pattern
-    (?>(ala)?)\\s*ala
+    \s*(?>(ala)?)\\s*ala
     >>> print p2.match1("ala")
     None
     """

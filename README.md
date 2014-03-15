@@ -4,7 +4,7 @@ Nifty
 *Nifty* is a library of utility functions and classes that simplify various common tasks in Python programming. A handy add-on to standard libraries that makes Python even easier to use. 
 Contains also a number of advanced tools for specific tasks of *web scraping*, *data processing* and *data mining*.
 
-Delivered to you by [Marcin Wojnarski](http://wojnarski.wordpress.com/marcin-wojnarski) (follow me on [Twitter](http://twitter.com/mwojnarski)). Licensed on GPL.
+Brought to you by [Marcin Wojnarski](http://wojnarski.wordpress.com/marcin-wojnarski) (follow me on [Twitter](http://twitter.com/mwojnarski)). Licensed on GPL.
 
 Contents
 --------
@@ -30,3 +30,5 @@ In [nifty.text](https://github.com/mwojnars/nifty/blob/master/text.py):
 - **N-grams**: *ngrams*
 
 Other modules to be documented in the near future. Check the source code for details.
+
+Nifty includes code of [Waxeye](http://waxeye.org/), a PEG parser generator (MIT license). It is used to generate parser for [Pattern](https://github.com/mwojnars/nifty/blob/master/pattern/pattern.py) class.

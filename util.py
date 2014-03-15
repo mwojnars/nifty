@@ -342,14 +342,16 @@ class Object(object):
        
        When subclassing Object:
        - Some attributes can be labelled as "transient", by adding their names to subclass'es __transient__ list.
-         __transient__ can also be given as a space-separated string "name1 name2 ...", which will be converted automatically into a list 
-         by the metaclass, after subclass definition. Additionally, the metaclass automatically extends the list 
+         __transient__ can also be given as a space-separated string "name1 name2 ...", which will be converted automatically 
+         into a list by the metaclass, after subclass definition. Additionally, the metaclass automatically extends the list 
          with names declared as transient in superclasses.
-         __transient__ is typically a class-level attribute, but can be overriden in instances to modify serialization behavior on per-instance basis.
+         __transient__ is typically a class-level attribute, but can be overriden in instances to modify 
+         serialization behavior on per-instance basis.
        - If you provide custom metaclass for your Object subclass, remember to inherit that metaclass from __Object__ and call
          super(X, cls).__init__ in your __init__(cls).
-       - Subclasses can easily add their own labels, by implementing a metaclass that subclasses __Object__ and invokes cls.label('labelName') in __init__.
-         New labels will be automatically provided with conversions and inheritance, like __transient__ does.
+       - Subclasses can easily add their own labels, by implementing a metaclass that subclasses __Object__ 
+         and invokes cls.label('labelName') in __init__. New labels will be automatically provided with 
+         conversions and inheritance, like __transient__ is.
     """
     __metaclass__ = __Object__
     __transient__ = []                      # list of names of attributes to be excluded from serialization 
