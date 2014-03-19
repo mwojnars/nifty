@@ -1247,8 +1247,8 @@ class Evolution(MetaOptimize):
 ###
 
 class Feed(Pipe):
-    """A proxy that enables the external operator to supply input data to the pipeline 1 item at a time, or in multiple separate batches of arbitrary size.
-    When the pipeline reads the data, operator must supply new batch with set() or setList(), otherwise the Feed.NoData exception will be raised."""
+    """A proxy that enables an external agent to supply input data to the pipeline 1 item at a time, or in multiple separate batches of arbitrary size.
+    When the pipeline reads the data, the agent must supply new batch with set() or setList(), otherwise the Feed.NoData exception will be raised."""
     
     class NoData(Exception):
         "Raised when there is no input data to fulfill the request in operator()."
@@ -1266,15 +1266,26 @@ class Feed(Pipe):
             for item in items: yield item
 
 class operator(object):
-    """Functional wrapper for a pipe or pipeline: enables manual pushing of items to pipe input, 1 at a time, like to a function (operator),
-    and reading the output as a returned value. Can be used in the same caller's thread, no need to spawn new thread. 
-    Pipes must pull exactly 1 item at a time from the pipeline source. If they pull more or less than this, exception will be raised.
+    """
+    A wrapper that turns a pipe (pipeline) back to a regular input-output function 
+    (a callable, to be precise) that can be fed with data manually, one item at a time:
+    
+    >>> pipeline = Function(lambda x: 2*x) >> Function(lambda x: str(x).upper())
+    >>> fun = operator(pipeline)
+    >>> print fun(3)
+    6
+    >>> print fun(['Ala'])
+    ['ALA', 'ALA']
+    
+    Typically the pipe is an instance of Operator. Even if not, it still must pull exactly 1 item at a time
+    from the source, otherwise an exception will be raised.
+    Can be used in the same caller's thread, no need to spawn a new thread.
     """
     def __init__(self, *pipes):
         self.feed = Feed()
-        self.pipeline = Pipeline([self.feed] + pipes)
+        self.pipeline = Pipeline((self.feed,) + pipes)
         self.process = self.pipeline.__iter__()
-    def __call__(item):
+    def __call__(self, item):
         self.feed.set(item)
         return self.process.next()
     def close(self):

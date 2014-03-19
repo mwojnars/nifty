@@ -312,8 +312,8 @@ class Pattern(object):
      - testN, goalN
     
     Usage:
-     - methods: match, match1, matchAll
-     - functions: matchPattern, matchPattern1
+     - match, match1, matchAll (methods of Pattern)
+     - matchPattern, matchPattern1 (standalone functions)
     
     Practical guidelines for writing Patterns:
      * REFERENCE POINTS - characteristic and *always* present (non-optional) substrings in several different places of the pattern, 
@@ -347,7 +347,7 @@ class Pattern(object):
     regex     = None    # compiled regex object, generated from pattern using the exnhanced 're2' ('regex') module
     semantics = None    # Context.Data object with global information about the pattern tree, collected during semantic analysis
     variables = None    # list of names of variables present in the pattern, extracted from 'semantics'
-    convert   = {}      # dict of converters or types that the extracted values shall be casted onto
+    convert   = {}      # dict of converters or types that the extracted values shall be casted onto, ex: {'DATE': pdatetime, 'PRICE': pfloat}
     extract   = {}      # stand-alone extractors: functions that take an entire document and return extracted value or object for a given item; dict
     html      = True    # shall match() perform HTML entity decoding and normalization of spaces in extracted items? (done before extractors/converters)
     tolower   = False   # shall all item names be converted to lowercase at the end of parsing?
@@ -704,21 +704,25 @@ class PatternOr(Pattern):
 
 ########################################################################################################################################################
 ###
-###  Standard converters
+###  Standard converters for use in Pattern.convert
 ###
 
 from nifty.text import html2text             # use html2text in Pattern.convert if you want extracted HTML code to be converted into raw text
 from decimal import Decimal                 # for parsing floating-point numbers without rounding errors
 
 def url(s, baseurl):
-    """Turn the URL 's' into absolute URL anchored at 'baseurl'. Do NOT unquote! (If you need unquoting, do it manually afterwards or use url_unquote() instead). 
+    """Turn the (relative) URL 's' into an absolute URL anchored at 'baseurl'. Do NOT unquote! 
+    (If you need unquoting, do it manually afterwards or use url_unquote() instead). 
     When used in Pattern.convert, 'baseurl' will be supplied at parsing time by the match() method itself."""
     if baseurl is None: return s
     return urljoin(baseurl, s)
 
 def url_unquote(s, baseurl = None):
-    """Unquotes the URL 's'. Optionally can also perform absolutization like url(), but NOT when used in Pattern.convert where baseurl is set to None (unlike url()).
-    Use ALWAYS when extracting portions of text (IDs, names) from href anchors, which won't be used as URLs themselves, but MUST be properly unquoted (!)."""
+    """Unquotes the URL 's'. Optionally can also perform absolutization like url(), 
+    but NOT when used in Pattern.convert (match() calls url_unquote with baseurl=None, unlike url()).
+    Use ALWAYS when extracting portions of text (IDs, names) from href anchors - 
+    the portions which won't be used as URLs themselves and MUST be properly unquoted,
+    which should be done on entire URL, before the portion is extracted."""
     s = urllib.unquote(s)
     if baseurl is None: return s
     return urljoin(baseurl, s)
