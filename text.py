@@ -200,6 +200,16 @@ class regex(object):
 
 #########################################################################################################################################################
 
+def regexEscape(s):
+    """Escape special characters in 's' and encode non-printable characters so that the resulting string 
+    can be included in regex pattern as a static string that matches occurences of 's'.
+    The output of this function is prettier than produced by re.escape() - here we escape only true special chars,
+    while re.escape() escapes ALL non-alphanumeric characters, so its output is long and rather ugly."""
+    s = s.encode('string_escape')           # encode non-printable characters
+    escape = r".^$*+?{}()[]|"               # no backslash \, it's handled in encode() above
+    s = ''.join('\\' + c if c in escape else c for c in s)
+    return s
+
 def alternative(strings, escape = True, compile = False, flags = 0):                     #@ReservedAssignment
     "Regex (not compiled by default) that matches the logical alternative of given strings. Strings are escaped by default."
     if isstring(strings): strings = strings.split()

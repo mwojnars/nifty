@@ -138,6 +138,7 @@ class WaxeyeTree(object):
         
         def init(self, waxnode = None, tree = None, string = None):
             children = [tree.rewrite(c) for c in waxnode.children] if waxnode else []
+            self.pos = waxnode.pos if waxnode else None
             self.type = waxnode.type if waxnode else None
             string = ''.join(str(c) for c in children) or string or ''
             self.value = self.typecast(string)
@@ -148,9 +149,8 @@ class WaxeyeTree(object):
         def compile(self): return self.value                                                        #@ReservedAssignment
     
     class const(node):
-        "A node that always generates the same output. However, in general, it can be parsed from different substrings of input text (!)."
+        "A node that always generates the same output: cls.value. However, in general, it can be parsed from different substrings of input text (!)."
         value = ""
-        def __str__(self): return str(self.value)
         def compile(self): return self.value                                                        #@ReservedAssignment
     
     class empty(static): pass

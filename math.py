@@ -13,18 +13,22 @@ You should have received a copy of the GNU General Public License along with Nif
 
 from __future__ import absolute_import
 import numpy as np
-from numpy import sum, mean, zeros, sqrt, pi, exp, isnan, isinf
+from numpy import sum, mean, zeros, sqrt, pi, exp, isnan, isinf, arctan
 import random, bisect, json
 
 from nifty.util import isnumber
 
+########################################################################################################################
+
+ipi = 1./pi         # inverted PI
 
 def isarray(x):    return isinstance(x, numpy.ndarray)
 
 
 ########################################################################################################################
-#   Random numbers
-#
+###
+###   Random numbers
+###
 
 # see http://eli.thegreenplace.net/2010/01/22/weighted-random-generation-in-python/
 def weighted_random(weights, rnd = random):
@@ -59,10 +63,11 @@ class WeightedRandom(object):
 ###
 
 def minmax(x):
+    "Calculate minimum and maximum in one step."
     return (np.min(x), np.max(x))
     
 def heat(X, magnitude, random = np.random.RandomState()):
-    "add random heat to the values"
+    "Add random heat to the values"
     shape = X.shape if isarray(X) else X
     return (random.random_sample(shape)-0.5) * (magnitude*2)
 
@@ -71,20 +76,52 @@ def logx(x):
     return np.log(abs(x) + 1) * np.sign(x)
 
 
+### Sigmoidal functions
+
+def logistic(x, center = None, slope = None, deriv = False):
+    "Logistic function: f(x) = 1/(1+e^(-x)). Derivative: f'(x) = f(x)*(1-f(x))"
+    if center is not None: x = x - center
+    if slope is not None: x = x * slope
+    y = 1. / (1. + exp(-x))
+    if not deriv: return y
+    d = y * (1-y)
+    if slope is not None: d *= slope
+    return y, d
+
+def cauchy(x, center = None, slope = None, deriv = False):
+    """CDF of a Cauchy distribution: f(x) = arctan(x)/pi + 0.5. Derivative: f'(x) = 1/(1+x^2) * 1/pi.
+    Has similar shape as logistic function but doesn't saturate so fast, 
+    so is safer to use when saturation is undesirable.
+    Good for modeling probabilities that will be used in multiplications, like log-likelihood estimates,
+    and should stay away from boundary values of 0 and 1.
+    In the range [-1.5,1.5], cauchy(x) differs from logistic(x) by no more than 8%,
+    with intersections at x=0.0 and near x=1.4. Only after |x|=1.5 the two functions differ substantially.
+    """
+    if center is not None: x = x - center
+    if slope is not None: x = x * slope
+    y = arctan(x)/pi + 0.5
+    if not deriv: return y
+    d = ipi / (1. + x**2)
+    if slope is not None: d *= slope
+    return y, d
+
+def sigmoid_sqrt(x, center = None, slope = None):
+    """
+    Smooth sigmoidal function based on 'sqrt'. Symmetrical. All values in (-1,1) range.
+    The prototype function is y = x/sqrt(1+x^2).
+    f(2.0)  =  0.89
+    f(-2.0) = -0.89
+    """
+    if center is not None: x = x - center
+    if slope is not None: x = x * slope
+    return x / np.sqrt(1 + x**2)
+
 def sigmoid_lin(x, p0, p1):
     "Piece-wise linear sigmoidal function, with values in [0,1], 0/1 glue points in p0/p1 respectively"
     if x is None: return 0.5
     y = float(x - p0) / (p1 - p0)
     return y.clip(0, 1) 
     
-def sigmoid_sqrt(x, slope = 1.0, center = 0.0):
-    """
-    Smooth sigmoidal function based on 'sqrt'. Symmetrical. All values in (-1,1) range.
-    The prototype function is y = x/(1+x^2).
-    f(2.0)  =  0.89
-    f(-2.0) = -0.89
-    """
-    return slope*(x-center) / np.sqrt(1 + (slope*(x-center))**2)    
 
 def binarize(x, x01 = 0.1, x09 = 0.9, funsigm = sigmoid_sqrt, delta = 2.0):
     """
@@ -109,9 +146,9 @@ def binarize(x, x01 = 0.1, x09 = 0.9, funsigm = sigmoid_sqrt, delta = 2.0):
     slope = 2 * delta / (x09 - x01)
     center = (x01 + x09) / 2.0
     
-    Y = funsigm(X, slope, center)
-    v0 = funsigm(0, slope, center)
-    v1 = funsigm(1, slope, center)
+    Y = funsigm(X, center, slope)
+    v0 = funsigm(0, center, slope)
+    v1 = funsigm(1, center, slope)
     Y = (Y - v0) * (1.0/(v1-v0))
     
     Y[Y < 0] = 0

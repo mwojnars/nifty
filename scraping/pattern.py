@@ -1,6 +1,430 @@
 # -*- coding: utf-8 -*-
-'''
-Dependencies: waxeye 0.8.0, regex 2013-03-11
+"""
+    Flexible context-based pattern matching in HTML/XML/markup/plaintext documents.
+    
+    Pattern is a new type of tool for extracting data from any markup document. 
+    It defines a new language, "redex" (REgular Document EXpressions, similarity with "regex" intentional),
+    for concise description of text patterns occuring in documents 
+    and defining which parts of text should be extracted as data during scraping.
+
+    Redex patterns define layout of the document: subsequent portions of text that must be present in given locations, 
+    and places where substrings - if matched - should be extracted for further analysis.
+    
+    Redex combines consistency and compactness of regexes (single pattern matches all document 
+    and extracts multiple variables at once) with strength and precision of XPaths: 
+    it is much simpler than regexes and allows patterns to span multiple fragments of the document, 
+    thus providing precise *context* where each fragment is allowed to match.
+    Single Pattern can substitute a dozen of XPaths.
+    Redex patterns are also much more readable than both regexes and XPath rules, thanks to their
+    literal resemblance to the documents being parsed.
+    Pattern/redex is tailored to markup languages and is aware of characteristic parts of tagged documents,
+    making parsing process more reliable.
+    Redex patterns bridge the gap between regexes and XPaths as used in web scraping.
+    
+    Every Pattern instance is built from a string written in redex. 
+    This string is compiled internally to a regex and subsequently matched against documents.
+    For example, the following simple redex pattern:
+    
+        >>> redex = '<a href="{URL}">the link we are looking for</a>'
+    
+    is compiled to a much more complicated regex:
+    
+        >>> print Pattern(redex).regex.pattern
+        (|(?<=>)\s*)<a(?=\s|/|>)([^<>]*?['"\s=]|)href\s*=\s*("|')(?P<URL>[^<>]*?)("|')(['"\s=][^<>]*?|)>the\s+link\s+we\s+are\s+looking\s+for(|(?<=>)\s*)</a(?=\s|/|>)(['"\s=][^<>]*?|)>
+    
+    This regex takes care of all intricacies of HTML documents: optional spaces in different places, 
+    additional surrounding attributes inside tags, different equivalent quoting characters (' or ") 
+    for tag attribute values, etc. Nobody would be able to write this regex manually.
+    Redex patterns are designed to do it for you.
+
+    You can create a pattern in two ways. By instantiating Pattern class (handy for short patterns):
+    
+        >>> pat = Pattern('<a href="{URL}"></a>')
+        
+    or by subclassing Pattern, with redex string put either in the 'pattern' property, or just in pydocs for brevity:
+
+        class UrlPattern(Pattern):
+            pattern = '<tr><td><a href="{URL}"> a long and very prominent link with <b>inner <u>elements</u></b>, enclosed in a table row </a></td></tr>'
+    
+        class UrlPattern(Pattern):
+            '''
+            <tr><td>
+            <a href="{URL}"> a long and very prominent link with <b>inner <u>elements</u></b>, enclosed in a table row </a>
+            </td></tr>
+            '''
+        pat2 = UrlPattern()
+    
+    Typically, you match the pattern to extract some data. This can be done with any of Pattern.match*() methods:
+    match, match1, matchAll (see pydocs for differences between them); 
+    or match, match1 functions, which compile and match the pattern in one step.
+    They all return matched values of variables (groups):
+    
+        >>> pat.match1('<A href="http://google.com"></A>')
+        u'http://google.com'
+        
+        >>> match1('<a href="{URL}"></a>', '<A href="http://google.com"></A>')
+        u'http://google.com'
+
+    For clarity of examples below, we'll use plain str type for documents being matched instead of the default unicode.
+    >>> Pattern.strtype = str
+
+
+    REDEX SYNTAX.
+        
+    Static text            -- Regular text (static text) is matched as-is, case-insensitive by default.
+                              Spaces between static words match any sequence of 1+ whitespaces.
+                              Spaces delimited by a non-static expression on either side 
+                              (a variable, optional expression, ...) match 0+ whitespaces (can match empty string).
+                              Spaces inside <...> tags match 0+ whitespaces, as well as any sequence of chars 
+                              delimited by in-tag separators: ', ", =, or a space.
+                              
+                              The match of the entire pattern can be preceeded in the document 
+                              by any number of whitespaces (they're stripped out before matching),
+                              as well as followed by any sequence of characters - not only spaces (!).
+                              Effectively, the match starts at the beginning of the non-whitespace part of the document,
+                              and can terminate anywhere in the doc, not necessarily at the end 
+                              (doesn't have to consume all characters).
+                              
+                              >>> match('Alice in Wonderland', '  Alice in Wonderland -- Alice was beginning to get very tired')
+                              'Alice in Wonderland'
+
+    Apples and ~           -- Tilde (~) matches any word: a sequence of 1+ alphanumeric characters 
+                              (letters, digits, underscore "_" and tilde "~"), without spaces,
+                              as many characters as possible (greedy match).
+                              
+                              >>> match('Apples and ~', 'Apples and oranges and pears')
+                              'Apples and oranges'
+
+    Version .              -- Dot (.) matches any continuous sequence of 0+ non-space characters except tags (no '>' or '<'),
+                              but as few characters as possible (lazy match); can also be used inside tags.
+                              Put "{.}" in the pattern to match literal dot (exactly one) instead of a sequence.
+                              >>> match1('Python {VER .} on .', 'Python 2.7 on Linux')
+                              '2.7'
+                              >>> match1('<a href="./{USER ~}">', '<a href="http://twitter.com/wojnarski">')
+                              'wojnarski'
+
+    Address: ..            -- Two dots (..) match any sequence of 0+ characters except tags (no '<' or '>'), lazy match; 
+                              can be used inside tags, although usually a single dot '.' suffices.
+                              >>> match1('Address: {ADDR ..} {.}', 'Address: 12-345 Warsaw, Poland.')
+                              '12-345 Warsaw, Poland'
+
+    <p>...</p>             -- Three or more dots (...) match any sequence of 0+ characters, including tags ('<' and '>' allowed).
+                              Cannot be used inside tags: between < and >.
+                              >>> match1('<p>{TEXT ...}</p>', '<p><u>Apples</u> and <i>oranges</i></p>')
+                              '<u>Apples</u> and <i>oranges</i>'
+
+    <a>link</a>            -- Attributes of a tag are matched implicitly: <tag> is equivalent to <tag ..>, 
+                              so there's no need to put ".." everywhere inside tags.
+                              
+                              >>> match1('<div>{MSG}</div>', '<div style="width:500px;border:1;" id="message">Success</div>')
+                              'Success'
+
+                              Moreover, implicit 0+ spaces are matched between neighboring tags even if no explicit
+                              space is present in the pattern:
+                              
+                              >>> match('</td><td>', '</td>   <td>')
+                              '</td>   <td>'
+
+    <div message>...       -- Each word on attribute list: attribute name, or a value surrounded by quotes, spaces or =, 
+                              is treated as a separate item. Surrounding items (and entire attributes) are matched implicitly, 
+                              so you can specify one item without worrying about the rest. No need to use surrounding ".." 
+                              or to worry about unseen attributes and values that might be added to the tag in the future.
+                              Compare this to the weirdness of the XPath expression that's needed to match just one class 
+                              in a multi-class element, like "title" in class="long wide title", 
+                              when the ordering of names is unknown:
+                                  xpath = "//div[contains(concat(' ', normalize-space(@class), ' '), ' title ')]"
+                              Using redex patterns is a lot easier:
+                              
+                              >>> match1('<div title>{TITLE}</div>', '<div style="width:800px" class="long title wide">About this website</div>')
+                              'About this website'
+    
+    <. price>              -- Dot (.) after '<' matches any tag name. If you don't know whether the element of interest 
+                              is a <div>, or a <p>, or a <table>, or a <span>, ... or you just want to abstract from 
+                              the particular name, use "<." to match any tag.
+                              Note that here, the dot behaves slightly differently than the general-purpose dot
+                              used in other places: when replacing a tag name, it matches at least 1 character (no empty string), 
+                              the match is greedy and it must terminate on a word boundary (space or end of tag).
+                               
+                              >>> match1('<. price>{PRICE}</.>', '<span class="price">$9.99</span>')
+                              '$9.99'
+
+    {VAR ...}              -- Braces define a *variable*: a named subexpression, equivalent to a *group* in a regex pattern.
+                              After matching, the string matched by the expression is returned under the name of the variable.
+                              Definition of a variable has a form of {NAME expression}, where NAME is the variable name
+                              (case-sensitive, typically written in all-caps to distinguish from static parts of the pattern);
+                              and 'expression' is any redex pattern, possibly containing other nested variables.
+                              The 'expression' can be omitted ({NAME}), in such case the default pattern ".." (2-dots) is assumed.
+                              By default, Pattern.match() returns an ObjDict of all variables, which is a regular dict
+                              extended with object-like access to values:
+
+                              >>> items = match('<a href="{URL ./photos/{USER ~}/{ID}/}">', '<a href="http://www.flickr.com/photos/atelier/738724/">')
+                              >>> items
+                              {'URL': 'http://www.flickr.com/photos/atelier/738724/', 'USER': 'atelier', 'ID': '738724'}
+                              >>> items['USER']
+                              'atelier'
+                              >>> items.USER
+                              'atelier'
+                              
+                              If you want the standard 'dict' to be returned instead, set dicttype=dict inside your Pattern subclass.
+                              If you wish that names of variables in the result are all changed to lowercase
+                              (convenient if you want to use them as object properties later on), set tolower=True in your pattern:
+                              
+                              >>> pat = Pattern('{FRUIT1 ~} and {FRUIT2 ~}')
+                              >>> pat.tolower = True
+                              >>> items = pat.match('apples and oranges')
+                              >>> items.fruit1, items.fruit2
+                              ('apples', 'oranges')
+                              
+                              By default, all variables which do NOT contain 3-dots '...' and thus match only regular text
+                              without tags, undergo HTML cleansing after extraction: striping of leading/trailing spaces,
+                              merging of multiple whitespaces (incl. newlines and tabs) into a single regular space ' ',
+                              and HTML entity decoding.
+                              To switch this behavior off, set 'html' property of your Pattern subclass to False,
+                              either permanently in the subclass definition or before calling Pattern.match().
+                              Compare the two calls below, the 1st one executed with the default setting of html=True,
+                              and the 2nd one with 'html' changed to False:
+                              
+                              >>> pat = Pattern('<td>{CELL}</td>')
+                              >>> pat.match1('<td>  apples \\n &amp; oranges  </td>')
+                              'apples & oranges'
+                              >>> pat.html = False
+                              >>> pat.match1('<td>  apples \\n &amp; oranges  </td>')
+                              '  apples \\n &amp; oranges  '
+                              
+                              However, if the variable contains 3-dots '...', no cleansing is performed regardless of 'html' setting:
+                              
+                              >>> match1('<tr> {ROW ...} </tr>', '<tr><td>  apples \\n &amp; oranges  </td></tr>')
+                              '<td>  apples \\n &amp; oranges  </td>'
+
+    {VAR~regex}            -- If the variable name is followed immediately by a tilde (~), the remaining part of variable definition
+                              is treated as a raw regex - not redex - expression.
+                              This is useful for matching arbitrary regex sub-patterns, 
+                              to handle complex cases not covered by basic redex syntax.
+                              Watch out: any spaces after '~' and before '}' are treated as part of the regex.
+                              The regex can't contain '}' char itself, to avoid ambiguity with terminating '}'
+                              (use {~regex~} syntax instead).
+    
+                              >>> match1('<a ./{ID~\d+}>', '<a href="http://www.flickr.com/photos/atelier/738724">')
+                              '738724'
+
+    {~regex~}              -- Braces with inner tildes and an expression inside denote an unnamed regex pattern:
+                              the regex is matched just like a {VAR~regex} variable, but the matched string is not extracted.
+                              Enables inclusion of arbitrary regex sub-patterns in a redex pattern.
+                              In contrary to {VAR~regex} syntax, here the right brace '}' is allowed inside 'regex',
+                              and only a tilde-brace pair '~}' is disallowed.
+                              This enables the use of {min,max} construct inside the regular expression.
+                              If you want to use a regex containing '~}', split it into two separate regexes.
+
+                              >>> match1('<a ./{ID {~\d{6}~}}>', '<a href="http://www.flickr.com/photos/atelier/738724">')
+                              '738724'
+
+    {* expr} {+ expr}      -- Zero-or-more and one-or-more repetitions of a given redex expression 'expr'.
+                              The expression can contain nested variables {* ..{X}..}, and/or hold a name itself: {*ITEM ...}.
+                              In both cases, the returned value of each variable is a *list* of strings 
+                              extracted by all repetitions rather than a single string.
+                              
+                              >>> match('{* ...<td>{ARTICLE}</td><td>{PRICE}</td>}', 
+                              ...       '<tr><td>Pen</td><td>$3.50</td></tr> '
+                              ...       '<tr><td>Pencil</td><td>$2.00</td></tr> '
+                              ...       '<tr><td>Eraser</td><td>$1.50</td></tr> ')
+                              {'ARTICLE': ['Pen', 'Pencil', 'Eraser'], 'PRICE': ['$3.50', '$2.00', '$1.50']}
+
+    {*+ ...} {++ ...}      -- You can use possessive quantifiers and atomic grouping to achieve finer control over 
+    {> ...}                   regex backtracking and optimize the speed of regex matching. For more information, see:
+                                  www.regular-expressions.info/possessive.html
+                                  www.regular-expressions.info/atomic.html
+
+    [optional]             -- Square brackets [expr] enclose an optional expression: matched if possible,
+                              but skipped if a matching - starting at the current position, where the preceeding match ended
+                              - can't be found. If a skipped optional expression contained variables, their values will be None.
+                              Optional expressions and variables can be nested in each other.
+                              
+                              >>> pat = '<li> {ENTRY [<img src="{AVATAR}">] {NAME}} </li>'
+                              >>> match(pat, '<li><img src="http://domain.com/john.png"> John Smith </li>')
+                              {'ENTRY': '<img src="http://domain.com/john.png"> John Smith', 'AVATAR': 'http://domain.com/john.png', 'NAME': 'John Smith'}
+                              >>> match(pat, '<li> Ken Edwards </li>')
+                              {'ENTRY': 'Ken Edwards', 'AVATAR': None, 'NAME': 'Ken Edwards'}
+                              
+                              Be careful when using optional expressions. They may often exhibit unexpected behavior,
+                              caused by the complex structure of backtracking during the regex matching process.
+                              The possibily of finding a match depends on what preceeding string (prefix)
+                              has been matched currently. Moreover, the necessity to match actual data instead of 
+                              an empty string depends on what next expression follows after the optional block
+                              and whether it enforces the optional to find a long match.
+                              
+                              Let's see an example.
+                              
+                              >>> match('. [tail]', "head tail")
+                              ''
+                              
+                              Here, one might expect that the pattern would match entire "head tail" string.
+                              This is not the case because the dot '.' performs a *lazy* match 
+                              (matches as few characters as possible), so it first tries to match an empty string,
+                              which succeeds, than matches the space ' ' to an empty string, too,
+                              and only than tries to match '[tail]' to "head tail", which also succeeds (!),
+                              by (unexpectedly) ignoring the optional expression in its entirety.
+                              
+                              To solve this problem, you can either replace the dot with a tilde, 
+                              which performs a more constraint match - not only that it matches exactly one non-empty word,
+                              but also the match is greedy and tries to match as many characters as possible:
+                              
+                              >>> match('~ [tail]', "head tail")
+                              'head tail'
+                              
+                              Alternatively, you can move the dot and put it inside the optional expression:
+                              
+                              >>> match('[. tail]', "head tail")
+                              'head tail'
+                              
+                              It is a good general rule to:
+                              - use the most constrained expression that's possible in a given place, 
+                                when choosing between '~', '.', '..' and '...'
+                              - never put dots before optional or repeated expressions: [...], {*...},
+                                but rather include them inside the expression.
+                              
+
+    {.} {{} {}}            -- To match an occurence of a redex-special character, enclose it in braces; a brace itself can also be enclosed:
+    {~} {[} {]} 
+                              >>> print match('{.} {{} {}} {~} {[} {]}', '. { } ~ [ ]')
+                              . { } ~ [ ]
+                              
+                              
+    VALUE CONVERSIONS.
+    
+    All extracted variables are strings by default. You can request that they are automatically casted onto other data types,
+    and/or their values are converted, by defining 'convert' property of the Pattern, which is a dictionary of variables' names
+    and corresponding types or converter functions that shall be applied to extracted values before returning them to the caller.
+    
+        >>> class Pat(Pattern):
+        ...     pattern = "<a {URL /comment/{USER}/{ID}}> {DATE} </a>"
+        ...     convert = {'URL': url, 'USER': url_unquote, 'ID': pint, 'DATE': pdate}
+        ...
+        >>> Pat().match('<a href="/comment/billy%20the%20kid/34"> July 25, 2015 </a>')
+        {'URL': '/comment/billy%20the%20kid/34', 'DATE': datetime.date(2015, 7, 25), 'USER': 'billy the kid', 'ID': 34}
+    
+    The 'url' converter is special, because it accepts an additional parameter upon conversion: 
+    the URL of the page being scraped, 'baseurl', that is used for converting relative URLs in the page to absolute ones. 
+    When calling Pattern.match(), you can specify a 'baseurl' and it will be forwarded to all 'url' converters:
+    
+        >>> items = Pat().match('<a href="/comment/billy%20the%20kid/34"> July 25, 2015 </a>', baseurl = "http://www.domain.com/home")
+        >>> items['URL']
+        'http://www.domain.com/comment/billy%20the%20kid/34'
+    
+    None values (from optional expressions) are NOT passed through converters but returned as-is.
+    If a variable appears inside repeated expression, like {+ ..{NAME}..}, and multiple strings are extracted,
+    the converter is applied to EACH string independently rather than to a list.
+    
+    Keys in 'convert' dictionary can comprise multiple names, for brevity (multi-keys). For example:
+        {"PRICE CHANGE VOLUME": pdecimal}
+    Additionaly, keys can contain '*' wildcard to match all names of a given form, like:
+        {"URL_*": url}
+    
+    Standard converters provided along with Pattern include:
+        url, url_unquote, pdate, pdatetime, pint, pfloat, pdecimal, percent.
+    
+    You can use these ones and/or define your own. In the latter case, each converter should be a function that takes 
+    an extracted string and casts/converts it to a destination type/value. In 'convert' dict, you can also specify a class
+    instead of a function, which will instantiate objects of this class upon conversion, passing the raw value 
+    to this class'es __init__().
+    
+    Moreover, you can use patterns as converters themselves. The inner pattern (converter) will be applied to the extracted string
+    passed as an input document, and a whole dictionary (or object) of extracted values will be returned 
+    as a value of the variable of the outer pattern. Effectively, this mechanism allows patterns to be nested in each other.
+    
+    Last but not least, you can implement custom post-processing of all extracted values at once
+    by overloading Pattern's 'epilog' method. This method takes a dict of extracted items after all conversions,
+    together with the original document, and either returns a new dict of items, or modifies the input dict in-place.
+    Epilog can not only change existing values, but also remove variables or add new ones to the result,
+    for instance, by implementing additional custom extraction based on the provided document object.
+    See Pattern.epilog() for details.
+
+    
+    EMBEDDED UNIT TESTS.
+    
+    Web pages evolve. Sometimes their structure changes only slightly, due to minor fixes and updates in their design,
+    layout or contents. Another time, the structure may get redesigned entirely from scratch.
+    In any case, the corresponding pattern must be updated accordingly to handle new structure.
+    The critical thing to watch out is whether the updated pattern still handles all special cases of 
+    the page's appearance - all those special cases that were carefully analysed and implemented
+    in the first version of the pattern, and must not get lost now, when the pattern is being updated.
+    
+    In order to enable easy future verification of the pattern's behavior,
+    you can embed *unit tests* inside its class. 
+    Each test consists of a pair of class attributes named 'textX' and 'goalX',
+    with X being an integer (1,2,... for consecutive independent tests),
+    'testX' being a snippet of text that shall be used as an input document for pattern matching,
+    and 'goalX' being the expected output: a dictionary of extracted variables and their values.
+    When specifying the goal, you can use a shorthand for string-valued variables and write, for instance:
+        goal1 = "NAME1 value1", "NAME2 value2", {...(remaining non-string values)...}
+   instead of:
+        goal1 = {"NAME1": "value1", "NAME2": "value2", ...}
+    
+    Whenever Python comes across a definition of a new Pattern subclass, it automatically invokes all tests 
+    present inside. This behavior is implemented in Pattern's custom metaclass, __Pattern__,
+    and is launched just after a new class is created (the class itself, not an instance!).
+    Upon execution, all failing tests will print detailed log to stdout. Successful tests will stay quiet.
+    
+    If a given test doesn't have a goal defined (the attribute 'goalX' is missing),
+    the extracted dictionary of values is printed to stdout instead of being passed to verification.
+    Moreover, it is printed in a form suitable for direct inclusion in corresponding goalX.
+    Thus, when writing a new test, you can first: write testN without goalN, to see what output is produced 
+    by the pattern; verify manually that the output is correct; and only then copy-paste it as goalN = ...,
+    to keep a record for future reference when the pattern needs to be updated.
+       
+    If you want to switch off the tests, set autotest=False inside a given Pattern subclass,
+    or Pattern.autotest=False to change global behavior.
+    
+
+    PRACTICAL GUIDELINES.
+    
+    How to write a pattern that matches a given HTML snippet:
+     - In the snippet, replace all occurences of values to be extracted with {NAME} or {NAME subpattern} or {*NAME ...}.
+       Remember to put explicit 3-dots '...' inside {} if you want to match strings with tags. 
+       2-dots '..' are used by default when no expression is given inside {}.
+     - Cut out unnecessary parts of text by replacing them with ~ (word) or . (non-space sequence) or .. (non-tag sequence) or ... (any sequence):
+       - tag contents inside <> replace with a space, or ., or .., or just nothing (the latter works best in many cases)
+       - tagged parts of the document replace with ... (matches all chars, including tags)
+       - untagged text between tags replace with .. (matches all chars except <>)
+       - sequence of non-space chars replace with . (matches all except <> and spaces)
+       - regular words comprising only alpha-numeric characters replace with ~ 
+       Ensure that every variable {} is still surrounded by enough amount of static text (REFERENCE POINTS / GUARDS) 
+       to uniquely identify its location in the document.
+     - Insert a space wherever 1+ spaces may occur in the document. Neighboring tags don't need a space:
+       whitespaces between > and < are matched implicitly.
+     - Mark non-obligatory parts of the pattern by surrounding them with []. If the part starts with . or .. or ..., 
+       include them inside [] if only possible (this is necessary even if the optional block is the 1st sub-expression of the pattern).
+       Remember to leave a CLOSING ANCHOR after []: a static text just after the closing bracket ], 
+       to avoid under-matching of the [] block (enforce maximum match).
+     - If the pattern works slow, which may happen especially on negative examples (!), add more reference points or atomic grouping {>...}.
+     
+    Practical guidelines for writing Patterns:
+     * REFERENCE POINTS - characteristic and *always* present (non-optional) substrings in several different places of the pattern, 
+        which help situate optional subpatterns relative to each other.
+     * GUARDS around variables - to precisely position the variable; avoid *over-matching*; kill spaces!
+     * CLOSING ANCHOR inside optional blocks - to force maximum match of the last included optional/variable; avoid *under-matching* 
+     
+    Keep in mind:
+     - Most of the time, pattern matching is LAZY: it matches as few characters as possible, 
+       and quite often an empty string turns out to be a correct match.
+       This happens not only with entire pattern, but also with its sub-expressions, esp. when [...] is used.
+       Thus, you should always put GUARDS at the end of (sub)expressions: static pieces of text 
+       or other obligatory expressions that would force the preceding expression to match as much as possible,
+       until the guard is matched, too.
+       Without guards, you may encounter unexpected behavior: the pattern will miss parts of the document 
+       despite these parts ARE present there.
+       
+     - When extracting URLs or their portions, ALWAYS use either url() or url_unquote() converters, to provide proper unquoting of extracted strings.
+     - If you need online interactive testing of regex-es for debugging, see http://gskinner.com/RegExr/
+
+    When implementing a new pattern, you can set verbose=True inside the class to request debug information
+    be printed on stdout when the pattern class gets defined and compiled.
+    The print out includes: pattern class name, list of variables detected, and the regex string 
+    produced during compilation of the pattern.
+    
+
+---
+Dependencies: waxeye 0.8.0, regex 2013-03-11.
+Pattern uses an improved and extended version of 're' module, the 'regex' - see http://pypi.python.org/pypi/regex
 
 ---
 This file is part of Nifty python package. Copyright (c) 2009-2014 by Marcin Wojnarski.
@@ -10,7 +434,7 @@ as published by the Free Software Foundation, either version 3 of the License, o
 Nifty is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License along with Nifty. If not, see <http://www.gnu.org/licenses/>.
-'''
+"""
 
 import re, regex as re2 #@UnresolvedImport
 import copy, urllib
@@ -18,8 +442,8 @@ from collections import namedtuple
 from datetime import datetime
 
 import nifty.util as util
-from nifty.util import isstring, islist, isdict, istuple, issubclass, setattrs, prefix, ObjDict, lowerkeys, classname
-from nifty.text import merge_spaces, decode_entities
+from nifty.util import isstring, islist, isdict, istuple, issubclass, subdict, prefix, ObjDict, lowerkeys, classname
+from nifty.text import merge_spaces, decode_entities, regexEscape
 from nifty.web import urljoin, xdoc
 
 import nifty.parsing.parsing as parsing
@@ -76,20 +500,32 @@ class Tree(BaseTree):
             return ctx
 
     static = BaseTree.static
+    const = BaseTree.const
     expr = node                                     # "Generic expression - a sequence of subnodes. Consecutive expressions can be flatten: merged into one."
 
-    class xwordfill(node):
-        def compile(self): return r'[^<>\s]*?'                                                      #@ReservedAssignment
-    class xshortfill(node):
-        def compile(self): return r'[^<>]*?'                                                        #@ReservedAssignment
-    class xlongfill(node):
-        display = "..."
-        def compile(self): return r'.*?'                                                            #@ReservedAssignment
+#    class xwordfill(node):
+#        def compile(self): return r'\w+' #r'[^<>\s/\\]*'                                            #@ReservedAssignment
+#    class xshortfill(node):
+#        def compile(self): return r'[^<>]*?'                                                        #@ReservedAssignment
+#    class xlongfill(node):
+#        display = "..."
+#        def compile(self): return r'.*?'                                                            #@ReservedAssignment
+#        def analyse(self, ctx):
+#            ctx.longfill = True
+#            return ctx
+#    class xjustadot(static):
+#        def compile(self): return r'\.'                                                             #@ReservedAssignment
+    
+    class xtilde(const): value = r'[\w~]+' #r'[^<>\s]*'
+    class xdot1(const): value = r'[^<>\s]*?'
+    class xdot2(const): value = r'[^<>]*?'
+    class xdot3(const):
+        value = r'.*?'
         def analyse(self, ctx):
             ctx.longfill = True
             return ctx
-    class xjustadot(static):
-        def compile(self): return r'\.'                                                             #@ReservedAssignment
+    class xspecial(static):
+        def compile(self): return regexEscape(self.value)                                           #@ReservedAssignment
 
     class space(node):
         display = " "
@@ -100,16 +536,14 @@ class Tree(BaseTree):
         "Must-space. Matches 1 or more spaces."
         def compile(self): return r'\s+'                                                            #@ReservedAssignment
     class xspaceX(space):
-        """Filler-space. Like short-filler, but 1st and last char must be one of ['"\s=]; or empty."""
-        def compile(self): return r'''(\s*|(['"\s=][^<>]*?['"\s=]))'''                                           #@ReservedAssignment
+        """In-tag filler (space on steroids): like xdot2 matches any sequence of chars except <>, 
+        if only the 1st and last char are in-tag separators: one of ['"\s=].
+        Alternatively, matches a regular sequence of 0+ spaces, like xspace0.
+        """
+        def compile(self): return r'''(\s*|(['"\s=][^<>]*?['"\s=]))'''                              #@ReservedAssignment
 
     class xword(static):
-        "Static string without spaces. In regex, special characters are escaped, non-printable characters are encoded."
-        def compile(self):                                                                          #@ReservedAssignment
-            s = self.value.encode('string_escape')
-            escape = r".^$*+?{}()[]|"       # no backslash \, it's handled in encode() above
-            s = ''.join('\\' + c if c in escape else c for c in s)
-            return s
+        def compile(self): return regexEscape(self.value)                                           #@ReservedAssignment
     class xstatic(expr): pass
     class xwordB(expr):
         """Like 'word', but modifies output regex to allow spaces around '=' and substitution of " with ' or the other way round."""
@@ -123,19 +557,21 @@ class Tree(BaseTree):
     class xexpr(expr): pass
     xexprA = xexprB = xexpr
     
+    class xtagspecial(static):
+        def compile(self): return regexEscape(self.value)                                           #@ReservedAssignment
     class xtagname(node): pass
     class xnoname(node):
         "Match any word as a tag name, with optional leading '/'; 'tag' node below will ensure that the name matched here is followed only by space or end of tag."
         display = "."
-        def compile(self): return r'/?\w+'                                                            #@ReservedAssignment
+        def compile(self): return r'/?\w+'                                                              #@ReservedAssignment
     class xtag(node):
         name = expr = closing = None
         def __init__(self, waxnode, tree):
             self.init(waxnode, tree)
-            self.name, self.expr, self.closing = self.children[:3]
+            self.tagspecial, self.name, self.expr, self.closing = self.children[:4]
             
-        def __str__(self): return '<%s%s%s' % (self.name, prefix(' ', self.expr), self.closing)
-        def compile(self):                                                                          #@ReservedAssignment
+        def __str__(self): return '<%s%s%s%s' % (self.tagspecial, self.name, prefix(' ', self.expr), self.closing)
+        def compile(self):                                                                              #@ReservedAssignment
             def comp(node): return node.compile() if node else ''
             gap = r'(?=\s|/|>)'                 # checks for separator between tag name and attribute list
             end = r'''['"\s=]'''
@@ -143,13 +579,14 @@ class Tree(BaseTree):
             spaceR = r'(%s[^<>]*?|)' % end      # match attributes on the right of 'expr', or nothing
             expr = comp(self.expr)
             expr = spaceL + expr if expr else ''
-            return r'(|(?<=>)\s*)' + '<' + comp(self.name) + gap + expr + spaceR + comp(self.closing)
+            return r'(|(?<=>)\s*)' + '<' + comp(self.tagspecial) + comp(self.name) + gap + expr + spaceR + comp(self.closing)
     
     class xrepeat(static): pass
     class xregex(static): pass
+    class xvregex(static): pass
     class xvarname(static): pass
     class xvar(node):
-        "A {xxx} element - named group and/or raw regex. If doesn't contain any expression, a shortfill '.' is used; put '...' inside {} to get a longfill."
+        "A {xxx} element - named group and/or raw regex. If doesn't contain any expression, '..' is used; put '...' inside {} to get a longfill."
         repeat = name = regex = expr = None
         
         def __init__(self, waxnode, tree):
@@ -157,7 +594,7 @@ class Tree(BaseTree):
             for c in self.children:
                 if c.type == 'repeat': self.repeat = c
                 elif c.type == 'varname': self.name = c
-                elif c.type == 'regex': self.regex = c
+                elif c.type == 'vregex': self.regex = c
                 elif isinstance(c, tree.xexpr): self.expr = c
                 
         def __str__(self): return '{%s%s%s}' % (self.name, prefix('~', str(self.regex)), prefix(' ', str(self.expr)))
@@ -202,30 +639,14 @@ class Tree(BaseTree):
         def compile(self): #@ReservedAssignment
             return r'(?>%s)' % self.expr.compile()
 
-    #############################################
-    
-    def compile(self): #@ReservedAssignment
-        "Compile 'tree' into regex. Return (regex2, semantics), where 'regex' is a standard regex compiled by 're' module, 'regex2' is compiled by extended 're2' ('regex') module"
-        regpat, semantics = self._compile()
-        try:
-            #regex = re.compile(regpat, re.DOTALL)       # DOTALL: dot will match newline, too
-            # (!) correct pattern which causes error in standard 're' module: re.compile("((?P<TIME>[^<>]*?))?")
-            leadingSpace = r"\s*"
-            if not regpat.startswith(leadingSpace): regpat = leadingSpace + regpat
-            regex2 = re2.compile(regpat, re2.DOTALL | re2.VERSION1)
-        except:
-            print "exception raised when compiling regex:"
-            print regpat
-            raise
-        return regex2, semantics
 
-    
 ########################################################################################################################################################
 ###
 ###  PATTERN
 ###
 
 class MetaPattern(type):
+    "Implements execution of Pattern's unit tests upon definition of subclasses, as well as combining Pattern classes by '+' operator."
     def __new__(cls, name, bases, attrs):
         cls = type.__new__(cls, name, bases, attrs)
         if cls.autotest and 'test1' in cls.__dict__:
@@ -239,142 +660,62 @@ class MetaPattern(type):
 
 class Pattern(object):
     """
-    This doc is partially OUTDATED (!).
-    
-    Flexible context-based pattern matching in html/xml/text documents based on robust and simple syntax that matches all markup block, with multiple variables, at once.
-    Pattern defines layout of a document: subsequent portions of text that must be present in given locations, 
-    and possibly places where - if matched - substrings should be extracted for further analysis. 
-    Patterns are written in a special custom language and converted to a regular expression during Pattern.__init__(). 
-    Typically applied to HTML, for easy scraping of web content. Single Pattern can substitute a dozen of XPaths.
-    If you need online interactive testing of regex-es for debugging, see http://gskinner.com/RegExr/
-
-    How to write a pattern that matches a given html snippet:
-     - In the snippet, replace all occurences of the values to be extracted with {NAME} or {NAME subpattern} or {*NAME...} (items of a list).
-       Remember to put longfill '...' inside {} if you want to match strings containing tags; a shortfill '.' is the default when no expression is given inside {}.
-     - Cut out unnecessary text replacing it with ~ (word fill) or . (short fill) or ... (long fill):
-       - raw text between tags replace with . (matches all chars except <>)
-       - rich text containing tags replace with ... (matches all chars)
-       - tag contents inside <> replace with space or . or empty string (inside <>, all of them match all chars except <>, space matches on boundaries of tag attributes)
-       - sequence of non-space chars replace with ~ (matches all except <> and spaces)
-       Ensure that every variable {} is still surrounded by enough non-optional text (REFERENCE POINTS / GUARDS) to uniquely identify its location in the document.
-     - Insert a space wherever 0+ spaces may occur in the document, except between > and < chars (neighboring tags) where spaces will be matched automatically. 
-     - Mark non-obligatory parts of the pattern by surrounding them with []. If the part starts with . or  ..., include them inside [] if only possible
-       (this is necessary even if the [] block is the 1st entity of the pattern).
-       Remember to leave a CLOSING ANCHOR after []: a static text just after the closing bracket ], to avoid under-matching of the [] block (enforce maximum match).
-     - If the Pattern works too slow, especially on negative examples (!), add more reference points or atomic grouping {>...}.
-     
-    Tips & tricks:
-     - when extracting URLs or their portions, ALWAYS use either url() or url_unquote() converters, to provide proper unquoting of extracted strings (!)
-
-    Pattern syntax:
-        .              [^<>]*       all except tags (entirely inside or entirely outside tags)
-        ... or ..      ???          tag-aware "all": '<' and '>' can only go together (complete tags)
-        space          \s+          if surrounded by static text
-        space          \s*          between non-static elements (max 1 static)
-        _              _|\s*
-        <xxx>          ~= <xxx .>     <xxx\s*(\s[^>]*)?>       match tag name as given, and any attributes that exist; like <xxx.> with obligatory \s after xxx  
-        <.xxx>         ~= <.xxx.>     <\w+\s[^>]*xxx[^>]*>     match substring anywhere inside attribute list
-        <xxx.yyy.zzz>  == <xxx yyy zzz> == <xxx .yyy.zzz.>
-        <xxx.../>      == <xxx.>...</xxx> | <xxx./>
-        <xxx y z .../> == <xxx y z.>...</xxx>   -- ... means not .* but (.(?!<xxx(\s|/|>)))* -- not allowed to open the same tag 2nd time inside ...
-        {VAR} -> {VAR.}         extract text up to the 1st tag
-        {VAR...}                extract text with tags
-        - spaces around < and >
-
-    The matching behavior:
-     - leading and trailing whitespaces in the pattern are removed
-     - pattern must occur at the *beginning* of the text, except for possibly a sequence of leading whitespaces (\s* at the beginning of the pattern regex)
-     - pattern does NOT have to match the end of the text, matching can terminate at any earlier point
-     - whitespace in the pattern matches:
-       - outside tags: 1+ spaces if surrounded by static text; 0+ spaces otherwise (e.g., on tag boundary)
-       - inside tags: 0+ non-tag (<> excluded) characters, but 1st and last char being a space if present
-     - {var} converted to (?P<var>.*) (a named group that will be available under the name 'var' after matching)
-     - {var expr}, where expr is interpreted like any top-level expression 
-     - {var~regex} or {~regex} converted to a group with 'regex' pasted as-is (plain regex pattern in standard notation)
-     - {*...} and {+...} - resolves into repetition operator around inner expression; extracted value is a list of strings, also for all nested variables
-     - {*+...} and {++...} - possessive quantifiers are allowed, see: www.regular-expressions.info/possessive.html
-     - {>...} - atomic grouping is allowed, see: www.regular-expressions.info/atomic.html
-     - [expression] converted to (...)? - optional expression with maximum (longest) possible matching
-     - [] and {} can be nested
-     - no charsets [abc] (square bracket reserved for "optional"), except for negative ones [^...] or inside regexes {~regex}, {var~regex}
-     - ~ (tilde) converted into a wordfill [^<>\s]*? (lazy matching of a word, no tags and no spaces) 
-     - after parsing, all variable names will be returned as lowercase, so in pattern and epilog() you can use uppercase names for better readability
-    
-    Value convertion. Nested patterns:
-     - 'convert' is a dict of converters or types that the extracted values shall be casted onto (type(val), only not-None values!); dict;
-     - can contain multikeys: "key1 key2 key3":value ; keys may contain wildcard '*' to match many variable names, like "URL_*":url
-     - converter can be a Pattern object: it will be applied to extracted text and a sub-dict/obj will be returned instead
-     - it's more efficient to supply Pattern object than class, though, to avoid multiple compilation of the same pattern string
-    
-    Embedded unit tests:
-     - autotest
-     - verbose
-     - testN, goalN
-    
-    Usage:
-     - match, match1, matchAll (methods of Pattern)
-     - matchPattern, matchPattern1 (standalone functions)
-    
-    Practical guidelines for writing Patterns:
-     * REFERENCE POINTS - characteristic and *always* present (non-optional) substrings in several different places of the pattern, 
-        which help situate optional subpatterns relative to each other.
-     * GUARDS around variables - to precisely position the variable; avoid *over-matching*; kill spaces!
-     * CLOSING ANCHOR inside optional blocks - to force maximum match of the last included optional/variable; avoid *under-matching* 
-     
-    Pattern class uses an extended version of 're' module, the 'regex' - see http://pypi.python.org/pypi/regex
-
-    >>> p = Pattern("{* ... {A}}{B}")
+    >>> p = Pattern("  {* ... {A}}{B}  ")
     >>> v = p.semantics.variables; A, B = v['A'], v['B']
     >>> A.longfill, A.repeated, B.longfill, B.repeated
     (False, True, False, False)
     >>> print p.regex.pattern
-    \s*(.*?(?P<A>[^<>]*?))*(?P<B>[^<>]*?)
+    (.*?(?P<A>[^<>]*?))*(?P<B>[^<>]*?)\s*
     
     >>> p2 = Pattern("{> [ala]} ala")
     >>> print p2.regex.pattern
-    \s*(?>(ala)?)\\s*ala
+    (?>(ala)?)\\s*ala
     >>> print p2.match1("ala")
     None
+    
+    >>> p = Pattern('<a href="{URL}"></a>')
+    >>> print p.match1('<A href="http://google.com"></A>')
+    http://google.com
     """
-    __metaclass__ = MetaPattern         # responsible for executing unit tests defined at class level in subclasses
-    MISSING = object()                  # token to indicate that true test outcome is unspecified
+    __metaclass__ = MetaPattern     # responsible for executing unit tests defined at class level in subclasses
+    MISSING = object()              # in internal unit tests, a token that indicates that true test outcome (goal) is undefined
     
-    url = None
-    
-    # defaults
-    pattern   = None    # source code of the patter, will be compiled into regex and matched against document text in match()
+    # input parameters
+    pattern   = None    # source redex code of the patter, compiled into regex during __init__ and then matched against documents in match*()
     path      = None    # optional XPath string; if present, pattern will be matched only against node(s) selected by this path - document must be an xdoc or will be parsed as HTML
-    regex     = None    # compiled regex object, generated from pattern using the exnhanced 're2' ('regex') module
-    semantics = None    # Context.Data object with global information about the pattern tree, collected during semantic analysis
-    variables = None    # list of names of variables present in the pattern, extracted from 'semantics'
     convert   = {}      # dict of converters or types that the extracted values shall be casted onto, ex: {'DATE': pdatetime, 'PRICE': pfloat}
     extract   = {}      # stand-alone extractors: functions that take an entire document and return extracted value or object for a given item; dict
-    html      = True    # shall match() perform HTML entity decoding and normalization of spaces in extracted items? (done before extractors/converters)
+    case      = False   # shall regex matching be case-sensitive (True)? INsensitive (False) by default
     tolower   = False   # shall all item names be converted to lowercase at the end of parsing?
+    html      = True    # shall match() perform HTML entity decoding and normalization of spaces in extracted items? (done before extractors/converters)
     mapping   = {}      # mapping of item names, for easier integration with other parts of the application (currently unused!)
+    strtype   = unicode # what type of string to cast the document onto before parsing; this determines also the type of returned result strings
     dicttype  = ObjDict # what type of dictionary to return; ObjDict allows .xxx access to values in addition to standard ['xxx']
     model     = None    # class to be used as a wrapper for the dictionary of matched fields passed in kwargs: __init__(**items) 
     verbose   = False   # if True, Pattern.__init__ will print out debug information
     autotest  = True    # if True, unit tests (see below) will be executed automatically upon class declaration
+
+    # output variables
+    tree      = None    # syntax tree of the 'pattern', before compilation to regex
+    regex     = None    # regex object compiled from 'pattern' with the enhanced 'regex' module; check regex.pattern to see what regex expression was produced from a given redex
+    semantics = None    # Context.Data object with global information about the pattern tree, collected during semantic analysis
+    variables = None    # list of names of variables present in the pattern, extracted from 'semantics'
     
     # optional unit tests defined in subclasses, named 'testN' and 'goalN', or just 'testN' (no ground truth, only print the output)
     # ... 
 
     # TODO: implement error detection: binary search for the smallest element of the pattern that causes it to break on a given input string
 
-    def __init__(self, pattern = None, extract = None, convert = None, html = None, tolower = None):
+    def __init__(self, pattern = None, **kwargs):
         if self.verbose: print classname(self)
         
         if pattern is not None: self.pattern = pattern
         if self.pattern is None: self.pattern = self.__class__.__doc__          # subclasses can define patterns in pydocs, for convenience
-        if extract is not None: self.extract = extract
-        if convert is not None: self.convert = convert
-        if html is not None: self.html = html
-        if tolower is not None: self.tolower = tolower
+        params = subdict(kwargs, "extract convert case tolower html".split())
+        self.__dict__.update(params)
 
-        parser = parsing.WaxeyeParser(Tree)
-        self.regex, self.semantics = parser.compile(self.pattern)               # compile source pattern into regex
-        
+        self._compile()                                                         # compile self.pattern to self.regex
+
         # decode compact notation of keys in 'convert': split multi-name keys, resolve wildcard keys
         self.convert = util.splitkeys(self.convert)
         self.variables = self.semantics.variables.keys()
@@ -387,12 +728,27 @@ class Pattern(object):
             del self.convert[name]
         
         if self.verbose: 
-            print self.variables
-            print self.regex.pattern
+            print " variables:", self.variables
+            print " regex:", self.regex.pattern
         
-#    def __call__(self):
-#        "Trying to instantiate an already instantiated Pattern subclass? Do nothing."
-#        return self        
+    def _compile(self):                                                                                      #@ReservedAssignment
+        "Translate the original reDex self.pattern into a regex pattern and compile to regex object."
+        parser = parsing.WaxeyeParser(Tree)
+        self.tree = parser.parse(self.pattern)
+        regex, self.semantics = self.tree.compile()
+        try:
+            #regex = re.compile(regex, re.DOTALL)       # DOTALL: dot will match newline, too
+            # (!) correct pattern which causes error in standard 're' module: re.compile("((?P<TIME>[^<>]*?))?")
+            
+            # consume leading whitespace if necessary; remember the match under the __lead__ name to cut it off from the final result
+            #space = r"\s*?"  #r"(?P<__lead__>\s*?)"
+            #if not regex.startswith(space): regex = space + regex
+            flags = re2.DOTALL | re2.VERSION1 | (re2.IGNORECASE if not self.case else 0)
+            self.regex = re2.compile(regex, flags)
+        except:
+            print "exception raised when compiling regex:"
+            print regex
+            raise
         
     def testAll(self, tests):
         """'tests' is a dictionary of unit tests, every test is a pair of items in dict named testK and goalK, where K is 1,2,3...
@@ -412,7 +768,7 @@ class Pattern(object):
                     continue
                 split = s.split(None, 1)        # 's' is a string...
                 if len(split) > 1: var,val = split[:2]
-                else: var,val = split[0], None
+                else: var,val = split[0], ""
                 res[var] = val
             return res
         
@@ -506,7 +862,7 @@ class Pattern(object):
             items = self.dicttype()
             for key in match.groupdict().keys():        # TODO: use capturesdict() instead
                 items[key] = match.captures(key)
-    
+            
             # flatten singleton lists of non-repeated variables AND of groups defined inside raw regexes {~regex} rather than via {VAR ...}
             var = self.semantics.variables
             for name, val in items.iteritems():
@@ -515,10 +871,11 @@ class Pattern(object):
         return items, match.end()
         
     def _convert(self, items, doc, model = None, baseurl = None, testing = False):
-        "Can modify 'items' dictionary."
+        "Postprocessing of variables extracted from 'doc': cleansing, type casting, converting to object. Can modify 'items'."
+        
         def clean(val, isstring = None):
             if not isstring and islist(val): return [clean(s,True) for s in val]
-            return decode_entities(merge_spaces(val))
+            return self.strtype(decode_entities(merge_spaces(val)))
         #def absolute(url, isstring = None):
         #    if baseurl is None: return url
         #    if not isstring and islist(url): return [absolute(u,True) for u in url]
@@ -581,43 +938,57 @@ class Pattern(object):
             raise
     
     def match(self, doc, path = None, model = None, baseurl = None, testing = False):
-        """Matches the pattern against document 'doc'. On successful match returns self.dicttype (ObjDict by default) with extracted and converted values,
-        possibly wrapped up in model() if not-None ('model' can be given here as function argument, or as a property of the object or class); 
-        or matched string if the pattern doesn't contain any variables. None on failure.
-        Typically 'doc' is a string, but it can also be any other type of object convertable into str() - this is useful if custom extractors are to be used
-        that require another type of object. If 'baseurl' is given, all extracted URLs will be turned into absolute URLs based at 'baseurl'.
-        'testing': True in unit tests, indicates that final processing (item names renaming, class wrapping) should be skipped and 'path' shall not be used."""
-        path = path or self.path
+        """Matches the pattern against document 'doc'. On successful match returns self.dicttype (ObjDict by default) 
+        with extracted and converted values, possibly wrapped up in model() if not-None 
+        ('model' can be given here as function argument, or as a property of the object or class); 
+        or the entire matched string if the pattern doesn't contain any variables. None on failure.
+        Typically 'doc' is a string, but it can also be any other type of object convertable into str() 
+        - this is useful if custom extractors are to be used that require another type of object. 
+        If 'baseurl' is given, all extracted URLs will be turned into absolute URLs based at 'baseurl'.
+        'testing': True in unit tests, indicates that final processing (item names renaming, class wrapping) 
+        should be skipped and 'path' shall not be used.
+        """
+        path = path or self.path                            # select XPath nodes if requested to do so
         if path and not testing: 
             if isstring(doc): doc = xdoc(doc)
             doc = doc.node(path)
-        if self.variables:
-            items, _ = self._matchRaw(unicode(doc))
+        
+        doc = self.strtype(doc).lstrip()                    # convert the doc to a string and remove leading whitespace
+        
+        if self.variables:                                  # extract variables?
+            items, _ = self._matchRaw(doc)
             return self._convert(items, doc, model, baseurl, testing)
-        else:
-            match = self.regex.match(unicode(doc))
+        else:                                               # extract the entire matched part of the document
+            match = self.regex.match(doc)
             if match is None: return None
             return match.captures()[0]
     
     def match1(self, *args, **kwargs):
-        """Shorthand for patterns that extract exactly 1 variable: returns *value* of this variable, as an atomic value rather than a dictionary. None when no matching found.
-        If no variables are present, returns the string matched by entire pattern, like if the pattern were enclosed in {VAR ...}."""
+        """Shorthand for patterns that extract exactly 1 variable: returns *value* of this variable, 
+        as an atomic value rather than a dictionary. None when no matching found. 
+        If no variables are present, returns the string matched by entire pattern, 
+        like if the pattern were enclosed in {VAR ...}.
+        """
         vals = self.match(*args, **kwargs)
         if isstring(vals) or vals is None: return vals
-        if len(vals) != 1: raise Exception("Pattern.match1: incorrect pattern, %d variables extracted instead of 1." % len(vals), self.variables, vals)
+        if len(vals) != 1: raise Exception("Pattern.match1: pattern contains too many variables (%d), should only contain one" % len(vals), self.variables, vals)
         return vals.values()[0]
         
     
     def matchAll(self, doc, path = None, **kwargs):
-        """Like match(), but finds all non-overlapping matches of the pattern in 'doc', not only 1, and returns as a list of result sets (dicts/objs), possibly empty.
-        If path or self.path is set, matches pattern to all nodes selected by this path (possibly nested, depending on the path), ignoring results of unmatching nodes."""
+        """Like match(), but finds all non-overlapping matches of the pattern in 'doc', 
+        not only one and not necessarily anchored at the beginning of the doc. 
+        Returns a list of result sets (dicts/objs), empty if no match was found.
+        If path or self.path is present, matches the pattern to all nodes selected by this path 
+        (nodes can be nested in each other if the path selects so), ignoring the unmatching nodes.
+        """
         path = path or self.path
         if path: return self._matchAllXPath(doc, path, **kwargs)
         return self._matchAllRegex(doc, **kwargs)
         
     def _matchAllRegex(self, doc, **kwargs):
         data = []; pos = 0
-        udoc = unicode(doc)
+        udoc = self.strtype(doc)
         while True:
             items, pos = self._matchRaw(udoc, pos)
             if items is None: return data
@@ -645,12 +1016,14 @@ class Pattern(object):
 
 ########################################################################################################################################################
 
-def matchPattern(pat, doc, **kwargs):
-    "For easy construction of 1-liners that match short custom pattern (string 'pat') to a given text. Watch out: the pattern is compiled from scratch on every call."
+def match(pat, doc, **kwargs):
+    """For easy construction of 1-liners that match short custom pattern (string 'pat') to a given text. 
+    Watch out: the pattern is compiled from scratch on every call, which can be very inefficient
+    if the pattern is used many times."""
     return Pattern(pat).match(doc, **kwargs)
 
-def matchPattern1(pat, doc, **kwargs):
-    "Like matchPattern, but calls Pattern.match1 instead of Pattern.match. For patterns that extract single variable."
+def match1(pat, doc, **kwargs):
+    "Like match(), but calls Pattern.match1 instead of Pattern.match, to extract a single variable, without its name."
     return Pattern(pat).match1(doc, **kwargs)
 
 

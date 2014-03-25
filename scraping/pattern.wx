@@ -1,8 +1,9 @@
-# Grammar for web document patterns (class Pattern). Tag-oriented syntax and semantics. 
+#
+# Grammar for the *redex* language (REgular Document EXpressions). 
 # Written in Waxeye language, see http://waxeye.org/manual.html
 # 
-# Compilation, in 'algo' folder: 
-#   $ ./parsing/waxeye -g python pattern/ -p pattern pattern/pattern.wx
+# Compilation, in 'nifty' folder: 
+#   $ ./parsing/waxeye -g python scraping/ -p pattern scraping/pattern.wx
 #
 # This generates a pattern_parser.py file with PatternParser class.
 #
@@ -15,81 +16,62 @@
 # Nifty is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 # You should have received a copy of the GNU General Public License along with Nifty. If not, see <http://www.gnu.org/licenses/>.
+#
 
 
 document    <=  exprA
 
-/*
-	shortfill longfill justadot 
-	space0 space1 spaceX
-	word static staticB
-	expr var optional
-	tagname noname tag
-*/
 
 # TOKENS
 
-alphanum 	<=  [a-zA-Z0-9_]								# doesn't handle Unicode characters in variable names
+alphanum 	<=  [a-zA-Z0-9_]					# doesn't handle Unicode characters in variable names
 space       <:  :+[ \t\n\r]
-tilde		<=  '~'
-dot         <=  '.'
-mdot        <:  '.' +'.'									# 2+ dots
+
+tilde		<-  '~'								# matches a word: sequence of 1+ alphanum characters, greedy
+dot1        <-  '.'   !'.'						# 1 dot: matches any sequence of non-space characters except <>, lazy
+dot2        <-  :?space '..'  !'.'	:?space		# 2 dots: any sequence of characters except <>, lazy; absorbs neighboring spaces for efficiency
+dot3        <-  :?space '...' *'.'	:?space		# 3+ dots: any sequence of characters, lazy; absorbs neighboring spaces for efficiency
+
 special     <-  '{' | '}' | '[' | ']' | '<' | '>' | '.' | '~'
 
 # SYNTAX & SEMANTICS
 
 # Terminals (no recursion)
 
-wordfill    <-  tilde						# word filler: matches a word, no tags and no spaces, [^<>\s]* lazy
-shortfill   <-  :?space dot !dot :?space 	# short-range filler: all except tag symbols, [^<>]* lazy
-longfill    <-  :?space mdot :?space 		# long-range filler: any characters including tags, .* lazy
-justadot	<-  '{.}'						# on output prints just a regular dot, regex-escaped: \.
+escaped     <=  :'{' special :'}'			# matches the special character literally
 
 space0      <-  space						# maybe-space, output semantics: 0+ spaces, greedy 
 space1      <-  space						# must-space, output semantics: 1+ spaces, greedy
 spaceX      <-  space						# all-space, output semantics: short-filler with 1st and last char (if any) being a space
-dropspace   <:  ?space						# optional leading/trailing spaces, to be omitted in AST 
+dropspace   <:  ?space						# optional leading spaces, to be omitted in AST 
 
 word        <-  +(!special !space .)		# any word interpreted as-is, no spaces
 static      <-  word *(space1 word)			# sequence of words separated by must-spaces, starts and ends with a word (not space)
-wordB       <-  word						# in output regex, will allow for spaces around '=' and substitution of " with ' or the other way round 
+wordB       <-  word						# in tags, don't parse 'static' node to allow for spaces around '=' and substitution of " with ' or the other way round 
 
 # Non-terminals (can be recursive)
 
-exprA       <-  dropspace *(justadot | atomic | varA | optionalA | static | tag | wordfill | longfill | shortfill | space0) dropspace		# top expression: tag-aware "all", '<' and '>' can only go together (complete tags)
-exprB       <-  dropspace *(justadot | atomic | varB | optionalB | wordB | wordfill | shortfill | spaceX)									# in-tag expression
+# "xA" are top-level expressions matching text outside <...> tags (but possibly containing tags inside)
+# "xB" are in-tag expressions, matching text between '<' and '>' characters
 
+exprA       <-  dropspace *(escaped | regex | atomic | varA | optionalA | static | tag | tilde | dot3 | dot2 | dot1 | space0)
+exprB       <-  dropspace *(escaped | regex | atomic | varB | optionalB | wordB | tilde | dot2 | dot1 | spaceX)
+
+tagspecial  <-  ?('/' | ':')
 tagname     <-  word
-noname      <-  dot
-tag         <-  :'<' (tagname|noname) exprB ('/>' | '>')
+noname      <-  '.'
+tag         <-  :'<' tagspecial (tagname|noname) exprB ('/>' | '>')
+
+regex       <-  :'{~' *(!'~}' .) :'~}'				# {~regex~}, a regex expression to be included directly in the output regex pattern
 
 varname    	<-  +alphanum
-repeat      <-  '*' | '+' | '*+' | '++'						# possessive quantifiers are allowed, to limit backtracking during regex matching, see: www.regular-expressions.info/possessive.html
-regex       <-  +(!'}' .)									# regex: all chars except '}'
-vregex      <=  :'~' regex
-vexprA		<=  :?space exprA
-vexprB		<=  :?space exprB
+repeat      <-  '*' | '+' | '*+' | '++'				# possessive quantifiers limit backtracking during regex matching, see: www.regular-expressions.info/possessive.html
+vregex      <-  :'~' +(!'}' .)						# a regex inside variable: all chars allowed except '}'
+vexprA		<=  !'~' :?space exprA
+vexprB		<=  !'~' :?space exprB
 
-varA		<-  :'{' ?repeat ?varname ?vregex ?vexprA :'}'		# ...{VAR} ...{VAR ab{CD}} ...{VAR~\w+} ...{~Ala ma \d+ koty} ...{* repeated}
-varB		<-  :'{' ?repeat ?varname ?vregex ?vexprB :'}'
+varA		<-  :'{' ?repeat ?(varname ?vregex) ?vexprA :'}'	# ...{VAR} ...{VAR ab{CD}} ...{VAR~\w+} ...{* repeated} ...{*VAR_REPEATED xyz}
+varB		<-  :'{' ?repeat ?(varname ?vregex) ?vexprB :'}'
 optionalA	<-  :'[' exprA :']'
 optionalB	<-  :'[' exprB :']'
 atomic      <-  :'{>' exprA :'}'								# atomic grouping, see: www.regular-expressions.info/atomic.html
-
-/*
-  Semantic equivalents:
-    spaceX = shortfill
-    exprA = exprB = expr
-    varA = varB = var
-    optionalA = optionalB = optional
-*/
-
-
-/* rubbish...
-specialB    <-  special | '"' | "'" | '='
-specialC    <-  '{' | '}' | '[' | ']' | '.'
-exprC       <-  *(var | staticC | optional | space0 | longfill | shortfill)		# in-attribute-value expression
-eq          <-  '='						# will have 0-spaces added around on output
-attrval     <-  wordB | ('"' exprC '"') | ("'" exprC "'")
-attr        <-  wordB ?(eq attrval)
-*/
