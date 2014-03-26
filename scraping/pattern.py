@@ -1,446 +1,449 @@
 # -*- coding: utf-8 -*-
 """
-    Flexible context-based pattern matching in HTML/XML/markup/plaintext documents.
+Flexible context-based pattern matching in HTML/XML/markup/plaintext documents.
+
+Pattern is a new type of tool for extracting data from any markup document. 
+It defines a new language, "redex" (REgular Document EXpressions, similarity with "regex" intentional),
+for concise description of text patterns occuring in documents 
+and defining which parts of text should be extracted as data during scraping.
+
+Redex patterns define layout of the document: subsequent portions of text that must be present in given locations, 
+and places where substrings - if matched - should be extracted for further analysis.
+
+Redex combines consistency and compactness of regexes (single pattern matches all document 
+and extracts multiple variables at once) with strength and precision of XPaths: 
+it is much simpler than regexes and allows patterns to span multiple fragments of the document, 
+thus providing precise *context* where each fragment is allowed to match.
+Single Pattern can substitute a dozen of XPaths.
+Redex patterns are also much more readable than both regexes and XPath rules, thanks to their
+literal resemblance to the documents being parsed.
+Pattern/redex is tailored to markup languages and is aware of characteristic parts of tagged documents,
+making parsing process more reliable.
+Redex patterns bridge the gap between regexes and XPaths as used in web scraping.
+
+Every Pattern instance is built from a string written in redex. 
+This string is compiled internally to a regex and subsequently matched against documents.
+For example, the following simple redex pattern:
+
+    >>> redex = '<a href="{URL}">the link we are looking for</a>'
+
+is compiled to a much more complicated regex:
+
+    >>> print Pattern(redex).regex.pattern
+    (|(?<=>)\s*)<a(?=\s|/|>)([^<>]*?['"\s=]|)href\s*=\s*("|')(?P<URL>[^<>]*?)("|')(['"\s=][^<>]*?|)>the\s+link\s+we\s+are\s+looking\s+for(|(?<=>)\s*)</a(?=\s|/|>)(['"\s=][^<>]*?|)>
+
+This regex takes care of all intricacies of HTML documents: optional spaces in different places, 
+additional surrounding attributes inside tags, different equivalent quoting characters (' or ") 
+for tag attribute values, etc. Nobody would be able to write this regex manually.
+Redex patterns are designed to do it for you.
+
+You can create a pattern in two ways. By instantiating Pattern class (handy for short patterns):
+
+    >>> pat = Pattern('<a href="{URL}"></a>')
     
-    Pattern is a new type of tool for extracting data from any markup document. 
-    It defines a new language, "redex" (REgular Document EXpressions, similarity with "regex" intentional),
-    for concise description of text patterns occuring in documents 
-    and defining which parts of text should be extracted as data during scraping.
+or by subclassing Pattern, with redex string put either in the 'pattern' property, or just in pydocs for brevity:
 
-    Redex patterns define layout of the document: subsequent portions of text that must be present in given locations, 
-    and places where substrings - if matched - should be extracted for further analysis.
+    class UrlPattern(Pattern):
+        pattern = '<tr><td><a href="{URL}"> a long and very prominent link with <b>inner <u>elements</u></b>, enclosed in a table row </a></td></tr>'
+
+    class UrlPattern(Pattern):
+        '''
+        <tr><td>
+        <a href="{URL}"> a long and very prominent link with <b>inner <u>elements</u></b>, enclosed in a table row </a>
+        </td></tr>
+        '''
+    pat2 = UrlPattern()
+
+Typically, you match the pattern to extract some data. This can be done with any of Pattern.match*() methods:
+match, match1, matchAll (see pydocs for differences between them); 
+or match, match1 functions, which compile and match the pattern in one step.
+They all return matched values of variables (groups):
+
+    >>> pat.match1('<A href="http://google.com"></A>')
+    u'http://google.com'
     
-    Redex combines consistency and compactness of regexes (single pattern matches all document 
-    and extracts multiple variables at once) with strength and precision of XPaths: 
-    it is much simpler than regexes and allows patterns to span multiple fragments of the document, 
-    thus providing precise *context* where each fragment is allowed to match.
-    Single Pattern can substitute a dozen of XPaths.
-    Redex patterns are also much more readable than both regexes and XPath rules, thanks to their
-    literal resemblance to the documents being parsed.
-    Pattern/redex is tailored to markup languages and is aware of characteristic parts of tagged documents,
-    making parsing process more reliable.
-    Redex patterns bridge the gap between regexes and XPaths as used in web scraping.
+    >>> match1('<a href="{URL}"></a>', '<A href="http://google.com"></A>')
+    u'http://google.com'
+
+For clarity of examples below, we'll request patterns to use plain <str> type during matching instead of the default <unicode>:
+>>> Pattern.strtype = str
+
+
+REDEX SYNTAX.
     
-    Every Pattern instance is built from a string written in redex. 
-    This string is compiled internally to a regex and subsequently matched against documents.
-    For example, the following simple redex pattern:
-    
-        >>> redex = '<a href="{URL}">the link we are looking for</a>'
-    
-    is compiled to a much more complicated regex:
-    
-        >>> print Pattern(redex).regex.pattern
-        (|(?<=>)\s*)<a(?=\s|/|>)([^<>]*?['"\s=]|)href\s*=\s*("|')(?P<URL>[^<>]*?)("|')(['"\s=][^<>]*?|)>the\s+link\s+we\s+are\s+looking\s+for(|(?<=>)\s*)</a(?=\s|/|>)(['"\s=][^<>]*?|)>
-    
-    This regex takes care of all intricacies of HTML documents: optional spaces in different places, 
-    additional surrounding attributes inside tags, different equivalent quoting characters (' or ") 
-    for tag attribute values, etc. Nobody would be able to write this regex manually.
-    Redex patterns are designed to do it for you.
+    Static text        -- Regular text (static text) is matched as-is, case-insensitive by default.
+                          Spaces between static words match any sequence of 1+ whitespaces.
+                          Spaces delimited by a non-static expression on either side 
+                          (a variable, optional expression, ...) match 0+ whitespaces (can match empty string).
+                          Spaces inside <...> tags match 0+ whitespaces, as well as any sequence of chars 
+                          delimited by in-tag separators: ', ", =, or a space.
+                          
+                          The match of the entire pattern can be preceeded in the document 
+                          by any number of whitespaces (they're stripped out before matching),
+                          as well as followed by any sequence of characters - not only spaces (!).
+                          Effectively, the match starts at the beginning of the non-whitespace part of the document,
+                          and can terminate anywhere in the doc, not necessarily at the end 
+                          (doesn't have to consume all characters).
+                          
+                          >>> match('Alice in Wonderland', '  Alice in Wonderland -- Alice was beginning to get very tired')
+                          'Alice in Wonderland'
 
-    You can create a pattern in two ways. By instantiating Pattern class (handy for short patterns):
-    
-        >>> pat = Pattern('<a href="{URL}"></a>')
-        
-    or by subclassing Pattern, with redex string put either in the 'pattern' property, or just in pydocs for brevity:
+    Apples and ~       -- Tilde (~) matches any word: a sequence of 1+ alphanumeric characters 
+                          (letters, digits, underscore "_" and tilde "~"), without spaces,
+                          as many characters as possible (greedy match).
+                          
+                          >>> match('Apples and ~', 'Apples and oranges and pears')
+                          'Apples and oranges'
 
-        class UrlPattern(Pattern):
-            pattern = '<tr><td><a href="{URL}"> a long and very prominent link with <b>inner <u>elements</u></b>, enclosed in a table row </a></td></tr>'
-    
-        class UrlPattern(Pattern):
-            '''
-            <tr><td>
-            <a href="{URL}"> a long and very prominent link with <b>inner <u>elements</u></b>, enclosed in a table row </a>
-            </td></tr>
-            '''
-        pat2 = UrlPattern()
-    
-    Typically, you match the pattern to extract some data. This can be done with any of Pattern.match*() methods:
-    match, match1, matchAll (see pydocs for differences between them); 
-    or match, match1 functions, which compile and match the pattern in one step.
-    They all return matched values of variables (groups):
-    
-        >>> pat.match1('<A href="http://google.com"></A>')
-        u'http://google.com'
-        
-        >>> match1('<a href="{URL}"></a>', '<A href="http://google.com"></A>')
-        u'http://google.com'
+    Version .          -- Dot (.) matches any continuous sequence of 0+ non-space characters except tags (no '>' or '<'),
+                          but as few characters as possible (lazy match); can also be used inside tags.
+                          Put "{.}" in the pattern to match literal dot (exactly one) instead of a sequence.
+                          >>> match1('Python {VER .} on .', 'Python 2.7 on Linux')
+                          '2.7'
+                          >>> match1('<a href="./{USER ~}">', '<a href="http://twitter.com/wojnarski">')
+                          'wojnarski'
 
-    For clarity of examples below, we'll use plain str type for documents being matched instead of the default unicode.
-    >>> Pattern.strtype = str
+    Address: ..        -- Two dots (..) match any sequence of 0+ characters except tags (no '<' or '>'), lazy match; 
+                          can be used inside tags, although usually a single dot '.' suffices.
+                          >>> match1('Address: {ADDR ..} {.}', 'Address: 12-345 Warsaw, Poland.')
+                          '12-345 Warsaw, Poland'
 
+    <p>...</p>         -- Three or more dots (...) match any sequence of 0+ characters, including tags ('<' and '>' allowed).
+                          Cannot be used inside tags: between < and >.
+                          The dots . .. ... and the tilde ~ are called jointly the *fillers*.
+                          
+                          >>> match1('<p>{TEXT ...}</p>', '<p><u>Apples</u> and <i>oranges</i></p>')
+                          '<u>Apples</u> and <i>oranges</i>'
 
-    REDEX SYNTAX.
-        
-    Static text            -- Regular text (static text) is matched as-is, case-insensitive by default.
-                              Spaces between static words match any sequence of 1+ whitespaces.
-                              Spaces delimited by a non-static expression on either side 
-                              (a variable, optional expression, ...) match 0+ whitespaces (can match empty string).
-                              Spaces inside <...> tags match 0+ whitespaces, as well as any sequence of chars 
-                              delimited by in-tag separators: ', ", =, or a space.
-                              
-                              The match of the entire pattern can be preceeded in the document 
-                              by any number of whitespaces (they're stripped out before matching),
-                              as well as followed by any sequence of characters - not only spaces (!).
-                              Effectively, the match starts at the beginning of the non-whitespace part of the document,
-                              and can terminate anywhere in the doc, not necessarily at the end 
-                              (doesn't have to consume all characters).
-                              
-                              >>> match('Alice in Wonderland', '  Alice in Wonderland -- Alice was beginning to get very tired')
-                              'Alice in Wonderland'
+    <a>link</a>        -- Attributes of a tag are matched implicitly: <tag> is equivalent to <tag ..>, 
+                          so there's no need to put ".." everywhere inside tags.
+                          
+                          >>> match1('<div>{MSG}</div>', '<div style="width:500px;border:1;" id="message">Success</div>')
+                          'Success'
 
-    Apples and ~           -- Tilde (~) matches any word: a sequence of 1+ alphanumeric characters 
-                              (letters, digits, underscore "_" and tilde "~"), without spaces,
-                              as many characters as possible (greedy match).
-                              
-                              >>> match('Apples and ~', 'Apples and oranges and pears')
-                              'Apples and oranges'
+                          Moreover, implicit 0+ spaces are matched between neighboring tags even if no explicit
+                          space is present in the pattern:
+                          
+                          >>> match('</td><td>', '</td>   <td>')
+                          '</td>   <td>'
 
-    Version .              -- Dot (.) matches any continuous sequence of 0+ non-space characters except tags (no '>' or '<'),
-                              but as few characters as possible (lazy match); can also be used inside tags.
-                              Put "{.}" in the pattern to match literal dot (exactly one) instead of a sequence.
-                              >>> match1('Python {VER .} on .', 'Python 2.7 on Linux')
-                              '2.7'
-                              >>> match1('<a href="./{USER ~}">', '<a href="http://twitter.com/wojnarski">')
-                              'wojnarski'
+    <div message>...   -- Each word on attribute list: attribute name, or a value surrounded by quotes, spaces or =, 
+                          is treated as a separate item. Surrounding items (and entire attributes) are matched implicitly, 
+                          so you can specify one item without worrying about the rest. No need to use surrounding ".." 
+                          or to worry about unseen attributes and values that might be added to the tag in the future.
+                          Compare this to the weirdness of the XPath expression that's needed to match just one class 
+                          in a multi-class element, like "title" in class="long wide title", 
+                          when the ordering of names is unknown:
+                              xpath = "//div[contains(concat(' ', normalize-space(@class), ' '), ' title ')]"
+                          Using redex patterns is a lot easier:
+                          
+                          >>> match1('<div title>{TITLE}</div>', '<div style="width:800px" class="long title wide">About this website</div>')
+                          'About this website'
 
-    Address: ..            -- Two dots (..) match any sequence of 0+ characters except tags (no '<' or '>'), lazy match; 
-                              can be used inside tags, although usually a single dot '.' suffices.
-                              >>> match1('Address: {ADDR ..} {.}', 'Address: 12-345 Warsaw, Poland.')
-                              '12-345 Warsaw, Poland'
+    <. price>          -- Dot (.) after '<' matches any tag name. If you don't know whether the element of interest 
+                          is a <div>, or a <p>, or a <table>, or a <span>, ... or you just want to abstract from 
+                          the particular name, use "<." to match any tag.
+                          Note that here, the dot behaves slightly differently than the general-purpose dot
+                          used in other places: when replacing a tag name, it matches at least 1 character (no empty string), 
+                          the match is greedy and it must terminate on a word boundary (space or end of tag).
+                           
+                          >>> match1('<. price>{PRICE}</.>', '<span class="price">$9.99</span>')
+                          '$9.99'
 
-    <p>...</p>             -- Three or more dots (...) match any sequence of 0+ characters, including tags ('<' and '>' allowed).
-                              Cannot be used inside tags: between < and >.
-                              The dots . .. ... and the tilde ~ are called jointly the *fillers*.
-                              
-                              >>> match1('<p>{TEXT ...}</p>', '<p><u>Apples</u> and <i>oranges</i></p>')
-                              '<u>Apples</u> and <i>oranges</i>'
+    {VAR ...}          -- Braces define a *variable*: a named subexpression, equivalent to a *group* in a regex pattern.
+                          After matching, the string matched by the expression is returned under the name of the variable.
+                          Definition of a variable has a form of {NAME expression}, where NAME is the variable name
+                          (case-sensitive, typically written in all-caps to distinguish from static parts of the pattern);
+                          and 'expression' is any redex pattern, possibly containing other nested variables.
+                          The 'expression' can be omitted ({NAME}), in such case the default pattern ".." (2-dots) is assumed.
+                          By default, Pattern.match() returns an ObjDict of all variables, which is a regular dict
+                          extended with object-like access to values:
 
-    <a>link</a>            -- Attributes of a tag are matched implicitly: <tag> is equivalent to <tag ..>, 
-                              so there's no need to put ".." everywhere inside tags.
-                              
-                              >>> match1('<div>{MSG}</div>', '<div style="width:500px;border:1;" id="message">Success</div>')
-                              'Success'
+                          >>> items = match('<a href="{URL ./photos/{USER ~}/{ID}/}">', '<a href="http://www.flickr.com/photos/atelier/738724/">')
+                          >>> items
+                          {'URL': 'http://www.flickr.com/photos/atelier/738724/', 'USER': 'atelier', 'ID': '738724'}
+                          >>> items['USER']
+                          'atelier'
+                          >>> items.USER
+                          'atelier'
+                          
+                          If you want the standard 'dict' to be returned instead, set dicttype=dict inside your Pattern subclass.
+                          If you wish that names of variables in the result are all changed to lowercase
+                          (convenient if you want to use them as object properties later on), set tolower=True in your pattern:
+                          
+                          >>> pat = Pattern('{FRUIT1 ~} and {FRUIT2 ~}')
+                          >>> pat.tolower = True
+                          >>> items = pat.match('apples and oranges')
+                          >>> items.fruit1, items.fruit2
+                          ('apples', 'oranges')
+                          
+                          By default, all variables which do NOT contain 3-dots '...' and thus match only regular text
+                          without tags, undergo HTML cleansing after extraction: striping of leading/trailing spaces,
+                          merging of multiple whitespaces (incl. newlines and tabs) into a single regular space ' ',
+                          and HTML entity decoding.
+                          To switch this behavior off, set 'html' property of your Pattern subclass to False,
+                          either permanently in the subclass definition or before calling Pattern.match().
+                          Compare the two calls below, the 1st one executed with the default setting of html=True,
+                          and the 2nd one with 'html' changed to False:
+                          
+                          >>> pat = Pattern('<td>{CELL}</td>')
+                          >>> pat.match1('<td>  apples \\n &amp; oranges  </td>')
+                          'apples & oranges'
+                          >>> pat.html = False
+                          >>> pat.match1('<td>  apples \\n &amp; oranges  </td>')
+                          '  apples \\n &amp; oranges  '
+                          
+                          However, if the variable contains 3-dots '...', no cleansing is performed regardless of 'html' setting:
+                          
+                          >>> match1('<tr> {ROW ...} </tr>', '<tr><td>  apples \\n &amp; oranges  </td></tr>')
+                          '<td>  apples \\n &amp; oranges  </td>'
 
-                              Moreover, implicit 0+ spaces are matched between neighboring tags even if no explicit
-                              space is present in the pattern:
-                              
-                              >>> match('</td><td>', '</td>   <td>')
-                              '</td>   <td>'
+    {VAR~regex}        -- If the variable name is followed immediately by a tilde (~), the remaining part of variable definition
+                          is treated as a raw regex - not redex - expression.
+                          This is useful for matching arbitrary regex sub-patterns, 
+                          to handle complex cases not covered by basic redex syntax.
+                          Watch out: any spaces after '~' and before '}' are treated as part of the regex.
+                          The regex can't contain '}' char itself, to avoid ambiguity with terminating '}'
+                          (use {~regex~} syntax instead).
 
-    <div message>...       -- Each word on attribute list: attribute name, or a value surrounded by quotes, spaces or =, 
-                              is treated as a separate item. Surrounding items (and entire attributes) are matched implicitly, 
-                              so you can specify one item without worrying about the rest. No need to use surrounding ".." 
-                              or to worry about unseen attributes and values that might be added to the tag in the future.
-                              Compare this to the weirdness of the XPath expression that's needed to match just one class 
-                              in a multi-class element, like "title" in class="long wide title", 
-                              when the ordering of names is unknown:
-                                  xpath = "//div[contains(concat(' ', normalize-space(@class), ' '), ' title ')]"
-                              Using redex patterns is a lot easier:
-                              
-                              >>> match1('<div title>{TITLE}</div>', '<div style="width:800px" class="long title wide">About this website</div>')
-                              'About this website'
-    
-    <. price>              -- Dot (.) after '<' matches any tag name. If you don't know whether the element of interest 
-                              is a <div>, or a <p>, or a <table>, or a <span>, ... or you just want to abstract from 
-                              the particular name, use "<." to match any tag.
-                              Note that here, the dot behaves slightly differently than the general-purpose dot
-                              used in other places: when replacing a tag name, it matches at least 1 character (no empty string), 
-                              the match is greedy and it must terminate on a word boundary (space or end of tag).
-                               
-                              >>> match1('<. price>{PRICE}</.>', '<span class="price">$9.99</span>')
-                              '$9.99'
+                          >>> match1('<a ./{ID~\d+}>', '<a href="http://www.flickr.com/photos/atelier/738724">')
+                          '738724'
 
-    {VAR ...}              -- Braces define a *variable*: a named subexpression, equivalent to a *group* in a regex pattern.
-                              After matching, the string matched by the expression is returned under the name of the variable.
-                              Definition of a variable has a form of {NAME expression}, where NAME is the variable name
-                              (case-sensitive, typically written in all-caps to distinguish from static parts of the pattern);
-                              and 'expression' is any redex pattern, possibly containing other nested variables.
-                              The 'expression' can be omitted ({NAME}), in such case the default pattern ".." (2-dots) is assumed.
-                              By default, Pattern.match() returns an ObjDict of all variables, which is a regular dict
-                              extended with object-like access to values:
+    {~regex~}          -- Braces with inner tildes and an expression inside denote an unnamed regex pattern:
+                          the regex is matched just like a {VAR~regex} variable, but the matched string is not extracted.
+                          Enables inclusion of arbitrary regex sub-patterns in a redex pattern.
+                          In contrary to {VAR~regex} syntax, here the right brace '}' is allowed inside 'regex',
+                          and only a tilde-brace pair '~}' is disallowed.
+                          This enables the use of {min,max} construct inside the regular expression.
+                          If you want to use a regex containing '~}', split it into two separate regexes.
 
-                              >>> items = match('<a href="{URL ./photos/{USER ~}/{ID}/}">', '<a href="http://www.flickr.com/photos/atelier/738724/">')
-                              >>> items
-                              {'URL': 'http://www.flickr.com/photos/atelier/738724/', 'USER': 'atelier', 'ID': '738724'}
-                              >>> items['USER']
-                              'atelier'
-                              >>> items.USER
-                              'atelier'
-                              
-                              If you want the standard 'dict' to be returned instead, set dicttype=dict inside your Pattern subclass.
-                              If you wish that names of variables in the result are all changed to lowercase
-                              (convenient if you want to use them as object properties later on), set tolower=True in your pattern:
-                              
-                              >>> pat = Pattern('{FRUIT1 ~} and {FRUIT2 ~}')
-                              >>> pat.tolower = True
-                              >>> items = pat.match('apples and oranges')
-                              >>> items.fruit1, items.fruit2
-                              ('apples', 'oranges')
-                              
-                              By default, all variables which do NOT contain 3-dots '...' and thus match only regular text
-                              without tags, undergo HTML cleansing after extraction: striping of leading/trailing spaces,
-                              merging of multiple whitespaces (incl. newlines and tabs) into a single regular space ' ',
-                              and HTML entity decoding.
-                              To switch this behavior off, set 'html' property of your Pattern subclass to False,
-                              either permanently in the subclass definition or before calling Pattern.match().
-                              Compare the two calls below, the 1st one executed with the default setting of html=True,
-                              and the 2nd one with 'html' changed to False:
-                              
-                              >>> pat = Pattern('<td>{CELL}</td>')
-                              >>> pat.match1('<td>  apples \\n &amp; oranges  </td>')
-                              'apples & oranges'
-                              >>> pat.html = False
-                              >>> pat.match1('<td>  apples \\n &amp; oranges  </td>')
-                              '  apples \\n &amp; oranges  '
-                              
-                              However, if the variable contains 3-dots '...', no cleansing is performed regardless of 'html' setting:
-                              
-                              >>> match1('<tr> {ROW ...} </tr>', '<tr><td>  apples \\n &amp; oranges  </td></tr>')
-                              '<td>  apples \\n &amp; oranges  </td>'
+                          >>> match1('<a ./{ID {~\d{6}~}}>', '<a href="http://www.flickr.com/photos/atelier/738724">')
+                          '738724'
 
-    {VAR~regex}            -- If the variable name is followed immediately by a tilde (~), the remaining part of variable definition
-                              is treated as a raw regex - not redex - expression.
-                              This is useful for matching arbitrary regex sub-patterns, 
-                              to handle complex cases not covered by basic redex syntax.
-                              Watch out: any spaces after '~' and before '}' are treated as part of the regex.
-                              The regex can't contain '}' char itself, to avoid ambiguity with terminating '}'
-                              (use {~regex~} syntax instead).
-    
-                              >>> match1('<a ./{ID~\d+}>', '<a href="http://www.flickr.com/photos/atelier/738724">')
-                              '738724'
+    {* expr} {+ expr}  -- Zero-or-more and one-or-more repetitions of a given redex expression 'expr'.
+                          The expression can contain nested variables {* ..{X}..}, and/or hold a name itself: {*ITEM ...}.
+                          In both cases, the returned value of each variable is a *list* of strings 
+                          extracted by all repetitions rather than a single string.
+                          
+                          >>> match('{* ...<td>{ARTICLE}</td><td>{PRICE}</td>}', 
+                          ...       '<tr><td>Pen</td><td>$3.50</td></tr> '
+                          ...       '<tr><td>Pencil</td><td>$2.00</td></tr> '
+                          ...       '<tr><td>Eraser</td><td>$1.50</td></tr> ')
+                          {'ARTICLE': ['Pen', 'Pencil', 'Eraser'], 'PRICE': ['$3.50', '$2.00', '$1.50']}
 
-    {~regex~}              -- Braces with inner tildes and an expression inside denote an unnamed regex pattern:
-                              the regex is matched just like a {VAR~regex} variable, but the matched string is not extracted.
-                              Enables inclusion of arbitrary regex sub-patterns in a redex pattern.
-                              In contrary to {VAR~regex} syntax, here the right brace '}' is allowed inside 'regex',
-                              and only a tilde-brace pair '~}' is disallowed.
-                              This enables the use of {min,max} construct inside the regular expression.
-                              If you want to use a regex containing '~}', split it into two separate regexes.
+    {*+ ...} {++ ...}  -- You can use possessive quantifiers and atomic grouping to achieve finer control over 
+    {> ...}               regex backtracking and optimize the speed of regex matching. For more information, see:
+                              www.regular-expressions.info/possessive.html
+                              www.regular-expressions.info/atomic.html
 
-                              >>> match1('<a ./{ID {~\d{6}~}}>', '<a href="http://www.flickr.com/photos/atelier/738724">')
-                              '738724'
+    [optional]         -- Square brackets [expr] enclose an optional expression: matched if possible,
+                          but skipped if a matching - starting at the current position, where the preceeding match ended
+                          - can't be found. If a skipped optional expression contained variables, their values will be None.
+                          Optional expressions and variables can be nested in each other.
+                          
+                          >>> pat = '<li> {ENTRY [<img src="{AVATAR}">] {NAME}} </li>'
+                          >>> match(pat, '<li><img src="http://domain.com/john.png"> John Smith </li>')
+                          {'ENTRY': '<img src="http://domain.com/john.png"> John Smith', 'AVATAR': 'http://domain.com/john.png', 'NAME': 'John Smith'}
+                          >>> match(pat, '<li> Ken Edwards </li>')
+                          {'ENTRY': 'Ken Edwards', 'AVATAR': None, 'NAME': 'Ken Edwards'}
+                          
+                          Be careful when using optional expressions. They may often exhibit unexpected behavior,
+                          caused by the complex structure of backtracking during the regex matching process.
+                          The possibily of finding a match depends on what preceeding string (prefix)
+                          has been matched currently. Moreover, the necessity to match actual data instead of 
+                          an empty string depends on what next expression follows after the optional block
+                          and whether it enforces the optional to find a long match.
+                          
+                          Let's see an example.
+                          
+                          >>> match('. [tail]', "head tail")
+                          ''
+                          
+                          Here, one might expect that the pattern would match entire "head tail" string.
+                          This is not the case because the dot '.' performs a *lazy* match 
+                          (matches as few characters as possible), so it first tries to match an empty string,
+                          which succeeds, than matches the space ' ' to an empty string, too,
+                          and only than tries to match '[tail]' to "head tail", which also succeeds (!),
+                          by (unexpectedly) ignoring the optional expression in its entirety.
+                          
+                          To solve this problem, you can either replace the dot with a tilde, 
+                          which performs a more constraint match - not only that it matches exactly one non-empty word,
+                          but also the match is greedy and tries to match as many characters as possible:
+                          
+                          >>> match('~ [tail]', "head tail")
+                          'head tail'
+                          
+                          Alternatively, you can move the dot and put it inside the optional expression:
+                          
+                          >>> match('[. tail]', "head tail")
+                          'head tail'
+                          
+                          It is a good general rule to:
+                          - use the most constrained expression that's possible in a given place, 
+                            when choosing between '~', '.', '..' and '...'
+                          - never put dots before optional or repeated expressions: [...], {*...},
+                            but rather include them inside the expression.
+                          
 
-    {* expr} {+ expr}      -- Zero-or-more and one-or-more repetitions of a given redex expression 'expr'.
-                              The expression can contain nested variables {* ..{X}..}, and/or hold a name itself: {*ITEM ...}.
-                              In both cases, the returned value of each variable is a *list* of strings 
-                              extracted by all repetitions rather than a single string.
-                              
-                              >>> match('{* ...<td>{ARTICLE}</td><td>{PRICE}</td>}', 
-                              ...       '<tr><td>Pen</td><td>$3.50</td></tr> '
-                              ...       '<tr><td>Pencil</td><td>$2.00</td></tr> '
-                              ...       '<tr><td>Eraser</td><td>$1.50</td></tr> ')
-                              {'ARTICLE': ['Pen', 'Pencil', 'Eraser'], 'PRICE': ['$3.50', '$2.00', '$1.50']}
-
-    {*+ ...} {++ ...}      -- You can use possessive quantifiers and atomic grouping to achieve finer control over 
-    {> ...}                   regex backtracking and optimize the speed of regex matching. For more information, see:
-                                  www.regular-expressions.info/possessive.html
-                                  www.regular-expressions.info/atomic.html
-
-    [optional]             -- Square brackets [expr] enclose an optional expression: matched if possible,
-                              but skipped if a matching - starting at the current position, where the preceeding match ended
-                              - can't be found. If a skipped optional expression contained variables, their values will be None.
-                              Optional expressions and variables can be nested in each other.
-                              
-                              >>> pat = '<li> {ENTRY [<img src="{AVATAR}">] {NAME}} </li>'
-                              >>> match(pat, '<li><img src="http://domain.com/john.png"> John Smith </li>')
-                              {'ENTRY': '<img src="http://domain.com/john.png"> John Smith', 'AVATAR': 'http://domain.com/john.png', 'NAME': 'John Smith'}
-                              >>> match(pat, '<li> Ken Edwards </li>')
-                              {'ENTRY': 'Ken Edwards', 'AVATAR': None, 'NAME': 'Ken Edwards'}
-                              
-                              Be careful when using optional expressions. They may often exhibit unexpected behavior,
-                              caused by the complex structure of backtracking during the regex matching process.
-                              The possibily of finding a match depends on what preceeding string (prefix)
-                              has been matched currently. Moreover, the necessity to match actual data instead of 
-                              an empty string depends on what next expression follows after the optional block
-                              and whether it enforces the optional to find a long match.
-                              
-                              Let's see an example.
-                              
-                              >>> match('. [tail]', "head tail")
-                              ''
-                              
-                              Here, one might expect that the pattern would match entire "head tail" string.
-                              This is not the case because the dot '.' performs a *lazy* match 
-                              (matches as few characters as possible), so it first tries to match an empty string,
-                              which succeeds, than matches the space ' ' to an empty string, too,
-                              and only than tries to match '[tail]' to "head tail", which also succeeds (!),
-                              by (unexpectedly) ignoring the optional expression in its entirety.
-                              
-                              To solve this problem, you can either replace the dot with a tilde, 
-                              which performs a more constraint match - not only that it matches exactly one non-empty word,
-                              but also the match is greedy and tries to match as many characters as possible:
-                              
-                              >>> match('~ [tail]', "head tail")
-                              'head tail'
-                              
-                              Alternatively, you can move the dot and put it inside the optional expression:
-                              
-                              >>> match('[. tail]', "head tail")
-                              'head tail'
-                              
-                              It is a good general rule to:
-                              - use the most constrained expression that's possible in a given place, 
-                                when choosing between '~', '.', '..' and '...'
-                              - never put dots before optional or repeated expressions: [...], {*...},
-                                but rather include them inside the expression.
-                              
-
-    {.} {{} {}}            -- To match an occurence of a redex-special character, enclose it in braces; a brace itself can also be enclosed:
+    {.} {{} {}}        -- To match an occurence of a redex-special character, enclose it in braces; a brace itself can also be enclosed:
     {~} {[} {]} 
-                              >>> print match('{.} {{} {}} {~} {[} {]}', '. { } ~ [ ]')
-                              . { } ~ [ ]
-                              
-                              
-    VALUE CONVERSIONS.
-    
-    All extracted variables are strings by default. You can request that they are automatically casted onto other data types,
-    and/or their values are converted, by defining 'convert' property of the Pattern, which is a dictionary of variables' names
-    and corresponding types or converter functions that shall be applied to extracted values before returning them to the caller.
-    
-        >>> class Pat(Pattern):
-        ...     pattern = "<a {URL /comment/{USER}/{ID}}> {DATE} </a>"
-        ...     convert = {'URL': url, 'USER': url_unquote, 'ID': pint, 'DATE': pdate}
-        ...
-        >>> Pat().match('<a href="/comment/billy%20the%20kid/34"> July 25, 2015 </a>')
-        {'URL': '/comment/billy%20the%20kid/34', 'DATE': datetime.date(2015, 7, 25), 'USER': 'billy the kid', 'ID': 34}
-    
-    The 'url' converter is special, because it accepts an additional parameter upon conversion: 
-    the URL of the page being scraped, 'baseurl', that is used for converting relative URLs in the page to absolute ones. 
-    When calling Pattern.match(), you can specify a 'baseurl' and it will be forwarded to all 'url' converters:
-    
-        >>> items = Pat().match('<a href="/comment/billy%20the%20kid/34"> July 25, 2015 </a>', baseurl = "http://www.domain.com/home")
-        >>> items['URL']
-        'http://www.domain.com/comment/billy%20the%20kid/34'
-    
-    None values (from optional expressions) are NOT passed through converters but returned as-is.
-    If a variable appears inside repeated expression, like {+ ..{NAME}..}, and multiple strings are extracted,
-    the converter is applied to EACH string independently rather than to a list.
-    
-    Keys in 'convert' dictionary can comprise multiple names, for brevity (multi-keys). For example:
-        {"PRICE CHANGE VOLUME": pdecimal}
-    Additionaly, keys can contain '*' wildcard to match all names of a given form, like:
-        {"URL_*": url}
-    
-    Standard converters provided along with Pattern include:
-        url, url_unquote, pdate, pdatetime, pint, pfloat, pdecimal, percent.
-    
-    You can use these ones and/or define your own. In the latter case, each converter should be a function that takes 
-    an extracted string and casts/converts it to a destination type/value. In 'convert' dict, you can also specify a class
-    instead of a function, which will instantiate objects of this class upon conversion, passing the raw value 
-    to this class'es __init__().
-    
-    Moreover, you can use patterns as converters themselves. The inner pattern (converter) will be applied to the extracted string
-    passed as an input document, and a whole dictionary (or object) of extracted values will be returned 
-    as a value of the variable of the outer pattern. Effectively, this mechanism allows patterns to be nested in each other.
-    
-    Last but not least, you can implement custom post-processing of all extracted values at once
-    by overloading Pattern's 'epilog' method. This method takes a dict of extracted items after all conversions,
-    together with the original document, and either returns a new dict of items, or modifies the input dict in-place.
-    Epilog can not only change existing values, but also remove variables or add new ones to the result,
-    for instance, by implementing additional custom extraction based on the provided document object.
-    See Pattern.epilog() for details.
+                          >>> print match('{.} {{} {}} {~} {[} {]}', '. { } ~ [ ]')
+                          . { } ~ [ ]
+                          
+                          
+VALUE CONVERSIONS.
 
-    
-    EMBEDDED UNIT TESTS.
-    
-    Web pages evolve. Sometimes their structure changes only slightly, due to minor fixes and updates in their design,
-    layout or contents. Another time, the structure may get redesigned entirely from scratch.
-    In any case, the corresponding pattern must be updated accordingly to handle new structure.
-    The critical thing to watch out is whether the updated pattern still handles all special cases of 
-    the page's appearance - all those special cases that were carefully analysed and implemented
-    in the first version of the pattern, and must not get lost now, when the pattern is being updated.
-    
-    In order to enable easy future verification of the pattern's behavior,
-    you can embed *unit tests* inside its class. 
-    Each test consists of a pair of class attributes named 'textX' and 'goalX',
-    with X being an integer (1,2,... for consecutive independent tests),
-    'testX' being a snippet of text that shall be used as an input document for pattern matching,
-    and 'goalX' being the expected output: a dictionary of extracted variables and their values.
-    When specifying the goal, you can use a shorthand for string-valued variables and write, for instance:
-        goal1 = "NAME1 value1", "NAME2 value2", {...(remaining non-string values)...}
-   instead of:
-        goal1 = {"NAME1": "value1", "NAME2": "value2", ...}
-    
-    Whenever Python comes across a definition of a new Pattern subclass, it automatically invokes all tests 
-    present inside. This behavior is implemented in Pattern's custom metaclass, __Pattern__,
-    and is launched just after a new class is created (the class itself, not an instance!).
-    Upon execution, all failing tests will print detailed log to stdout. Successful tests will stay quiet.
-    
-    If a given test doesn't have a goal defined (the attribute 'goalX' is missing),
-    the extracted dictionary of values is printed to stdout instead of being passed to verification.
-    Moreover, it is printed in a form suitable for direct inclusion in corresponding goalX.
-    Thus, when writing a new test, you can first: write testN without goalN, to see what output is produced 
-    by the pattern; verify manually that the output is correct; and only then copy-paste it as goalN = ...,
-    to keep a record for future reference when the pattern needs to be updated.
-       
-    If you want to switch off the tests, set autotest=False inside a given Pattern subclass,
-    or Pattern.autotest=False to change global behavior.
-    
+All extracted variables are strings by default. You can request that they are automatically casted onto other data types,
+and/or their values are converted, by defining 'convert' property of the Pattern, which is a dictionary of variables' names
+and corresponding types or converter functions that shall be applied to extracted values before returning them to the caller.
 
-    PRACTICAL GUIDELINES.
-    
-    When implementing redex patterns, it is helpful to understand what functional types of expressions can occur in the pattern:
-     * STATIC EXPRESSION - any expression that behaves similarly to static text, in that it obligatory matches a non-empty string.
-                           Static expression may contain variables and tildes ~, but not optional blocks [], repetitions {* } {+ }
-                           or lazy fillers (1-, 2-, 3-dots, explicit or implicit).
-                           Static expressions serve as pillars that support correct specification of all parts of the pattern
-                           and improve speed of pattern matching.
-     * REFERENCE POINTS - static expressions located outside optional blocks, in different places of the pattern. 
-                          They help position optional subpatterns relative to other parts of the document and ensure 
-                          global consistency of the pattern.
-     * GUARDS - static expressions that surround a variable, like "<td>" and "</td>" in "<td>{DATA}</td>". They position the variable 
-                precisely in relation to neighboring text and protect against *over-matching*.
-     * CLOSING ANCHOR - a static expression inside optional block, located at its end, like "</p>" in: "[... </p>]".
-                        Enforces maximum match of the inner pattern of optional block and protects against *under-matching* 
-                        of variables and fillers contained inside [].
-     
-    When devising a redex pattern, it is best to start with a real snippet of HTML code extracted from the actual document
-    to be parsed, and then convert it step by step to a redex pattern, by removing unnecessary parts, 
-    inserting fillers and optionality markers, reducing repeated subexpressions to {* } or {+ } blocks,
-    and replacing meaningful parts with variables.
-    Usually, pattern matching is applied to a specific node in HTML syntax tree of the document,
-    thus it is easiest to extract the snippet with tools like FireBug, by visually selecting the page block to be processed,
-    and then copy-pasting all its raw HTML contents.
-    
-    A typical procedure for converting HTML snippet to a redex may look like this:
-     - In the snippet, replace all occurences of values to be extracted with {NAME} or {NAME subpattern} or {*NAME ...}.
-       Put explicit 3-dots '...' inside {} wherever text containing tags must be matched 
-       (2-dots '..' are put by default when no sub-pattern is given).
-     - Remove unnecessary parts of text by replacing them with ~ (word) or . (non-space sequence) or .. (non-tag sequence) or ... (any sequence):
-       - tagged parts of the document replace with ... (matches all chars, including tags)
-       - untagged text between tags replace with .. (matches all chars except <>)
-       - sequence of non-space chars replace with . (matches all except <> and spaces)
-       - regular words comprising only alpha-numeric characters replace with ~ 
-       - tag attributes list inside <> replace with a space, or ., or .., or just nothing (the latter works best in many cases)
-       - tag name inside <> replace with a dot '.'
-       Ensure that every variable {} is still surrounded by enough amount of static text (GUARDS / REFERENCE POINTS) 
-       to uniquely identify its location in the document.
-     - Insert a space wherever 1+ spaces may occur in the document between remaining static parts.
-       Neighboring tags don't need a space: whitespaces between > and < are matched implicitly.
-     - Mark non-obligatory parts of the pattern by surrounding them with []. If the part starts with . or .. or ..., 
-       include them inside [] if only possible (do this even if the optional block is the 1st sub-expression of the pattern).
-       Remember to put a CLOSING ANCHOR at the end of [], to avoid under-matching of the optional block.
-     - If pattern matching works too slow - which may happen particularly on negative examples, due to more laborious regex backtracking
-       needed to check all possible matchings paths - add more REFERENCE POINTS.
-       If the problem persists (rare case), try to manually limit backtracking by applying atomic grouping {>...}
-       or possessive quantifiers {*+ }, {++ } - but note that these constructs change semantics of the pattern,
-       so you should use them with care, only when you are certain that they don't break the pattern.
-     
-    Keep in mind:
-     - Most of the time, pattern matching is LAZY: it matches as few characters as possible, 
-       and quite often an empty string turns out to be a correct match.
-       This happens not only with entire pattern, but also with its sub-expressions, esp. when [...] is used.
-       Thus, you should always put GUARDS at the end of (sub)expressions: static pieces of text 
-       or other obligatory expressions that would force the preceding expression to match as much as possible,
-       until the guard is matched, too. Without guards, you may encounter unexpected behavior: 
-       the pattern can miss parts of the document despite they ARE present there.
-     - When extracting URLs or their portions, ALWAYS use url() or url_unquote() converters, 
-       to ensure proper unquoting of extracted strings and to convert relative URLs to absolute ones.
-     - When implementing a new pattern, you can set verbose=True inside the class to request debug information
-       be printed out when the pattern gets defined and compiled.
-       The print out includes list of all variables detected and the regex string produced from compilation.
-     - If you need online interactive testing of regex-es for debugging purposes, check sites like http://gskinner.com/RegExr/
-    
+    >>> class Pat(Pattern):
+    ...     pattern = "<a {URL /comment/{USER}/{ID}}> {DATE} </a>"
+    ...     convert = {'URL': url, 'USER': url_unquote, 'ID': pint, 'DATE': pdate}
+    ...
+    >>> Pat().match('<a href="/comment/billy%20the%20kid/34"> July 25, 2015 </a>')
+    {'URL': '/comment/billy%20the%20kid/34', 'DATE': datetime.date(2015, 7, 25), 'USER': 'billy the kid', 'ID': 34}
+
+The 'url' converter is special, because it accepts an additional parameter upon conversion: 
+the URL of the page being scraped, 'baseurl', that is used for converting relative URLs in the page to absolute ones. 
+When calling Pattern.match(), you can specify a 'baseurl' and it will be forwarded to all 'url' converters:
+
+    >>> items = Pat().match('<a href="/comment/billy%20the%20kid/34"> July 25, 2015 </a>', baseurl = "http://www.domain.com/home")
+    >>> items['URL']
+    'http://www.domain.com/comment/billy%20the%20kid/34'
+
+None values (from optional expressions) are NOT passed through converters but returned as-is.
+If a variable appears inside repeated expression, like {+ ..{NAME}..}, and multiple strings are extracted,
+the converter is applied to EACH string independently rather than to a list.
+
+Keys in 'convert' dictionary can comprise multiple names, for brevity (multi-keys). For example:
+    {"PRICE CHANGE VOLUME": pdecimal}
+Additionaly, keys can contain '*' wildcard to match all names of a given form, like:
+    {"URL_*": url}
+
+Standard converters provided along with Pattern include:
+    url, url_unquote, pdate, pdatetime, pint, pfloat, pdecimal, percent.
+
+You can use these ones and/or define your own. In the latter case, each converter should be a function that takes 
+an extracted string and casts/converts it to a destination type/value. In 'convert' dict, you can also specify a class
+instead of a function, which will instantiate objects of this class upon conversion, passing the raw value 
+to this class'es __init__().
+
+Moreover, you can use patterns as converters themselves. The inner pattern (converter) will be applied to the extracted string
+passed as an input document, and a whole dictionary (or object) of extracted values will be returned 
+as a value of the variable of the outer pattern. Effectively, this mechanism allows patterns to be nested in each other.
+
+Last but not least, you can implement custom post-processing of all extracted values at once
+by overloading Pattern's 'epilog' method. This method takes a dict of extracted items after all conversions,
+together with the original document, and either returns a new dict of items, or modifies the input dict in-place.
+Epilog can not only change existing values, but also remove variables or add new ones to the result,
+for instance, by implementing additional custom extraction based on the provided document object.
+See Pattern.epilog() for details.
+
+
+EMBEDDED UNIT TESTS.
+
+Web pages evolve. Sometimes their structure changes only slightly, due to minor fixes and updates in their design,
+layout or contents. Another time, the structure may get redesigned entirely from scratch.
+In any case, the corresponding pattern must be updated accordingly to handle new structure.
+The critical thing to watch out is whether the updated pattern still handles all special cases of 
+the page's appearance - all those special cases that were carefully analysed and implemented
+in the first version of the pattern, and must not get lost now, when the pattern is being updated.
+
+In order to enable easy future verification of the pattern's behavior,
+you can embed *unit tests* inside its class. 
+Each test consists of a pair of class attributes named 'textX' and 'goalX',
+with X being an integer (1,2,... for consecutive independent tests),
+'testX' being a snippet of text that shall be used as an input document for pattern matching,
+and 'goalX' being the expected output: a dictionary of extracted variables and their values.
+When specifying the goal, you can use a shorthand for string-valued variables and write, for instance:
+    goal1 = "NAME1 value1", "NAME2 value2", {...(remaining non-string values)...}
+instead of:
+    goal1 = {"NAME1": "value1", "NAME2": "value2", ...}
+
+Whenever Python comes across a definition of a new Pattern subclass, it automatically invokes all tests 
+present inside. This behavior is implemented in Pattern's custom metaclass, __Pattern__,
+and is launched just after a new class is created (the class itself, not an instance!).
+Upon execution, all failing tests will print detailed log to stdout. Successful tests will stay quiet.
+
+If a given test doesn't have a goal defined (the attribute 'goalX' is missing),
+the extracted dictionary of values is printed to stdout instead of being passed to verification.
+Moreover, it is printed in a form suitable for direct inclusion in corresponding goalX.
+Thus, when writing a new test, you can first: write testN without goalN, to see what output is produced 
+by the pattern; verify manually that the output is correct; and only then copy-paste it as goalN = ...,
+to keep a record for future reference when the pattern needs to be updated.
+   
+If you want to switch off the tests, set autotest=False inside a given Pattern subclass,
+or Pattern.autotest=False to change global behavior.
+
+
+PRACTICAL GUIDELINES.
+
+When implementing redex patterns, it is helpful to understand what functional types of expressions can occur in the pattern:
+ * STATIC EXPRESSION - any expression that behaves similarly to static text, in that it obligatory matches a non-empty string.
+                       Static expression may contain variables and tildes ~, but not optional blocks [], repetitions {* } {+ }
+                       or lazy fillers (1-, 2-, 3-dots, explicit or implicit).
+                       Static expressions serve as pillars that support correct specification of all parts of the pattern
+                       and improve speed of pattern matching.
+ * REFERENCE POINTS - static expressions located outside optional blocks, in different places of the pattern. 
+                      They help position optional subpatterns relative to other parts of the document and ensure 
+                      global consistency of the pattern.
+ * GUARDS - static expressions that surround a variable, like "<td>" and "</td>" in "<td>{DATA}</td>". They position the variable 
+            precisely in relation to neighboring text and protect against *over-matching*.
+ * CLOSING ANCHOR - a static expression inside optional block, located at its end, like "</p>" in: "[... </p>]".
+                    Enforces maximum match of the inner pattern of optional block and protects against *under-matching* 
+                    of variables and fillers contained inside [].
+
+When devising a redex pattern, it is best to start with a real snippet of HTML code extracted from the actual document
+to be parsed, and then convert it step by step to a redex pattern, by removing unnecessary parts, 
+inserting fillers and optionality markers, reducing repeated subexpressions to {* } or {+ } blocks,
+and replacing meaningful parts with variables.
+Usually, pattern matching is applied to a specific node in HTML syntax tree of the document,
+thus it is easiest to extract the snippet with tools like FireBug, by visually selecting the page block to be processed,
+and then copy-pasting all its raw HTML contents.
+
+A typical procedure for converting HTML snippet to a redex may look like this:
+ - In the snippet, replace all occurences of values to be extracted with {NAME} or {NAME subpattern} or {*NAME ...}.
+   Put explicit 3-dots '...' inside {} wherever text containing tags must be matched 
+   (2-dots '..' are put by default when no sub-pattern is given).
+ - Remove unnecessary parts of text by replacing them with ~ (word) or . (non-space sequence) or .. (non-tag sequence) or ... (any sequence):
+   - tagged parts of the document replace with ... (matches all chars, including tags)
+   - untagged text between tags replace with .. (matches all chars except <>)
+   - sequence of non-space chars replace with . (matches all except <> and spaces)
+   - regular words comprising only alpha-numeric characters replace with ~ 
+   - tag attributes list inside <> replace with a space, or ., or .., or just nothing (the latter works best in many cases)
+   - tag name inside <> replace with a dot '.'
+   Ensure that every variable {} is still surrounded by enough amount of static text (GUARDS / REFERENCE POINTS) 
+   to uniquely identify its location in the document.
+ - Insert a space wherever 1+ spaces may occur in the document between remaining static parts.
+   Neighboring tags don't need a space: whitespaces between > and < are matched implicitly.
+ - Mark non-obligatory parts of the pattern by surrounding them with []. If the part starts with . or .. or ..., 
+   include them inside [] if only possible (do this even if the optional block is the 1st sub-expression of the pattern).
+   Remember to put a CLOSING ANCHOR at the end of [], to avoid under-matching of the optional block.
+ - If pattern matching works too slow - which may happen particularly on negative examples, due to more laborious regex backtracking
+   needed to check all possible matchings paths - add more REFERENCE POINTS.
+   If the problem persists (rare case), try to manually limit backtracking by applying atomic grouping {>...}
+   or possessive quantifiers {*+ }, {++ } - but note that these constructs change semantics of the pattern,
+   so you should use them with care, only when you are certain that they don't break the pattern.
+ 
+Tips & tricks:
+ - Most of the time, pattern matching is LAZY: it matches as few characters as possible, 
+   and quite often an empty string turns out to be a correct match.
+   This happens not only with entire pattern, but also with its sub-expressions, esp. when [...] is used.
+   Thus, you should always put GUARDS at the end of (sub)expressions: static pieces of text 
+   or other obligatory expressions that would force the preceding expression to match as much as possible,
+   until the guard is matched, too. Without guards, you may encounter unexpected behavior: 
+   the pattern can miss parts of the document despite they ARE present there.
+ - When extracting URLs or their portions, ALWAYS use url() or url_unquote() converters, 
+   to ensure proper unquoting of extracted strings and to convert relative URLs to absolute ones.
+ - When implementing a new pattern, you can set verbose=True inside the class to request debug information
+   be printed out when the pattern gets defined and compiled.
+   The print out includes list of all variables detected and the regex string produced from compilation.
+ - Troubleshooting. When the pattern doesn't work, try removing part of it, say the 2nd half,
+   and check if it works in the shorter form. If not, cut it again and again. In this way, you can easily track down
+   the place which causes problems.
+ - If you need online interactive testing of regex-es for debugging purposes, check sites like http://gskinner.com/RegExr/
+
 
 ---
 Dependencies: waxeye 0.8.0, regex 2013-03-11.
