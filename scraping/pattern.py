@@ -110,6 +110,8 @@
 
     <p>...</p>             -- Three or more dots (...) match any sequence of 0+ characters, including tags ('<' and '>' allowed).
                               Cannot be used inside tags: between < and >.
+                              The dots . .. ... and the tilde ~ are called jointly the *fillers*.
+                              
                               >>> match1('<p>{TEXT ...}</p>', '<p><u>Apples</u> and <i>oranges</i></p>')
                               '<u>Apples</u> and <i>oranges</i>'
 
@@ -377,31 +379,52 @@
 
     PRACTICAL GUIDELINES.
     
-    How to write a pattern that matches a given HTML snippet:
+    When implementing redex patterns, it is helpful to understand what functional types of expressions can occur in the pattern:
+     * STATIC EXPRESSION - any expression that behaves similarly to static text, in that it obligatory matches a non-empty string.
+                           Static expression may contain variables and tildes ~, but not optional blocks [], repetitions {* } {+ }
+                           or lazy fillers (1-, 2-, 3-dots, explicit or implicit).
+                           Static expressions serve as pillars that support correct specification of all parts of the pattern
+                           and improve speed of pattern matching.
+     * REFERENCE POINTS - static expressions located outside optional blocks, in different places of the pattern. 
+                          They help position optional subpatterns relative to other parts of the document and ensure 
+                          global consistency of the pattern.
+     * GUARDS - static expressions that surround a variable, like "<td>" and "</td>" in "<td>{DATA}</td>". They position the variable 
+                precisely in relation to neighboring text and protect against *over-matching*.
+     * CLOSING ANCHOR - a static expression inside optional block, located at its end, like "</p>" in: "[... </p>]".
+                        Enforces maximum match of the inner pattern of optional block and protects against *under-matching* 
+                        of variables and fillers contained inside [].
+     
+    When devising a redex pattern, it is best to start with a real snippet of HTML code extracted from the actual document
+    to be parsed, and then convert it step by step to a redex pattern, by removing unnecessary parts, 
+    inserting fillers and optionality markers, reducing repeated subexpressions to {* } or {+ } blocks,
+    and replacing meaningful parts with variables.
+    Usually, pattern matching is applied to a specific node in HTML syntax tree of the document,
+    thus it is easiest to extract the snippet with tools like FireBug, by visually selecting the page block to be processed,
+    and then copy-pasting all its raw HTML contents.
+    
+    A typical procedure for converting HTML snippet to a redex may look like this:
      - In the snippet, replace all occurences of values to be extracted with {NAME} or {NAME subpattern} or {*NAME ...}.
-       Remember to put explicit 3-dots '...' inside {} if you want to match strings with tags. 
-       2-dots '..' are used by default when no expression is given inside {}.
-     - Cut out unnecessary parts of text by replacing them with ~ (word) or . (non-space sequence) or .. (non-tag sequence) or ... (any sequence):
-       - tag contents inside <> replace with a space, or ., or .., or just nothing (the latter works best in many cases)
+       Put explicit 3-dots '...' inside {} wherever text containing tags must be matched 
+       (2-dots '..' are put by default when no sub-pattern is given).
+     - Remove unnecessary parts of text by replacing them with ~ (word) or . (non-space sequence) or .. (non-tag sequence) or ... (any sequence):
        - tagged parts of the document replace with ... (matches all chars, including tags)
        - untagged text between tags replace with .. (matches all chars except <>)
        - sequence of non-space chars replace with . (matches all except <> and spaces)
        - regular words comprising only alpha-numeric characters replace with ~ 
-       Ensure that every variable {} is still surrounded by enough amount of static text (REFERENCE POINTS / GUARDS) 
+       - tag attributes list inside <> replace with a space, or ., or .., or just nothing (the latter works best in many cases)
+       - tag name inside <> replace with a dot '.'
+       Ensure that every variable {} is still surrounded by enough amount of static text (GUARDS / REFERENCE POINTS) 
        to uniquely identify its location in the document.
-     - Insert a space wherever 1+ spaces may occur in the document. Neighboring tags don't need a space:
-       whitespaces between > and < are matched implicitly.
+     - Insert a space wherever 1+ spaces may occur in the document between remaining static parts.
+       Neighboring tags don't need a space: whitespaces between > and < are matched implicitly.
      - Mark non-obligatory parts of the pattern by surrounding them with []. If the part starts with . or .. or ..., 
-       include them inside [] if only possible (this is necessary even if the optional block is the 1st sub-expression of the pattern).
-       Remember to leave a CLOSING ANCHOR after []: a static text just after the closing bracket ], 
-       to avoid under-matching of the [] block (enforce maximum match).
-     - If the pattern works slow, which may happen especially on negative examples (!), add more reference points or atomic grouping {>...}.
-     
-    Practical guidelines for writing Patterns:
-     * REFERENCE POINTS - characteristic and *always* present (non-optional) substrings in several different places of the pattern, 
-        which help situate optional subpatterns relative to each other.
-     * GUARDS around variables - to precisely position the variable; avoid *over-matching*; kill spaces!
-     * CLOSING ANCHOR inside optional blocks - to force maximum match of the last included optional/variable; avoid *under-matching* 
+       include them inside [] if only possible (do this even if the optional block is the 1st sub-expression of the pattern).
+       Remember to put a CLOSING ANCHOR at the end of [], to avoid under-matching of the optional block.
+     - If pattern matching works too slow - which may happen particularly on negative examples, due to more laborious regex backtracking
+       needed to check all possible matchings paths - add more REFERENCE POINTS.
+       If the problem persists (rare case), try to manually limit backtracking by applying atomic grouping {>...}
+       or possessive quantifiers {*+ }, {++ } - but note that these constructs change semantics of the pattern,
+       so you should use them with care, only when you are certain that they don't break the pattern.
      
     Keep in mind:
      - Most of the time, pattern matching is LAZY: it matches as few characters as possible, 
@@ -409,22 +432,19 @@
        This happens not only with entire pattern, but also with its sub-expressions, esp. when [...] is used.
        Thus, you should always put GUARDS at the end of (sub)expressions: static pieces of text 
        or other obligatory expressions that would force the preceding expression to match as much as possible,
-       until the guard is matched, too.
-       Without guards, you may encounter unexpected behavior: the pattern will miss parts of the document 
-       despite these parts ARE present there.
-       
-     - When extracting URLs or their portions, ALWAYS use either url() or url_unquote() converters, to provide proper unquoting of extracted strings.
-     - If you need online interactive testing of regex-es for debugging, see http://gskinner.com/RegExr/
-
-    When implementing a new pattern, you can set verbose=True inside the class to request debug information
-    be printed on stdout when the pattern class gets defined and compiled.
-    The print out includes: pattern class name, list of variables detected, and the regex string 
-    produced during compilation of the pattern.
+       until the guard is matched, too. Without guards, you may encounter unexpected behavior: 
+       the pattern can miss parts of the document despite they ARE present there.
+     - When extracting URLs or their portions, ALWAYS use url() or url_unquote() converters, 
+       to ensure proper unquoting of extracted strings and to convert relative URLs to absolute ones.
+     - When implementing a new pattern, you can set verbose=True inside the class to request debug information
+       be printed out when the pattern gets defined and compiled.
+       The print out includes list of all variables detected and the regex string produced from compilation.
+     - If you need online interactive testing of regex-es for debugging purposes, check sites like http://gskinner.com/RegExr/
     
 
 ---
 Dependencies: waxeye 0.8.0, regex 2013-03-11.
-Pattern uses an improved and extended version of 're' module, the 'regex' - see http://pypi.python.org/pypi/regex
+This file uses an improved and extended version of 're' module, the 'regex' - see http://pypi.python.org/pypi/regex
 
 ---
 This file is part of Nifty python package. Copyright (c) 2009-2014 by Marcin Wojnarski.
@@ -660,6 +680,8 @@ class MetaPattern(type):
 
 class Pattern(object):
     """
+    Redex pattern.
+    
     >>> p = Pattern("  {* ... {A}}{B}  ")
     >>> v = p.semantics.variables; A, B = v['A'], v['B']
     >>> A.longfill, A.repeated, B.longfill, B.repeated

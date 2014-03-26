@@ -76,7 +76,7 @@ def logx(x):
     return np.log(abs(x) + 1) * np.sign(x)
 
 
-### Sigmoidal functions
+### Sigmoidal functions for use in predictive models and data processing
 
 def logistic(x, center = None, slope = None, deriv = False):
     "Logistic function: f(x) = 1/(1+e^(-x)). Derivative: f'(x) = f(x)*(1-f(x))"
