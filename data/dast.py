@@ -842,7 +842,6 @@ class DAST(object):
 
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)                    # one-time assignment of all properties
-        #self.parser = WaxeyeParser()
 
     def encode(self, obj, **kwargs):
         "Encode object hierarchy rooted at 'obj' and return the resulting code as a string."

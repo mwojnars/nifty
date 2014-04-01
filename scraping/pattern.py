@@ -443,14 +443,14 @@ Tips & tricks:
    until the guard is matched, too. Without guards, you may encounter unexpected behavior: 
    the pattern can miss parts of the document despite they ARE present there.
  - When extracting URLs or their portions, ALWAYS use url() or url_unquote() converters, 
-   to ensure proper unquoting of extracted strings and to convert relative URLs to absolute ones.
- - When implementing a new pattern, you can set verbose=True inside the class to request debug information
-   be printed out when the pattern gets defined and compiled.
-   The print out includes list of all variables detected and the regex string produced from compilation.
- - Troubleshooting. When the pattern doesn't work, try removing part of it, say the 2nd half,
+   to ensure proper unquoting of extracted strings and convert relative URLs to absolute ones.
+ - When implementing a new pattern, you can set verbose=True inside the class to request that debug information
+   is printed out when the pattern gets defined and compiled. The print out includes list of all variables detected 
+   and the regex string produced from compilation.
+ - Troubleshooting. When the pattern doesn't work, try removing a part of it, say the 2nd half,
    and check if it works in the shorter form. If not, cut it again and again. In this way, you can easily track down
    the place which causes problems.
- - If you need online interactive testing of regex-es for debugging purposes, check sites like http://gskinner.com/RegExr/
+ - If you need to test regexes, for debugging purposes, check online interactive sites like http://gskinner.com/RegExr/
 
 
 ---
@@ -516,7 +516,7 @@ BaseTree = parsing.WaxeyeTree
 
 class Tree(BaseTree):
 
-    Parser = pattern_parser.PatternParser
+    parser  = pattern_parser.PatternParser()
     Context = Context
 
     class node(BaseTree.node):
@@ -766,8 +766,7 @@ class Pattern(object):
         
     def _compile(self):                                                                                      #@ReservedAssignment
         "Translate the original reDex self.pattern into a regex pattern and compile to regex object."
-        parser = parsing.WaxeyeParser(Tree)
-        self.tree = parser.parse(self.pattern)
+        self.tree = Tree(self.pattern)
         regex, self.semantics = self.tree.compile()
         try:
             #regex = re.compile(regex, re.DOTALL)       # DOTALL: dot will match newline, too
