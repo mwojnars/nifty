@@ -712,8 +712,11 @@ class Tee(object):
          print >>out, "Message"
     """
     def __init__(self, *files):
-        "If only 1 file is given, stdout is appended automatically. If names not files are given, they will be opened in 'wt' mode (possible erasure if file exists!)."
-        self.files = [open(f,'wt') if isstring(f) else f for f in files]
+        """If only 1 file is given, stdout is appended automatically. If names not files are given, 
+        they will be opened in 'wt' mode (possible erasure if file exists!).
+        None, '' and 'stdout' denote stdout.
+        """
+        self.files = [sys.stdout if (not f or f == 'stdout') else open(f,'wt') if isstring(f) else f for f in files]
         if len(files) <= 1: self.files.append(sys.stdout)
     def write(self, obj):
         for f in self.files: f.write(obj)

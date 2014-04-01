@@ -3,6 +3,9 @@ Data pipes.
 Allow construction of complex networks (pipelines) of data processing units, that combined perform advanced operations, 
 and process large volumes of data (data streams) efficiently thanks to pipelining (processing one item at a time, instead of a full dataset).
 
+- All functional pipes (Operator, Monitor, Filter and subclasses) accept plain python functions 
+  as an argument to initializer. This function is called if the core method was left unimplemented.
+
 ---
 This file is part of Nifty python package. Copyright (c) 2009-2014 by Marcin Wojnarski.
 
@@ -16,9 +19,10 @@ You should have received a copy of the GNU General Public License along with Nif
 from __future__ import absolute_import
 import sys, heapq, math, numpy as np, jsonpickle, itertools, threading
 from copy import copy, deepcopy
-from itertools import islice
 from time import time, sleep
 from Queue import Queue
+from itertools import islice
+from collections import OrderedDict
 
 from nifty.util import isint, islist, isstring, issubclass, isfunction, iscontainer, istype, classname, getattrs, setattrs, divup, Tee
 from nifty.util import Object, __Object__, NoneLock
@@ -34,7 +38,7 @@ class Space(object):
     """A 1D set of values allowed for a given knob. Typically used to restrict the set of all real numbers to a discrete (finite or infinite) evenly-spaced subset.
     None is disallowed as a value (plays a special role). Can define also a probability density function on the space.
     """
-    name = None                 # optional name of the parameter represented by this space
+    #name = None                 # optional name of the parameter represented by this space
     
     def getKnob(self):
         "Return an empty (value = None) Knob instance that's compatible with this space and can subsequently be filled in with values of this space."
@@ -55,10 +59,17 @@ class Space(object):
     def move(self, start, step):
         "Try to make a move in the space from point 'start' by increment 'step'. Return target point or None if impossible to move."
 
+class Singular(Space):
+    "Space with only 1 value. The value can be of any type, no particular properties are required."
+    def __init__(self, value): self.value = value
+    def __len__(self): return 1
+    def __iter__(self): yield self.value
+        
+
 class Nominal(Space):
     "A finite discrete set of nominal values of any type (strings, numbers, ...), with no natural ordering. The ordering of values in the collection is used."
     def __init__(self, *values, **kwargs):
-        if kwargs: self.name = kwargs['name']
+        #self.name = kwargs.pop('name')
         if not len(set(values)) == len(values): raise Exception("Nominal: values provided are not unique, %s" % values)
         self.values = v = list(values)
         self.indices = {v[i]:i for i in range(len(v))}          # for metric operation on values from the space
@@ -80,16 +91,22 @@ class Nominal(Space):
 #     def __init__(self, values):
 #         self.values = values
     
-class Grid(Space):
+class Cartesian(Space):
     "Cartesian product of multiple Spaces. A multidimentional set of allowed values for a given combination of knobs. Each multi-value is a tuple."
     
     def __init__(self, *spaces, **namedSpaces):
-        "If on the 'spaces' list a tuple or list is given instead of a Space instance, it's wrapped up in Nominal space."
-        spaces = [s if isinstance(s, Space) else Nominal(s) for s in spaces]
-        namedSpaces = [Nominal(*values, name = name) for name, values in namedSpaces.iteritems()]
-        self.spaces = spaces + namedSpaces
-        self.names = [s.name for s in self.spaces]
-        if None in self.names: self.names = None            # if any subspace is unnamed, entire grid is treated as unnamed
+        "If any given space is a tuple or list instead of a Space instance, it's wrapped up in Nominal or Singular."
+        def wrap(space):
+            if isinstance(space, Space): return space
+            if not islist(space): return Singular(space)
+            if len(space) == 1: return Singular(space[0])
+            return Nominal(*space)
+            
+        self.spaces = [wrap(s) for s in spaces]
+#         namedSpaces = [Nominal(*values, name = name) for name, values in namedSpaces.iteritems()]
+#         self.spaces = spaces + namedSpaces
+#         self.names = [s.name for s in self.spaces]
+#         if None in self.names: self.names = None            # if any subspace is unnamed, entire grid is treated as unnamed
     
     def __len__(self):
         prod = 1
@@ -131,6 +148,10 @@ class Grid(Space):
 ###
 ###   KNOBS & LABELS
 ###
+
+class Knobs(OrderedDict):
+    "An ordered dictionary of {name:value} of knobs, representing one particular knobs combination."
+
 
 # class Label(object):
 #     "A special attribute in a class that keeps meta data about a given object, for reporting purposes, e.g.: algorithm name, execution ID etc."
@@ -212,8 +233,16 @@ class Cell(Object):
     Knobs and signals enable implementation of generic meta-algorithms which operate on inner structures without exact knowledge of their identity,
     only by manipulation of knobs and signals.
     
+    Addressing.
+    - "experiment/model/submodel.knob" - slash indicates inclusion: inner cell included in an outer cell
+    - "experiment/*"  - star indicates the current cell and all inner cells, but not nested ones
+    - "experiment/**" - like '*', additionally includes nested cells
+    - "experiment/+"  - like '*', but excludes current (outer) cell
+    - "experiment/++"
+    
     Things to keep in mind:
-    - properties defined inside inner classes, __knobs__ and __inner__, are automatically copied to parent class level after class definition
+    - properties defined inside inner classes, __knobs__ and __inner__, are automatically copied to parent class level 
+      after class definition.
     """
     __metaclass__ = __Cell__
 
@@ -222,13 +251,14 @@ class Cell(Object):
     __signals__ = []
     __inner__ = []
 
-    name = None                 # optional label, not necessarily unique, that identifies this cell instance or a group of cells in signal routing
-    owner = None                # the cell which owns 'self' and creates an environment where 'self' lives; typically 'self' is present in owner.__inner__
+    name = None             # optional label, not necessarily unique, that identifies this cell instance or a group of cells in signal routing
+    owner = None            # the cell which owns 'self' and creates an environment where 'self' lives; typically 'self' is present in owner.__inner__
 
     printlock = threading.Lock()          # mutual exclusion of printing (on stdout); assign NoneLock to switch synchronization off
 
-    def __init__(self, **knobs):
+    def __init__(self, name = None, **knobs):
         "The client can pass knobs already in __init__, without manual call to setKnobs."
+        if name: self.name = name
         if knobs: self.setKnobs(knobs)
 
     def setKnobs(self, knobs, strict = False):
@@ -317,11 +347,15 @@ class Cell(Object):
 ###
 
 class __Pipe__(__Cell__):
-    "Enables chaining of pipe classes (automatically instantiated without args), not only pipe instances."
+    "Enables chaining (pipelining) of pipe classes, not only instances. >> and << return a Pipeline instance."
     def __rshift__(cls, other):
-        return cls() >> other
+        if other is RUN: Pipeline(cls).execute()
+        else: return Pipeline(cls, other)
+        
     def __lshift__(cls, other):
         return cls() << other
+        if other is PIPE: return Pipeline(cls)
+        return Pipeline(other, cls)
 
 
 class Pipe(Cell):
@@ -330,24 +364,46 @@ class Pipe(Cell):
     Every iterable type - a collection, a generator or any type that implements __iter__() - can be used as a source pipe, too.
     
     Features of data pipes:
-    - operator >>
-    - use classes, not only instances, with >>
-    - use collections, functions, ... with >> 
+    - operator '>>'
+    - can use classes, not only instances, with >>
+    - can use collections, functions, ... with >> 
     """
     __metaclass__ = __Pipe__
     __transient__ = "source"    # don't serialize 'source' attribute
     
-    source = None               # source Pipe or iteratable from which input data for 'self' will be pulled
-    count  = None               # number of input items read so far in a given execution, or 1-based index of the item currently being processed; tracked in most standard pipes (not all)
+    source    = None            # source Pipe or iteratable from which input data for 'self' will be pulled
+    sources   = None            # list of source pipes; used only in pipes with multiple inputs, instead of 'source'
+    count     = None            # no. of input items read so far in this iteration, or 1-based index of the item currently processed; tracked in most standard pipes (not all)
+
+    created   = False           # has the object been initialized already, in setup()? most pipes have empty setup(), only more complex ones use it for creation of internal structures
     iterating = False           # flag that protects against multiple iteration of the same pipe, at the same time
     
-    def __init__(self, **kwargs):
-        self.__dict__.update(kwargs)
-        
+
+    def setup(self):
+        """Delayed initialization of the model, called just before the first iteration (and before open()).
+        Delaying initialization and doing it in setup() instead of __init__() enables knobs 
+        to be configured in the meantime, *after* and separately from instantiation of the object.
+        If you have to call both setKnobs() and setup(), it's better to first call setKnobs.
+        """
+
+    def open(self):
+        """Overridden by end client subclasses to perform custom per-iteration initialization.
+        Called at the beginning of __iter__(), in _prolog().
+        Classes intended for further subclassing shall override _prolog(), not open(),
+        with a call to super(X,self)._prolog() at the end of overriding method.
+        """
+    def close(self):
+        """Overridden by end client subclasses to perform custom per-iteration clean-up.
+        Called at the end of __iter__(), in _epilog().
+        Classes intended for further subclassing shall override _epilog(), not close(),
+        with a call to super(X,self)._epilog() at the beginning of overriding method.
+        """
+    
     def __iter__(self):
-        """Main method of every data pipe. Pulls data from the source(s), processes and yields results of processing one by one. 
-        Subclasses should override either iter() or __iter__(), in the latter case the subclass is responsible for calling _prolog and _epilog.
-        Generic subclasses also allow to override open() and close() to perform custom initialization and clean-up on every cycle of iteration.
+        """Main method of every data pipe. Pulls data from the source(s), processes and yields results of processing 
+        one by one. Subclasses should override either iter() or __iter__(), in the latter case the subclass 
+        is responsible for calling _prolog and _epilog. Generic subclasses also allow to override open() and close() 
+        to perform custom initialization and clean-up on every cycle of iteration.
         """
         self._prolog()
         try:
@@ -358,25 +414,24 @@ class Pipe(Cell):
         self._epilog()
 
     def iter(self):
+        """If you subclass Pipe directly, not via specialized base classes (Operator, Monitor, Filter, ...),
+        better override iter() not __iter__()."""
         raise NotImplemented()
 
     def _prolog(self):
+        if not self.created:            # call setup() if needed
+            self.setup()
+            self.created = True
         if self.iterating: raise Exception("Data pipe %s opened for iteration twice, before previous iteration has been closed" % self)
         self.iterating = True
         self.count = 0
         #self._logStackTrace("__iter__")
-        
         self.open()
 
     def _epilog(self):
         self.close()
         del self.iterating                  # could set self.iterating=False instead, but deleting is more convenient for serialization
 
-    def open(self):
-        "Called at the beginning of __iter__(). Can be overloaded in subclasses to perform per-cycle initialization."
-    def close(self):
-        "Called at the end of __iter__(). Can be overloaded in subclasses to perform per-cycle clean-up."
-    
     def copy(self, deep = True):
         "self.source is excluded from copying and the returned pipe has source UNassigned, even when deep copy (that's how __getstate__ is implemented)."
         if deep: 
@@ -389,23 +444,23 @@ class Pipe(Cell):
         Typically used for Pipelines which end with a sink and only produce side effects."""
         for item in self: pass
 
-    def loop(self, times = None):
-        """Executes this pipe multiple times, or infinitely if times=None. Yields items from all iterations as a single stream of data. 
-        Client can read self.nloops - the no. of loops completed so far - to find out which loop is being executed right now.
-        There is NO restarting between loops."""
-        self.nloops = 0
-        while True:
-            if times != None and self.nloops >= times: break
-            if self.nloops > 0: self.reopen()
-            empty = True
-            for item in self: 
-                empty = False
-                yield item
-            self.nloops += 1
-            if times == None and empty: raise Exception("Infinite loop over empty dataset")
-
-    def reopen(self):
-        "Override in subclasses to perform custom setup before next loop of processing is executed in loop()."
+#     def loop(self, times = None):
+#         """Executes this pipe multiple times, or infinitely if times=None. Yields items from all iterations as a single stream of data. 
+#         Client can read self.nloops - the no. of loops completed so far - to find out which loop is being executed right now.
+#         There is NO restarting between loops."""
+#         self.nloops = 0
+#         while True:
+#             if times != None and self.nloops >= times: break
+#             if self.nloops > 0: self.reopen()
+#             empty = True
+#             for item in self: 
+#                 empty = False
+#                 yield item
+#             self.nloops += 1
+#             if times == None and empty: raise Exception("Infinite loop over empty dataset")
+# 
+#     def reopen(self):
+#         "Override in subclasses to perform custom setup before next loop of processing is executed in loop()."
         
     def __rshift__(self, other):
         """'>>' operator overloaded, enables pipeline creation via 'a >> b >> c' syntax. Returned object is a Pipeline.
@@ -448,15 +503,24 @@ RUN = Pipe()
 
 #####################################################################################################################################################
 ###
-###   Functional Pipes (base abstract classes)
+###   FUNCTIONAL PIPES
 ###
 
-class Operator(Pipe):
-    """Plain item-wise processing & filtering function, implemented in the subclass by overloading process() and possibly also open/close().
-    Method process(item) returns modified version of the item or None to indicate that the item should be dropped (filtered out).
-    For operators that only perform filtering, with no modification of items, see Filter class."""
+class _Functional(Pipe):
+    "Base class for Operator, Monitor and Filter. Implements wrapping up a custom python function into a functional pipe."
+
+    fun = None              # plain python function to be used as the class implementation, if core method not overriden
     
-    count = None            # during iteration holds the number of input items read so far; 1-based index of the item being currently processed
+    def __init__(self, *args, **knobs):
+        "Inner function - if present - must be given as 1st and only unnamed argument. All knobs given as keyword args."
+        if args: self.fun = args[0]
+        super(_Functional, self).__init__(**knobs)
+    
+class Operator(_Functional):
+    """Plain item-wise processing & filtering function, implemented in the subclass by overloading process() 
+    and possibly also open/close(). Method process(item) returns modified version of the item,
+    or None to indicate that the item should be dropped (filtered out).
+    For operators that only perform filtering, with no modification of items, see Filter class."""
     
     def __iter__(self):
         self._prolog()
@@ -475,11 +539,26 @@ class Operator(Pipe):
         
     def process(self, item):
         "Return modified item; or None, interpreted as no result (drop item). Subclasses can read self.count to get 1-based index of the current item."
-        raise NotImplemented()
+        return self.fun(item)
     
-class Monitor(Operator):
-    """An operator that (by assumption) doesn't modify input items, only observes the data and possibly produces side effects (collecting stats, logging etc).
-    Subclasses override monitor(item) and possibly open/close() or report(); or monitoring function is passed as 'oper' upon Monitor instantiation."""
+class Monitor(_Functional):
+    """A pipe that (by assumption) doesn't modify input items, only observes the data and possibly produces 
+    side effects (collecting stats, logging, final reporting etc). 
+    Monitor provides subclasses with an output stream, self.out, that's configurable by the client
+    in the 1st argument to __init__ (stdout by default).
+    Subclasses override monitor(item) and possibly open/close() or report(). 
+    The monitoring function can also be passed as the 2nd argument to __init__."""
+
+    outfiles = None         # list of: <file> or name of file, where logging/reporting should be printed out
+    out      = None         # the actual file object to be used for all printing/logging/reporting in monitor() and report()
+    
+    def __init__(self, outfiles = None, *args, **kwargs):
+        """'outfiles' can be: None or '' (=stdout), or a <file>, or a filename, or a list of <file>s or filenames 
+        (None, '' and 'stdout' allowed)."""
+        super(Monitor, self).__init__(*args, **kwargs)
+        self.outfiles = outfiles if islist(outfiles) else [outfiles]
+        self.out = None                     # the output stream to be used by all 'print' operations; opened in _prolog()
+
     def __iter__(self):
         self._prolog()
         self.count = 0
@@ -494,20 +573,36 @@ class Monitor(Operator):
             raise
         self._epilog()
 
+    def _prolog(self):
+        if len(self.outfiles) > 1:
+            self.out = Tee(self.outfiles) 
+        else:
+            f = self.outfiles[0]
+            self.out = sys.stdout if (not f or f == 'stdout') else open(f,'wt') if isstring(f) else f
+        super(Monitor, self)._prolog()
+
+    def _epilog(self):
+        with self.printlock: self.report()
+        super(Monitor, self)._epilog()
+        if self.out not in [sys.stdout, sys.stderr]:
+            self.out.close()
+
     def monitor(self, item):
+        "Override in subclasses to process next item during iteration. If printing a log, use self.out as the output stream."
         self.process(item)              # for backward compatibility, process() is still called; TODO: remove process() and leave only monitor() in the future
     def process(self, item):
         "Can return modified item; or None, interpreted as no result (drop item); or True (pass unchanged); or False (drop item)."
-        if self.oper is None: raise Exception("Missing operator function (self.oper) in class %s" % classname(self))
-        self.oper(item)
+        #if self.fun is None: raise Exception("Missing inner function (self.fun) in class %s" % classname(self))
+        self.fun(item)
 
-    def close(self):
-        with self.printlock: self.report()
-    def report(self): pass
+    def report(self):
+        "Override in subclasses to print out a report at the end of iterating. Use self.out as the output stream."
 
 
-class Filter(Operator):
-    "Doesn't change input items, but filters out undesired ones. process() must return True (pass the item through) or False (drop the item), not the actual object."
+class Filter(_Functional):
+    """Doesn't change input items, but filters out undesired ones. 
+    Method process() must return True (pass the item through) or False (drop the item), not the actual object."""
+    
     def __iter__(self):
         self._prolog()
         try:
@@ -518,15 +613,12 @@ class Filter(Operator):
         except GeneratorExit, ex:
             self._epilog()
             raise
-        #except Exception, ex:
-        #    self._sealStackTrace()
-        #    raise
         self._epilog()
 
     def accept(self, item):
         return self.process(item)
     def process(self, item):                            # deprecated in Filter; override accept() instead
-        return self.oper(item)
+        return self.fun(item)
 
 
 # class Sink(Pipe):
@@ -538,7 +630,7 @@ class Filter(Operator):
 # 
 # class Capacitor(Pipe):
 #     "Consumes all input data and only then starts producing output data, possibly of a different type, e.g. aggregates of input items."
-
+#
 # class DataPile(Pipe):
 #     """Permanent (buffered) storage of data, in memory or filesystem, that can be reused many times after one-time creation.
 #     Can provide random access to items via index (dict) or multiple indices.
@@ -551,7 +643,7 @@ class Filter(Operator):
 
 #####################################################################################################################################################
 ###
-###   Specialized Pipes (concrete classes)
+###   CONCRETE PIPES
 ###
 
 ###  Wrappers for standard Python objects
@@ -580,7 +672,8 @@ class File(Pipe):
         return iter(self.file)
     
 class Function(Operator):
-    "An operator constructed from a plain python function. A wrapper."
+    """An operator OR a filter constructed from a plain python function. A wrapper.
+    Explicit use of Operator or Filter classes instead of this one is recommended."""
     def __init__(self, oper = None):
         "oper=None handles the case when processing function is implemented through overloading of process()."
         self.oper = oper
@@ -715,39 +808,40 @@ class Sort(Pipe):
         while heap: yield heappop(heap)
 
 
-###  Reporting
+#####################################################################################################################################################
+###
+###   MONITORS & REPORTING
+###
 
 class Print(Monitor):
     """Print items passing through, or value of 'func' function calculated on each item and/or a static message. If outfile is given, additionally print to that file (in such case, stdout can be suppressed).
     Subclasses can override monitor(item) and open/close() to provide custom printing: use self.out as the output stream: 'print >>self.out, ...' 
     - it redirects to stdout and/or file, appropriately."""
 
-    outfile = None
     subset = None
 
-    def __init__(self, msg = "%s", func = None, outfile = None, disp = True, count = False, subset = None):
+    def __init__(self, msg = "%s", func = None, outfile = None, disp = True, count = False, subset = None, *args, **kwargs):
         """msg: format string of messages, may contain 1 parameter %s to print the data item in the right place.
         func: optional function called on every item before printing, its output is printed instead of the actual item.
         outfile: path to external output file or None; disp: shall we print to stdout?; count: shall we print 1-based item number at the begining of a line?
         subset: print every n-th item (see Subset), or None to print all items."""
-        Monitor.__init__(self)
+        if outfile and disp: outfile = [outfile, disp]
+        Monitor.__init__(self, outfile, *args, **kwargs)
         #if '%s' not in msg: msg += ' %s'
         self.static = ('%s' not in msg)
         self.message = msg
         self.func = func
-        if outfile: self.outfile = outfile
-        self.disp = disp
         self.index = count
         if subset: self.subset = subset
         #print "created Print() instance, message '%s'" % self.message
 
-    def open(self):
-        if self.outfile and self.disp: self.out = Tee(self.outfile) 
-        else: self.out = open(self.outfile, 'wt') if self.outfile else sys.stdout
-        self.open1()
-    
-    def open1(self):
-        "Override in subclasses to extend opening procedure with own operations."
+#     def open(self):
+#         if self.outfile and self.disp: self.out = Tee(self.outfile) 
+#         else: self.out = open(self.outfile, 'wt') if self.outfile else sys.stdout
+#         self.open1()
+#     
+#     def open1(self):
+#         "Override in subclasses to extend opening procedure with own operations."
 
     def monitor(self, item):
         #print "Print.monitor()", self.subset, self.index
@@ -814,7 +908,7 @@ class Progress(Monitor):
     
 class Total(Monitor):
     "Print total no. of items at the end of processing."
-    def __init__(self, msg = "Total data items: %d"):
+    def __init__(self, msg = "Data items:   %d"):
         Monitor.__init__(self)
         self.msgTotal = msg
         if msg:
@@ -856,14 +950,73 @@ class Report(Total, Time):
             if self.msgTotal: print self.msgTotal % self.total
             if self.msgTime: print self.msgTime % self.elapsed()
 
-class Metric(Operator):
-    "Calculates a given metric on input samples and appends to them on the output. Typically used for evaluation."
 
-class Experiment(Monitor):
-    "Provides subclasses with logging facilities."
+class Metric(Monitor):
+    """Calculates a given metric on each input item and aggregates to an overall metric(s).
+    Optionally appends individual metrics to each item (modifies items). 
+    Subclasses can implement initialization of internal structures in open() and reporting in report().
+    Aggregation can be implemented in either aggregate() (recommended for general-purpose classes, more versatile), 
+    or metric(), together with calculating individual values (easier when writing a short class for one-time use).
+    Subclasses can use self.size attribute, which holds the no. of individual not-None metrics computed so far.
+    """
+
+    #metricname = None           # if not-None, metric of each item will be saved in the item under this name
+    last = None                 # most recent individual metric value calculated
+    size = None                 # no. of individual metrics calculated & aggregated so far excluding Nones; 0-based
+
+    def _prolog(self):
+        self.size = 0
+        super(Metric, self)._prolog()
+
+    def monitor(self, item):
+        self.last = metric = self.metric(item)
+        #if self.metricname: setattr(item, self.metricname, metric)
+        if metric is None: return
+        self.aggregate(metric)
+        self.size += 1
+        
+    def metric(self, item):
+        "Override in subclasses to calculate individual metric of each item. Can return None if the item should be ignored"
+        return self.fun(item)
+
+    def aggregate(self, metric):
+        """Override in subclasses to update internal structures for calculation of an aggregated metric, 
+        after new individual sample was measured with the result 'metric'."""
+        
+class Mean(Metric):
+    """Calculates sample mean & std.deviation of values measured for individual items by a given metric.
+    The metric is either implemented in overridden metric() method, or given as a function - argument of initialization.
+    """
+    
+    def open(self):
+        self.sum = self.sum2 = 0.0
+    
+    def aggregate(self, metric):
+        self.sum += metric
+        self.sum2 += metric ** 2
+
+    def mean(self): 
+        "Sample mean"
+        return self.sum / float(self.size)
+
+    def deviation(self): 
+        "Sample standard deviation"
+        N = float(self.size)
+        return sqrt((self.sum2 - self.sum/N * self.sum) / (N-1))
 
 
-###  File access
+# class Experiment(Monitor):
+#     "Provides subclasses with logging facilities."
+
+# class Trainable(object):
+#     trained  = False        # is the model trained enough to make predictions? training can be continued in parallel with predicting
+#     training = True         # shall the items passing through be used for training, in addition to making predictions if possible?
+
+
+#####################################################################################################################################################
+###
+###   File Access
+###
 
 class Save(Monitor):
     "Writes all passing items to a predefined file and outputs them unmodified to the receiver. Item type must be compatible with the file's write() method."
@@ -956,7 +1109,7 @@ class DastPile(Pile):
 
 class List(Pipe):
     "Combines all input items into a list. At the end, this list is output as the only output item; it's also directly available as self.items property."
-    def __iter__(self):
+    def iter(self):
         self.items = []
         for item in self.source:
             self.items.append(item)
@@ -965,7 +1118,7 @@ class List(Pipe):
         
 #####################################################################################################################################################
 ###
-###   Structural Pipes
+###   STRUCTURAL PIPES
 ###
 
 class MetaPipe(Pipe):
@@ -982,15 +1135,15 @@ class Container(MetaPipe):
         if not deep: res.pipes = copy(self.pipes)
         return res
         
-    def setKnobs(self, knobs, strict = False):
+    def setKnobs(self, knobs, strict = False, pipes = None):
         super(Container, self).setKnobs(knobs, strict)          # Container itself has no knobs, but a subclass can define some
-        for pipe in self.pipes:
+        if pipes is None: pipes = self.pipes
+        for pipe in pipes:
             try:
                 if hasattr(pipe, 'setKnobs'): pipe.setKnobs(knobs, strict)
             except:
                 print pipe
                 raise
-
 
 class Wrapper(MetaPipe):
     "Like Container, but always has only 1 internal pipe: self.pipe."
@@ -999,13 +1152,24 @@ class Wrapper(MetaPipe):
     
     def setKnobs(self, knobs, strict = False):
         super(Wrapper, self).setKnobs(knobs, strict)            # Wrapper itself has no knobs, but a subclass can define some
-        self.pipe.setKnobs(knobs, strict)
+        if self.pipe: self.pipe.setKnobs(knobs, strict)
         
+    def _prolog(self):
+        "Call pipe's setup before starting iteration."
+        if self.pipe: self.pipe.setup()
+        super(Wrapper, self)._prolog()
 
 #####################################################################################################################################################
 
 class Pipeline(Container):
-    "Sequence of data pipes connected sequentially, one after another. Pipeline is a MetaPipe and a Pipe itself."
+    """Sequence of data pipes connected sequentially, one after another. Pipeline is a MetaPipe and a Pipe itself.
+    Inner pipes can be accessed by indexing operator: pipeline[3]
+    """
+    
+    pipes    = None         # static list of pipes as passed during pipeline initialization
+    pipeline = None         # the actual pipes used in iteration, created dynamically in __iter__ or setKnobs() 
+    knobs    = None         # knobs to be set before iteration starts; 
+                            # for delayed setting of knobs, necessary when some pipes are only templates that require normalization
     
     def __init__(self, *pipes, **kwargs):
         "'kwargs' may contain connected=True to indicate that pipes are already connected into a list or a tree (must be sorted in topological order!)."
@@ -1029,22 +1193,44 @@ class Pipeline(Container):
         return res
 
     def setKnobs(self, knobs, strict = False):
-        self.pipes = _normalize(self.pipes)                 # if knobs to be configured, pipes must be normalized beforehand (normally __iter__ does this)
-        super(Pipeline, self).setKnobs(knobs, strict)
+        self.knobs = (knobs, strict)
+        if self.pipeline: self._setKnobs()
 
-    def __iter__(self):
+    def _setKnobs(self):        
+        if not self.knobs: return 
+        super(Pipeline, self).setKnobs(*self.knobs, pipes = self.pipeline)
+        self.knobs = None
+        #self.pipes = _normalize(self.pipes)                 # if knobs to be configured, pipes must be normalized beforehand (normally __iter__ does this)
+        #super(Pipeline, self).setKnobs(knobs, strict)
+
+    def setup(self):
+        #self.pipes = _normalize(self.pipes)
+        self.pipeline = _normalize(self.pipes)
+        for pipe in self.pipeline:
+            pipe.setup()
+        self._setKnobs()
+
+    def iter(self):
         # normalize pipes; connect into a list; connect entire pipeline with the source
-        self.pipes = _normalize(self.pipes)
+        #self.pipeline = _normalize(self.pipes)
         prev = self.source
-        for next in self.pipes:
+        for next in self.pipeline:
             if prev is not None: next.source = prev         # 1st pipe can be a generator or collection, not necessarily a Pipe (no .source attribute)
             prev = next
             
         # pull data
-        head = self.pipes[-1]
+        head = self.pipeline[-1]
         for item in head: yield item
     
+    def __getitem__(self, pos):
+        """Returns either an operating pipe from self.pipeline, or a static pipe from self.pipes, 
+        depending whether called during iteration or not.
+        """
+        return self.pipeline[pos] if self.iterating else self.pipes[pos]
+    
     def __str__(self):
+        if self.iterating:
+            return "Open pipeline " + ' >> '.join(map(str, self.pipeline))
         return "Pipeline " + ' >> '.join(map(str, self.pipes))
     
 
@@ -1058,20 +1244,20 @@ class MultiSource(Pipe):
         res.sources = copy(self.sources)
         return res
 
-class Parallel(MultiSource):
-    "Connects multiple pipes as parallel routes between a single source and a single destination."
-    def __init__(self, source, handlers):
-        if handlers and islist(handlers[0]): handlers = handlers[0]
-        self.pipes = _normalize(handlers)
-        for h in handlers:
-            h.source = source
-
-class Hub(MultiSource):
-    "Branching of pipes: a central pipe (hub) with multiple parallel sources."
-    def __init__(self, sources, hub):
-        self.sources = hub.sources = _normalize(sources)
-        self.hub = hub
-        self.pipes = self.sources + [hub]            # for open() & close()
+# class Parallel(MultiSource):
+#     "Connects multiple pipes as parallel routes between a single source and a single destination."
+#     def __init__(self, source, handlers):
+#         if handlers and islist(handlers[0]): handlers = handlers[0]
+#         self.pipes = _normalize(handlers)
+#         for h in handlers:
+#             h.source = source
+# 
+# class Hub(MultiSource):
+#     "Branching of pipes: a central pipe (hub) with multiple parallel sources."
+#     def __init__(self, sources, hub):
+#         self.sources = hub.sources = _normalize(sources)
+#         self.hub = hub
+#         self.pipes = self.sources + [hub]            # for open() & close()
 
 class Union(MultiSource):
     """Combine items from multiple sources by concatenating corresponding streams one after another: all items from the 1st source; then 2nd... then 3rd...
@@ -1115,33 +1301,40 @@ class MetaOptimize(Wrapper):
     """Client MUST ensure that internal pipe does NOT modify input items. Otherwise, only the 1st copy of the pipe will work on correct input data, 
     others will receive broken input. Does not yield anything, may only produce side effects."""
     
-#class GridSearch(MetaOptimize):
-#    "Sequential exhaustive search over space of all possible knob values. Input data is reloaded from scratch for every new algorithm execution."
-
-class GridSearch(MetaOptimize):
-    """Exhaustive search over space of all possible knob values, executed in mixed serial-parallel mode, depending on 'maxThreads' setting. 
-    In parallel mode, the algorithm must NOT modify data items, otherwise there will be interference between concurrent threads.
+class Grid(MetaOptimize):
+    """
+    Executes a given pipe multiple times, for all possible combinations of knob values.
+    Runs in mixed serial-parallel mode, depending on 'maxThreads' setting. 
+    In parallel mode, the algorithm must NOT deep-modify data items, otherwise there will be interference 
+    between concurrent threads (items are only shallow-copied for each thread). 
+    For confirmation, after evaluating different knob settings and choosing the best one, you should execute 
+    the pipe with this setting outside Grid and see if it produces the same results as inside Grid.
     No output produced, only empty stream.
     """
     
-    runID        = "runID"              # name of a special knob inside 'pipe' that will be set with an ID (integer >= 1) of the current run
-    startID      = 0                    # ID of the first run, to start counting from
-    maxThreads   = 0                    # max. no. of parallel threads; <=1 for serial execution; None for full parallelism, with only 1 scan over input data
-    threadBuffer = 10                   # length of input queue in each thread; 1 enforces perfect alignment of threads execution; 
-                                        # 0: no alignment, queues can get big when input data are produced faster than consumed
+    runID        = "runID"          # name of a special knob inside 'pipe' that will be set with an ID (integer >= 1) of the current run
+    startID      = 0                # ID of the first run, to start counting from
+    maxThreads   = 0                # max. no. of parallel threads; <=1 for serial execution; None for full parallelism, with only 1 scan over input data
+    threadBuffer = 10               # length of input queue in each thread; 1 enforces perfect alignment of threads execution; 
+                                    # 0: no alignment, queues can get big when input data are produced faster than consumed
+    copyPipe     = True             # shall we make a separate deep copy of the pipe for each run?
+    copyData     = True             # shall we make separate deep copies of data items for each parallel run? no copy in serial mode
     
-    def __init__(self, pipe, *args, **kwargs):
-        "'grid' is either a Grid or another Space instance, or a list of tuples to be converted into a Grid."
+    def __init__(self, pipe, **kwargs):
+        #"""'space', if present, is a Cartesian or another Space instance, 
+        #but typically space=None and knobs are passed as keyword args.
+        #"""
         self.pipe = pipe                                    # the pipe(line) to be copied and executed, in parallel, for different combinations of knob values
         self.runID = kwargs.pop('runID', self.runID)
         self.startID = kwargs.pop('startID', self.startID)
         self.maxThreads = kwargs.pop('maxThreads', self.maxThreads)
         self.threadBuffer = kwargs.pop('threadBuffer', self.threadBuffer)
+        self.copyPipe = kwargs.pop('copyPipe', self.copyPipe)
+        self.copyData = kwargs.pop('copyData', self.copyData)
         
-        if len(args) == 1 and isinstance(args[0], Space) and not kwargs:
-            self.grid = args[0]
-        else:
-            self.grid = Grid(*args, **kwargs)               # value space of all possible knob values
+        knobs = kwargs
+        self.space = Cartesian(*knobs.values())             # value space of all possible knob values
+        self.names = knobs.keys()                           # names of knobs
         self.done = None                                    # no. of runs completed so far
     
     def __iter__(self):
@@ -1153,27 +1346,28 @@ class GridSearch(MetaOptimize):
         return; yield                                       # to make this method work as a generator (only an empty one)
         
     def iterSerial(self):
-        with self.printlock: print "GridSearch: %d serial runs to be executed..." % len(self.grid)
-        for i, value in enumerate(self.grid):
+        with self.printlock: print "Grid: %d serial runs to be executed..." % len(self.space)
+        for i, value in enumerate(self.space):
             self.scanSerial(value, self.startID + i)
             self.done += 1
         
     def iterParallel(self):
-        scans = divup(len(self.grid), self.maxThreads) if self.maxThreads else 1
-        with self.printlock: print "GridSearch: %d runs to be executed, in %d scan(s) over input data..." % (len(self.grid), scans)
+        scans = divup(len(self.space), self.maxThreads) if self.maxThreads else 1
+        with self.printlock: print "Grid: %d runs to be executed, in %d scan(s) over input data..." % (len(self.space), scans)
         
         def knobsStream():
-            for i, v in enumerate(self.grid):
+            "Generates knob combinations. Every combination is a list of (name,value) pairs, one pair for each knob."
+            for i, v in enumerate(self.space):
                 yield self.createKnobs(self.startID + i, v)
 
         def knobsGroups():
-            "Take the 'knobsStream' and partition into groups of up to 'maxThreads' size each."
+            "Partitions stream generated by knobsStream() into groups of up to 'maxThreads' size each."
             if not self.maxThreads: 
                 yield knobsStream()
                 return
             group = []
-            for knob in knobsStream():
-                group.append(knob)
+            for knobs in knobsStream():
+                group.append(knobs)
                 if len(group) >= self.maxThreads:
                     yield group
                     group = []
@@ -1184,31 +1378,38 @@ class GridSearch(MetaOptimize):
             self.done += len(kgroup)
 
     def createKnobs(self, ID, values):
-        return [(self.runID, ID)] + zip(self.grid.names, values)
+        "Creates one combination of knobs using given values and returns as a list of (name,value) pairs."
+        return Knobs([(self.runID, ID)] + zip(self.names, values))
         
-    def createPipe(self, knobs, copy = True):
-        pipe = self.pipe.copy() if copy else self.pipe
-        pipe.setKnobs(dict(knobs))
+    def createPipe(self, knobs):
+        pipe = self.pipe.copy() if self.copyPipe else self.pipe
+        pipe.setKnobs(knobs)
+        pipe.setup()
         return pipe        
         
     def scanSerial(self, value, ID):
-        """Single scan over input data, with items passed directly to the single pipe being executed. No parallelism, no multi-threading, no pipe copying.
-        Note that the same pipe object will be reused in all runs - watch out against interference between consecutive runs.
+        """Single scan over input data, with items passed directly to the single pipe being executed. 
+        No parallelism, no multi-threading, no pipe copying.
+        The same pipe object is reused in all runs - watch out against interference between consecutive runs.
         """
-        with self.printlock: print "GridSearch, starting next serial scan for run ID=%s..." % ID
+        with self.printlock: print "Grid, starting next serial scan for run ID=%s..." % ID
         knobs = self.createKnobs(ID, value)
-        pipe = self.createPipe(knobs, copy = False)
+        pipe = self.createPipe(knobs)
         self.printKnobs(knobs)
         PIPE >> self.source >> pipe >> RUN
     
     def scanParallel(self, knobsGroup):
         "Single scan over input data, with each item fed to a group of parallel threads."
-        with self.printlock: print "GridSearch, starting next parallel scan for %d runs beginning with ID=%s..." % (len(knobsGroup), knobsGroup[0][0][1])
+        with self.printlock: print "Grid, starting next parallel scan for %d runs beginning with ID=%s..." % (len(knobsGroup), knobsGroup[0][0][1])
         self.count = 0
         threads = self.createThreads(knobsGroup)
+        duplicate = deepcopy if self.copyData else lambda x:x
+
         for item in self.source: 
             self.count += 1
-            for _, pipe in threads: pipe.put(item)              # feed input data to each pipe in parallel
+            for _, pipe in threads:                             # feed input data to each pipe in parallel
+                pipe.put(duplicate(item))
+        
         self.closeThreads(threads)
         
     def createThreads(self, knobsGroup):
@@ -1225,7 +1426,7 @@ class GridSearch(MetaOptimize):
             pipe.emptyFeed()                    # wait until all pipes eat up all remaining input items; note: some pipes may still be processing the last item!
         sleep(1)
         
-        with self.printlock: print "GridSearch, %d runs done." % (self.done + len(pipes))
+        with self.printlock: print "Grid, %d runs done." % (self.done + len(pipes))
         for knobs, pipe in pipes:
             self.printKnobs(knobs)
             pipe.end()
@@ -1234,7 +1435,7 @@ class GridSearch(MetaOptimize):
     def printKnobs(self, knobs):
         with self.printlock:
             print "----------------------------------------------------------------"
-            print ' '.join("%s=%s" % knob for knob in knobs)            # space-separated list of knob values
+            print ' '.join("%s=%s" % knob for knob in knobs.iteritems())        # space-separated list of knob values
     
 
 class Evolution(MetaOptimize):
@@ -1246,29 +1447,80 @@ class Evolution(MetaOptimize):
 ###   Functional wrappers (operators)
 ###
 
-class Feed(Pipe):
-    """A proxy that enables an external agent to supply input data to the pipeline 1 item at a time, or in multiple separate batches of arbitrary size.
-    When the pipeline reads the data, the agent must supply new batch with set() or setList(), otherwise the Feed.NoData exception will be raised."""
-    
-    class NoData(Exception):
-        "Raised when there is no input data to fulfill the request in operator()."
-    
-    data = None
-    def set(self, *items):
-        self.data = items
-    def setList(self, items):
-        self.data = items
-    def __iter__(self):
-        while True:
-            items = self.data
-            self.data = None
-            if items is None: raise Feed.NoData()
-            for item in items: yield item
+class Controller(Wrapper):
+    """A wrapper that controls input and output of a given pipe, by manually feeding individual items 
+    to its input and manually retrieving items from the output, with possibly some additional operations
+    performed before/during/after the item is processed.
+    In default implementation of process(), the inner pipe is expected to pull exactly 1 item at a time
+    from the source, otherwise an exception will be raised (typically the pipe is an Operator).
+    However, if a subclass overrides process(), it can expect the inner pipe to exhibit any other type 
+    of input-output behavior.
+    """
 
-class operator(object):
+    class NoData(Exception):
+        """Raised when there is no input data to fulfill the request, which indicates that input-output
+        relationship implemented by Controller's inner pipe doesn't match the relationship expected by process()."""
+        
+    class Feed(Pipe):
+        """A proxy that enables an external agent to supply input data to the pipe(line) 1 item at a time, 
+        or in multiple separate batches of arbitrary size. When the pipeline reads the data, the agent must supply 
+        new batch with set() or setList(), otherwise Feed.NoData exception is raised."""
+        data = None
+        def set(self, *items):
+            self.data = items
+        def setList(self, items):
+            self.data = items
+        def __iter__(self):
+            while True:
+                items = self.data
+                self.data = None
+                if items is None: raise Controller.NoData()
+                for item in items: yield item
+
+    
+    def __init__(self, pipe):
+        self.pipe = pipe                        # client can use this for later introspection of the inner pipe(s)
+    
+    def _prolog(self):
+        self.feed = Controller.Feed()
+        self.iterator = (self.feed >> self.pipe).__iter__()
+        super(Controller, self)._prolog()
+        
+    def _epilog(self):
+        super(Controller, self)._epilog()
+        self.iterator.close()
+        self.feed = None
+
+    def iter(self):
+        """Subclasses can override this method to handle other types (not 1-1) of input-output relationship
+        implemented by the inner pipe. In such case, process() can also be overridden, or left unused.
+        """
+        for item in self.source: yield self.process(item)
+    
+    def process(self, item):
+        """Subclasses can override this method to perform additional operations before/during/after 
+        the item is processed. In such case, remember to call self.put(item) and self.get() in appropriate places,
+        or alternatively super(X,self).process(item), which runs put() and get() altogether."""
+        self.put(item)
+        return self.get()
+    
+    def put(self, item): self.feed.set(item)
+    def get(self): return self.iterator.next()
+
+    def __getitem__(self, pos):
+        "Delegates self[] to self.pipe[] - useful when 'pipe' is a pipeline, to access individual pipes directly via self[i]"
+        return self.pipe[pos]
+
+#     def reopen(self):
+#         self.close()
+#         self.iterator = self.pipeline.__iter__()
+
+
+class operator(Controller):
     """
     A wrapper that turns a pipe (pipeline) back to a regular input-output function 
-    (a callable, to be precise) that can be fed with data manually, one item at a time:
+    (a callable, to be precise) that can be fed with data manually, one item at a time.
+    During processing, the original pipe can still be accessed via 'pipe' property of the wrapper.
     
     >>> pipeline = Function(lambda x: 2*x) >> Function(lambda x: str(x).upper())
     >>> fun = operator(pipeline)
@@ -1276,26 +1528,21 @@ class operator(object):
     6
     >>> print fun(['Ala'])
     ['ALA', 'ALA']
+    >>> print fun.pipe[0]
+    Function
     
     Typically the pipe is an instance of Operator. Even if not, it still must pull exactly 1 item at a time
     from the source, otherwise an exception will be raised.
     Can be used in the same caller's thread, no need to spawn a new thread.
     """
-    def __init__(self, *pipes):
-        self.feed = Feed()
-        self.pipeline = Pipeline((self.feed,) + pipes)
-        self.process = self.pipeline.__iter__()
-    def __call__(self, item):
-        self.feed.set(item)
-        return self.process.next()
-    def close(self):
-        self.process.close()
-    def reopen(self):
-        self.close()
-        self.process = self.pipeline.__iter__()
-        
-    write = push = send = __call__              # aliases, when explicit method call, like op.write(item), is more suitable than op(item)
 
+    def __init__(self, pipe):
+        super(operator, self).__init__(pipe)
+        self._prolog()
+
+    # processing can be invoked with op(item), like a function, not only op.process(item)
+    __call__ = Controller.process
+    
 
 #####################################################################################################################################################
 

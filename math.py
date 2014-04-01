@@ -18,28 +18,49 @@ import random, bisect, json
 
 from nifty.util import isnumber
 
+
 ########################################################################################################################
+###
+###   UTILITIES. Numpy extensions
+###
 
 ipi = 1./pi         # inverted PI
 
 def isarray(x):    return isinstance(x, numpy.ndarray)
 
 
+def np_find(condition):
+    "Return the indices where ravel(condition) is true. Copied from matplotlib/mlab.py"
+    res, = np.nonzero(np.ravel(condition))
+    return res
+np.find = np_find
+
+def np_dumps(V, format_spec = '%.5g'):
+    "Return compact string (JSON) representation of numpy vector, with commas between items instead of spaces!"
+    return '[' + ','.join([format_spec % x for x in V]) + ']'
+
+def np_loads(s):
+    "Load numpy vector from a string in JSON format: [x1,x2,...,xn]"
+    return np.array(json.loads(s))
+
+
 ########################################################################################################################
 ###
-###   Random numbers
+###   RANDOM NUMBERS
 ###
 
 # see http://eli.thegreenplace.net/2010/01/22/weighted-random-generation-in-python/
 def weighted_random(weights, rnd = random):
-    """Random value chosen from a discrete set of values 0,1,... with weights. Weights are (unscaled) probabilities of values, possibly different for each one.
+    """Random value chosen from a discrete set of values 0,1,... with weights. 
+    Weights are (unscaled) probabilities of values, possibly different for each one.
     You can pass your own Random object in 'rnd' to provide appropriate seeding."""
     totals = np.cumsum(weights)
     throw = rnd.random() * totals[-1]
     return np.searchsorted(totals, throw)
 
 class WeightedRandom(object):
-    "Generator of random values (can be non-numeric) from a discrete set with weights. Weights are (unscaled) probabilities of values, possibly different for each one."
+    """Generator of random values (can be non-numeric) from a discrete set with weights. 
+    Weights are (unscaled) probabilities of values, possibly different for each one."""
     def __init__(self, weights, vals = None, seed = None):
         self.totals = []
         self.total = 0
@@ -59,7 +80,7 @@ class WeightedRandom(object):
 
 ########################################################################################################################
 ###
-###   Scalar & point-wise mathematical transformations
+###   SCALAR & point-wise mathematical transformations
 ###
 
 def minmax(x):
@@ -171,19 +192,33 @@ def mexican(x, std = 1.0, mean = 0.0):
     f3 = exp(-x2 / 2)
     return f1 * f2 * f3
     
-def softmax(scores, slope = 1.0, eps = 1e-10):
+def softmax(scores, slope = None, eps = 1e-10):
     "softmax function: turns a vector of real-valued scores into unit-sum probabilities by applying exp() and normalization."
     scores = scores - np.max(scores)            # shift values to avoid overflow in exp()
-    exps = exp(scores * slope) #+ EPS           # +EPS to avoid 0.0 probabilities
+    if slope is not None: scores *= slope
+    exps = exp(scores) #+ EPS                   # +EPS to avoid 0.0 probabilities
     Z = np.sum(exps)
     #print "", Z, list(exps.flat)
     assert not isnan(Z) and not isinf(Z)
-    return exps / (Z + eps)        # 1-d vector
+    return exps / (Z + eps)                     # 1-d vector
 
 
 ########################################################################################################################
 ###
-###   Vector-wise operations
+###   AGGREGATIONS of vectors/series to scalars
+###
+
+def likelihood(probs, log = np.log, exp = False):
+    """Average log-likelihood of observed events, given a sequence of their 'a priori' probabilities.
+    If exp=True, returns exp() of this: a geometric average of likelihoods of observed events.
+    'log' is the logarithm function to use (log/log2/log10)."""
+    loglike = mean(log(probs))
+    return np.exp(loglike) if exp else loglike
+    
+
+########################################################################################################################
+###
+###   VECTOR-wise operations
 ###
 
 def normv2(x, axis = -1):
@@ -192,23 +227,4 @@ def normv2(x, axis = -1):
 def normv(x, axis = -1):
     "Euclidean norm of vectors contained in matrix 'x', along 'axis'. Last axis by default."
     return np.sqrt(normv2(x,axis))
-
-########################################################################################################################
-###
-###   import/export, other ...
-###
-
-def np_find(condition):
-    "Return the indices where ravel(condition) is true. Copied from matplotlib/mlab.py"
-    res, = np.nonzero(np.ravel(condition))
-    return res
-np.find = np_find
-
-def np_dumps(V, format_spec = '%.5g'):
-    "Return compact string (JSON) representation of numpy vector, with commas between items instead of spaces!"
-    return '[' + ','.join([format_spec % x for x in V]) + ']'
-
-def np_loads(s):
-    "Load numpy vector from a string in JSON format: [x1,x2,...,xn]"
-    return np.array(json.loads(s))
 
