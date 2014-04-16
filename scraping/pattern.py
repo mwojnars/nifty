@@ -498,7 +498,8 @@ class Context(parsing.Context):
             self.repeated, self.longfill = repeated, longfill
     
     class Data(object):
-        "Global semantic data collected by a Context object when passing through the tree. Kept in separate class so that context.copy() still references the same data as 'context'."
+        """Global semantic data collected by a Context object when passing through the tree. 
+        Kept in a separate class so that context.copy() still references the same data as 'context'."""
         def __init__(self):
             self.variables = {}         # name --> Variable
     
@@ -597,8 +598,7 @@ class Tree(BaseTree):
         def compile(self): return r'/?\w+'                                                              #@ReservedAssignment
     class xtag(node):
         name = expr = closing = None
-        def __init__(self, waxnode, tree):
-            self.init(waxnode, tree)
+        def init(self, tree, waxnode):
             self.tagspecial, self.name, self.expr, self.closing = self.children[:4]
             
         def __str__(self): return '<%s%s%s%s' % (self.tagspecial, self.name, prefix(' ', self.expr), self.closing)
@@ -620,8 +620,7 @@ class Tree(BaseTree):
         "A {xxx} element - named group and/or raw regex. If doesn't contain any expression, '..' is used; put '...' inside {} to get a longfill."
         repeat = name = regex = expr = None
         
-        def __init__(self, waxnode, tree):
-            self.init(waxnode, tree)
+        def init(self, tree, waxnode):
             for c in self.children:
                 if c.type == 'repeat': self.repeat = c
                 elif c.type == 'varname': self.name = c
@@ -651,24 +650,17 @@ class Tree(BaseTree):
     
     class xoptional(node):
         "A [xxx] element. Resolves into a *greedy* optional match of 'xxx' pattern."
-        def __init__(self, waxnode, tree):
-            self.init(waxnode, tree)
-            self.expr = self.children[0]
-        def __str__(self): 
-            return '[%s]' % self.expr
-        def compile(self): #@ReservedAssignment
-            return r'(%s)?' % self.expr.compile()
+        def init(self, tree, waxnode):  self.expr = self.children[0]
+        def __str__(self):              return '[%s]' % self.expr
+        def compile(self):              return r'(%s)?' % self.expr.compile()                       #@ReservedAssignment
+            
     xoptionalA = xoptionalB = xoptional
 
     class xatomic(node):
         "A {> xxx} element. Resolves into atomic grouping (?>...) that limits backtracking during regex matching, see: www.regular-expressions.info/atomic.html."
-        def __init__(self, waxnode, tree):
-            self.init(waxnode, tree)
-            self.expr = self.children[0]
-        def __str__(self): 
-            return '{> %s}' % self.expr
-        def compile(self): #@ReservedAssignment
-            return r'(?>%s)' % self.expr.compile()
+        def init(self, tree, waxnode):  self.expr = self.children[0]
+        def __str__(self):              return '{> %s}' % self.expr
+        def compile(self):              return r'(?>%s)' % self.expr.compile()                      #@ReservedAssignment
 
 
 ########################################################################################################################################################

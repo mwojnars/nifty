@@ -38,6 +38,8 @@ Web scraping tools in [nifty.scraping.pattern](https://github.com/mwojnars/nifty
 - **parsing** of basic data types from human-readable formats used in web pages: *pdate*, *pdatetime*, *pint*, *pfloat*, *pdecimal*, *percent*
 - **url** absolutization & unquoting: *url*, *url_unquote*
 
+Data storage and object serialization with a new **DAST** format, in [nifty.data.dast](https://github.com/mwojnars/nifty/blob/master/data/dast.py).
+
 For more information, check pydocs and comments in the source code. Other modules to be documented in the near future.
 
 Nifty includes code of [Waxeye](http://waxeye.org/), a PEG parser generator (MIT license) used to generate parser for [Patterns](https://github.com/mwojnars/nifty/blob/master/scraping/pattern.py).

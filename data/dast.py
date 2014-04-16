@@ -149,7 +149,7 @@ from itertools import izip
 from datetime import datetime, date, time
 from collections import OrderedDict, defaultdict, namedtuple, Iterator
 
-from nifty.util import isstring, isdict, classname, subdict, Object
+from nifty.util import isstring, isdict, isbound, classname, subdict, Object
 from nifty.text import regex
 
 ########################################################################################################################################################
@@ -424,7 +424,7 @@ class Encoder(object):
         if mode == 1 and not self.mode1: mode = 0
         
         t = type(obj)
-        encode = self.encoders.get(t) or Encoder._obj
+        encode = self.encoders.get(t) or Encoder._object
         encode(self, obj, mode, level)
         
     def _write(self, s):
@@ -438,12 +438,26 @@ class Encoder(object):
     def _int  (self, x, m, l): self._write(str(x))
     def _float(self, x, m, l): self._write(str(x))
     
+    def _datetime(self, d, m, l):
+        fmt = 'datetime "%s"' if m >= 1 else 'datetime("%s")'
+        self._write(fmt % d)
+    def _date(self, d, m, l):
+        fmt = 'date "%s"' if m >= 1 else 'date("%s")'
+        self._write(fmt % d)
+    def _time(self, t, m, l):
+        fmt = 'time "%s"' if m >= 1 else 'time("%s")'
+        self._write(fmt % t)
+
     def _str(self, s, mode, level):
         if mode == 0: self._write('"' + encode_basestring(s) + '"')
         else:
             s = encode_basestring(s) #encode_basestring_multiline(s)
             s = s.replace('\n', '\n' + self.indent * level + ' ')
             self._write('"' + s + '"')
+    
+    def _type(self, t, m, l):
+        name = t.__module__ + "." + t.__name__
+        self._generic_object(m, l, "type", args0 = (name,))
     
     def _list(self, x, mode, level):
         if mode == 0:
@@ -493,34 +507,62 @@ class Encoder(object):
             self._write("dict:")
             self._pairs2(d, level + 1)
         
-    def _obj(self, x, mode, level):
+    def _defaultdict(self, d, mode, level):
+        self._generic_object(mode, level, "defaultdict", args0 = (d.default_factory,), args2 = (dict(d),))
+        
+    def _object(self, x, mode, level):
         "Encode object of an arbitrary class."
+        def getstate(x):
+            getstate = getattr(x, '__getstate__', None)
+            if getstate is None: return None
+            if not isbound(getstate): return None               # 'x' can be a class! then __getstate__ won't work
+            state = getstate()
+            if isdict(state): return state
+            return {'__state__': state}                         # wrap up a non-dict state in dict
+        
+        def getnewargs(x):
+            getnewargs = getattr(x, '__getnewargs__', None)
+            if getnewargs is None: return ()
+            if not isbound(getnewargs): return ()
+            return getnewargs()
+        
+        # discover typename
         typename = classname(x, full=True)
-        if hasattr(x, '__getstate__'):          # pick object's state, either from __getstate__ or from __dict__          
-            state = x.__getstate__()            # watch out: returned state must be a dict (!), other cases are not handled currently
-            if not isdict(state):
-                state = {'__state__': state}
-        else:
+        
+        # extract newargs
+        newargs = getnewargs(x)
+        
+        # extract state
+        state = getstate(x)                                     # try to pick object's state from __getstate__
+        if state is None:                                       # otherwise use __dict__
             try: 
                 state = x.__dict__
             except:
-                raise Exception("dast.Encoder, can't encode object %s of type <%s>, unable to retrieve its __dict__ property" % (repr(x), typename))
+                raise Exception("dast.Encoder, can't encode object %s of type <%s>, "
+                                "unable to retrieve its __dict__ property" % (repr(x), typename))
         
-        self._write(typename)
-        if mode <= 1: self._state0(None, state, mode)
-        else:
-            fmt = getattr(x, '__dast_format__', {})
-            self._state2(level, kwargs2 = state, fmt = fmt)
+        fmt = getattr(x, '__dast_format__', {}) if mode == 2 else None
+        self._generic_object(mode, level, typename, args2 = newargs, kwargs2 = state, fmt = fmt)
         
     def _array(self, x, mode, level):
         dtype = str(x.dtype)
         data = x.tolist()
-        self._write("array")
-        if mode <= 1: self._state0([dtype, data], None, mode)
-        else:
-            self._state2(level, args0 = [dtype], args2 = data)
+        self._generic_object(mode, level, "array", args0 = [dtype], args2 = data)
 
     # for internal use
+
+    def _generic_object(self, mode, level, typename, args0 = (), args2 = (), kwargs0 = {}, kwargs2 = {}, fmt = {}):
+        "Encode anything in an object-like format. Each piece of data to be written passed as a separate argument."
+        self._write(typename)
+        if mode <= 1: 
+            if kwargs0 and kwargs2:
+                kwargs = kwargs0.copy()
+                kwargs.update(kwargs2)
+            else:
+                kwargs = kwargs0 or kwargs2
+            self._state0(args0 + args2, kwargs, mode)
+        else:
+            self._state2(level, args0 = args0, args2 = args2, kwargs0 = kwargs0, kwargs2 = kwargs2, fmt = fmt)
     
     def _state0(self, args, kwargs, mode):
         "Encode state of an arbitrary object (everything after typename), mode 0 or 1."
@@ -531,7 +573,7 @@ class Encoder(object):
         elif args or kwargs:
             self._write(" ")
             self._arglist0(args, kwargs)
-    def _state2(self, level, args0 = [], args2 = [], kwargs0 = {}, kwargs2 = {}, fmt = {}):
+    def _state2(self, level, args0 = (), args2 = (), kwargs0 = {}, kwargs2 = {}, fmt = {}):
         "Encode state of an arbitrary object, mode 2, with selected arguments (args0, kwargs0) encoded in mode 1"
         inline = (args0 or kwargs0)
         outline = (args2 or kwargs2)
@@ -620,21 +662,11 @@ class Encoder(object):
             self._encode(i, 2, level)
 
 
-    def _datetime(self, d, m, l):
-        fmt = 'datetime "%s"' if m >= 1 else 'datetime("%s")'
-        self._write(fmt % d)
-    def _date(self, d, m, l):
-        fmt = 'date "%s"' if m >= 1 else 'date("%s")'
-        self._write(fmt % d)
-    def _time(self, t, m, l):
-        fmt = 'time "%s"' if m >= 1 else 'time("%s")'
-        self._write(fmt % t)
-
     # encoders for standard types
     encoders = { int:_int, long:_int, float:_float, bool:_bool, str:_str, unicode:_str, type(None):_none, 
-                 list:_list, tuple:_tuple, set:_set, 
-                 dict:_dict, OrderedDict:_dict, defaultdict:_dict,
                  datetime:_datetime, date:_date, time:_time,
+                 type:_type, list:_list, tuple:_tuple, set:_set, 
+                 dict:_dict, OrderedDict:_dict, defaultdict:_defaultdict,
                  np.float16:_float, np.float32:_float, np.float64:_float, np.float128:_float,
                  np.ndarray:_array,
                 }
@@ -645,33 +677,41 @@ class Encoder(object):
 ###  DECODER
 ###
 
-def _tuple(*args): return args
-def _list(*args): return list(args)
-#def _dict(*pairs): return dict(pairs)
-def _set(*args): return set(args)
-
-def _datetime(s): 
-    if '.' in s: return datetime.strptime(s, '%Y-%m-%d %H:%M:%S.%f')
-    return datetime.strptime(s, '%Y-%m-%d %H:%M:%S')
-def _date(s): 
-    return datetime.strptime(s, '%Y-%m-%d').date()
-def _time(s):
-    if '.' in s: return datetime.strptime(s, '%H:%M:%S.%f').time()
-    return datetime.strptime(s, '%H:%M:%S').time()
-def _array(dtype, *data):
-    return np.array(data, dtype = dtype)
-
 class Decoder(object):
     "Decoder of a particular encoded string (file or list of DAST-encoded lines). Creates buffer on top of the string to easily iterate over lines with 1 line lookahead."
 
+    def _type (name): return _import(name)
+    def _tuple(*args): return args
+    def _list (*args): return list(args)
+    def _set  (*args): return set(args)
+    #def _dict(*pairs): return dict(pairs)
+    
+    def _datetime(s): 
+        if '.' in s: return datetime.strptime(s, '%Y-%m-%d %H:%M:%S.%f')
+        return datetime.strptime(s, '%Y-%m-%d %H:%M:%S')
+    def _date(s): 
+        return datetime.strptime(s, '%Y-%m-%d').date()
+    def _time(s):
+        if '.' in s: return datetime.strptime(s, '%H:%M:%S.%f').time()
+        return datetime.strptime(s, '%H:%M:%S').time()
+    
+    def _defaultdict(*args): return defaultdict(*args)
+    def _array(dtype, *data):
+        return np.array(data, dtype = dtype)
+    
     #EOF = object()              # token that indicates end of file OR end of current block during decoding
     dicttype = OrderedDict
-    decoders = {'tuple':_tuple, 'list':_list, 'set':_set, 'datetime':_datetime, 'date':_date, 'time':_time, 'array':_array}
+    decoders = {'type':_type, 'tuple':_tuple, 'list':_list, 'set':_set, 'datetime':_datetime, 'date':_date, 'time':_time, 
+                'defaultdict':_defaultdict, 'array':_array}
 
     #nocompile = False           # if True, decode() will return syntax trees instead of compiled objects
 
     def __init__(self, input, decoders = None):
-        "'decoders': dict of type decoders to override the default Decoder.decoders."
+        """'decoders': dict of type decoders, {typename: decoder}, to override default Decoder.decoders.
+        Decoder can be a function that's fed with all arguments read from the file: decoder(*args, **kwargs).
+        OR, decoder can be a class that's instantiated with __new__(*args) - only unnamed arguments passed!
+        - and then the object's __dict__ is updated with kwargs.
+        """
         self.decoders = decs = Decoder.decoders.copy()             # the dict of decoders may get modified during operation, thus shallow-copying
         if decoders: decs.update(decoders)
         
@@ -754,7 +794,8 @@ class Decoder(object):
             
     
     def decodeType(self, typename, args, kwargs):
-        "Decode typename extracted from a DAST file (map to a corresponding type or callable), and instantiate with given arguments."
+        """Decode typename extracted from a DAST file (map to a corresponding type or callable), 
+        and instantiate with given arguments."""
         
         if typename == 'dict':                                      # 'dict' is special: may have arbitrary objects as keys (non-identifiers), so we can't do **kwargs to call decoder
             return kwargs
@@ -766,19 +807,20 @@ class Decoder(object):
             isclass = True
             self.decoders[typename] = (decoder, isclass)            # keep the loaded type for future reference
          
-        if hasattr(decoder, '__dast_init__'):                       # 'decoder' is a class with custom deserializer __dast_init__
-            return decoder.__dast_init__(*args, **kwargs)           # use __dast_init__ = __init__ to direct decoding to standard initializer
-        elif isclass:
-            # no __dast_init__? __dict__ will be recreated automatically, on UNinitialized object;
-            # if you need something special to be done both for __init__ and DAST loading, try to put it inside custom __new__() of the class,
-            # as *args are passed to new(), while **kwargs are copied directly to __dict__.
+        if isclass:
             obj = decoder.__new__(decoder, *args)
-            state = kwargs.pop('__state__', None)
-            if kwargs: obj.__dict__.update(kwargs)
-            if state: obj.__setstate__(state)
+            if hasattr(decoder, '__dast_init__'):                   # has custom deserializer __dast_init__
+                decoder.__dast_init__(obj, *args, **kwargs)
+            else:
+                # no __dast_init__? __dict__ will be recreated automatically, on UNinitialized object;
+                # if you need something special to be done both for __init__ and DAST loading, try to put it inside 
+                # custom __new__() of the class, as *args are passed to new(), while **kwargs are copied directly to __dict__.
+                state = kwargs.pop('__state__', None)
+                if kwargs: obj.__dict__.update(kwargs)
+                if state: obj.__setstate__(state)
             return obj
-        else:
-            return decoder(*args, **kwargs)                         # decoder is a function, don't bother with __new__ and __dict__
+
+        return decoder(*args, **kwargs)                         # decoder is a function, don't bother with __new__ and __dict__
     
     def decode(self):
         while True:
@@ -985,6 +1027,11 @@ class User(Object):
         self.comments = [comm1, comm2, comm3]
         self.pagesVisited = {123,643,76554}
 
+class Class(Object): pass
+
+Point = namedtuple("Point", "x y") 
+
+
 def test1(x, verbose = False, **kwargs):
     "Test that consists of encoding 'x' and then decoding back from the resulting code."
     if verbose: print "input:   ", x
@@ -1002,6 +1049,7 @@ def test1(x, verbose = False, **kwargs):
         print "OK" if same else "DIFFERENT"
         print
     if not same:
+        print "decoded:", z
         raise Exception("test1, decoded object differs from the original one")
 
 def test(x):
@@ -1024,10 +1072,15 @@ if __name__ == "__main__":
     test({3,5,7,'ala'})
     test({5: 643, "pies i kot": None, None: True})
     test(Comment("Ala ma kota", datetime(2013,4,20,10,10,10)))
-    test(User())
-    test(np.array([1, 2, 3.0]))
+    test(User())                                # user-defined object
+    test(np.array([1, 2, 3.0]))                 # numpy arrays
     test(np.array([[]]))
     test(np.array([[3, 4], [2, 1], [8, 9]]))
+    test([int, float, dict, defaultdict])       # standard types
+    test(Point(2,3))                            # instance of <namedtuple>
+    test(defaultdict(int, {3:'x', 'ala ma':'kota'}))
+
+    test(Class)                                 # user-defined type with custom (inherited) __metaclass__
 
     print "\ndone"
     

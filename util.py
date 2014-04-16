@@ -40,6 +40,8 @@ def iscontainer(x):
 def isiterable(x):
     "True if x is *any* iterable: list, tuple, dict, set, string (!), any object with __iter__ or __getitem__ method."
     return isinstance(x, collections.Iterable) #and not isinstance(x, basestring)
+def isregex(x):
+    return isinstance(x, re._pattern_type)
 # def isarray(x) - defined in 'math' module
 
 def isfunction(x):
@@ -47,8 +49,9 @@ def isfunction(x):
     return isinstance(x, (_types.FunctionType, _types.BuiltinFunctionType, _types.MethodType, _types.BuiltinMethodType, _types.UnboundMethodType))
 def isgenerator(x):
     return isinstance(x, _types.GeneratorType)
-def isregex(x):
-    return isinstance(x, re._pattern_type)
+def isbound(method):
+    "True if a given method is bound, i.e., assigned to an instance (with 'self'), not a class method."
+    return method.im_self is not None
 
 # Environment checks:
 def islinux():
@@ -109,12 +112,13 @@ def unique(seq, order = False):
     seen_add = seen.add
     return [x for x in seq if x not in seen and not seen_add(x)]
 
-def flatten(seq):
+def flatten(*seq):
     """List of all atomic elements of 'seq' (strings treated as atomic) together with all elements of sub-iterables of 'seq', recursively.
-    >>> flatten([[[1,2,3], (42,None)], [4,5], [6], 7, ('a','string')])
-    [1, 2, 3, 42, None, 4, 5, 6, 7, 'a', 'string']
+    >>> flatten([[[1,2,3], (42,None)], [4,5], [6], 7, ('a','string')], (8, 9))
+    [1, 2, 3, 42, None, 4, 5, 6, 7, 'a', 'string', 8, 9]
     """
     result = []
+    if len(seq) == 1: seq = seq[0]
     for x in seq:
         if hasattr(x, "__iter__"): result += flatten(x)
         else: result.append(x)
@@ -305,28 +309,32 @@ class __Object__(type):
         cls.normLabel(name)                         # convert cls's own labelling to canonical representation
         cls.inheritList(name)                       # inherit labellings from superclasses
         cls.__labels__.append(name)                 # mark 'name' as a label
-
+    
     def normLabel(cls, label):
         "Normalize a list of labelled attributes declared in this class, by converting it from a string or inner class if necessary."
-        attrs = getattr(cls, label, [])                             # list of names of attributes labelled by 'label'
-        if istype(attrs):                                           # inner class instead of a list?
+        attrs = getattr(cls, label, [])                         # list of names of attributes labelled by 'label'
+        if istype(attrs):                                       # inner class?
             attrs = getattrs(attrs)
-            setattrs(cls, attrs)                                    # copy all attrs from the inner class to top class level
-            attrs = attrs.keys()                                    # collect attr names
-        elif isstring(attrs):                                       # space-separated list of knob names?
+            for name in attrs.iterkeys():                       # check that all attrs can be safely copied to top class, without overwriting regular attr
+                if not name in cls.__dict__: continue 
+                raise Exception("Attribute %s appears twice in %s: as a regular attribute and inside label class %s" %
+                                (name, cls, label))
+            setattrs(cls, attrs)                                # copy all attrs from the inner class to top class level
+            attrs = attrs.keys()                                # collect attr names
+        elif isstring(attrs):                                   # space-separated list of attribute names?
             attrs = attrs.split()
         setattr(cls, label, attrs)
 
-    def inheritList(cls, attr, order = True):
-        "If 'attr' is the name of a special attribute containing a list of items, append lists from base classes to cls's list."
+    def inheritList(cls, label, order = True):
+        "If 'label' is the name of a special attribute containing a list of items, append lists from base classes to cls's list."
         #"""Find out what attributes are labelled by 'label' in superclasses and label them in this class, too. 
         #'label' is the name of attribute that keeps a list of labelled attrs of a given class."""
-        baseitems = [getattr(base, attr, []) for base in cls.__bases__]         # get lists defined in base classes
+        baseitems = [getattr(base, label, []) for base in cls.__bases__]        # get lists defined in base classes
         baseitems = reduce(lambda x,y:x+y, baseitems)                           # combine into one list
-        items = getattr(cls, attr)
+        items = getattr(cls, label)
         combined = unique(baseitems + items, order = order)                     # add cls's items and uniqify
-        setattr(cls, attr, combined)
-        
+        setattr(cls, label, combined)
+
 
 class Object(object):
     """For easy creation of objects that can have assigned any attributes, unlike <object> instances. For example: 
@@ -339,6 +347,8 @@ class Object(object):
        - equality '==' operator __eq__ that performs deep comparison by comparing __dict__ dictionaries, not only object IDs.
        - __str__ that prints the class name and its __dict__, with full recursion like for nested dict's (__repr__ == __str__).
        - __getstate__ that understands the __transient__ list of attributes and excludes them from serialization.
+       - copy() and deepcopy() also honor __transient__, since they utilize __getstate__ unless custom __copy__/__deepcopy__ 
+         is implemented in a subclass.
        
        When subclassing Object:
        - Some attributes can be labelled as "transient", by adding their names to subclass'es __transient__ list.
@@ -374,6 +384,8 @@ class Object(object):
             for attr in self.__transient__: state.pop(attr, None)
             return state
         return self.__dict__
+    def __setstate__(self, state):
+        self.__dict__ = state
     
 
 class NoneObject(Object):
@@ -390,6 +402,10 @@ class NoneObject(Object):
 def merge_spaces(s, pat = re.compile(r'\s+')):
     "Merge multiple spaces, replace newlines and tabs with spaces, strip leading/trailing space. Similar to normalize-space() in XPath."
     return pat.sub(' ', s).strip()
+
+def escape(s):
+    "Slash-escape (or encode) non-printable characters, including \n and \t."
+    return s.encode('unicode_escape')
 
 def ascii(text):
     """ASCII-fication of a given unicode 'text': national characters replaced with their non-accented ASCII analogs. 
@@ -680,13 +696,14 @@ def normdir(folder, full = False):
     return folder + os.path.sep
 
 def listdir(root, onlyfiles = False, onlydirs = False, recursive = False, fullpath = False):
-    """A generic routine for listing directory contents: files or subfolders or both. More universal than standard os.listdir(), can be used as a replacement.
-    For large folders, with many files/dirs, listing all items is much faster then 'onlyfiles' or 'onlydirs' (file/dir check for each item is very time consuming).
+    """Generic routine for listing directory contents: files or subfolders or both. More universal than standard os.listdir(), 
+    can be used as a replacement. For large folders, with many files/dirs, listing all items is much faster 
+    than 'onlyfiles' or 'onlydirs' (file/dir check for each item is very time consuming).
     """
     root = normdir(root)
     if not onlyfiles and not onlydirs:  items = os.listdir(root)
-    elif onlyfiles:                     items = os.walk(folder).next()[2]
-    elif onlydirs:                      items = os.walk(folder).next()[1]
+    elif onlyfiles:                     items = os.walk(root).next()[2]
+    elif onlydirs:                      items = os.walk(root).next()[1]
     else:                               items = []
     if fullpath: items = [root + item for item in items]
     return items
@@ -706,6 +723,18 @@ def ifindfiles(pattern):
     return glob.iglob(pattern)
 
 
+def openfile(f, mode = 'wt'):
+    """Smart open(). If f is already an open file, returns it without changes. If f is a string, opens the file path
+    denoted by the string ('wt' mode by default). Recognizes special names 'stdout', 'stderr' and 'stdin',
+    and returns corresponding file objects in such cases. Empty string and None map to stdout file."""
+    if f in [None, '', 'stdout']: return sys.stdout
+    if f in ['stderr', 'stdin']: return getattr(sys, f)
+    if isstring(f): return open(f, mode)
+    if not isinstance(f, file) or f.closed:
+        raise Exception("Tee, object of incorrect type passed as a file(name), or a closed file: %s" % f)
+    return f
+
+
 class Tee(object):
     """For duplicating output to several streams, typically stdout and a file. Usage:
          out = Tee(logfile)        # includes stdout by default, whenever only 1 argument (or none) is given
@@ -714,9 +743,9 @@ class Tee(object):
     def __init__(self, *files):
         """If only 1 file is given, stdout is appended automatically. If names not files are given, 
         they will be opened in 'wt' mode (possible erasure if file exists!).
-        None, '' and 'stdout' denote stdout.
+        None and '' denote stdout. 'stdout', 'stderr', 'stdin' are mapped to sys.* file objects.
         """
-        self.files = [sys.stdout if (not f or f == 'stdout') else open(f,'wt') if isstring(f) else f for f in files]
+        self.files = [openfile(f, 'wt') for f in files]
         if len(files) <= 1: self.files.append(sys.stdout)
     def write(self, obj):
         for f in self.files: f.write(obj)
@@ -724,7 +753,7 @@ class Tee(object):
         for f in self.files: f.flush()
     def close(self):
         "Close all files except sys.stdxxx"
-        exclude = [sys.stdout, sys.stderr]
+        exclude = [sys.stdout, sys.stderr, sys.stdin]
         for f in self.files:
             if f not in exclude: f.close()
 

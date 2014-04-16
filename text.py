@@ -153,19 +153,20 @@ class regex(object):
     
     int   = r'[+-]?\d+'         # can include 0 as the first char (!), sometimes this is recognized as octal; don't include hexadecimal integers   @ReservedAssignment
     float = r'[+-]?((\.\d+)|(\d+\.\d*))([eE][+-]?\d+)?'             # floating-point number in any form recognized by Python, except NaN and Inf   @ReservedAssignment
-    escaped_string = r'"(?:[^"\\]|\\.)*"' + r"|'(?:[^'\\]|\\.)*'"   # "string" or 'string', with escaped characters, like \" and \'
+    escaped_string = r'"(?:[^"\\]|\\.)*"' + r"|'(?:[^'\\]|\\.)*'"   # "string" or 'string', with escaped characters, like \" and \' or other
     
     ident = r"\b\w+\b"          # identifier, only a-zA-Z0-9_ characters (all alphanumeric, maybe more depending on locale), with word boundaries
     word  = r"\S+"              # word, a sequence of any non-whitespace characters; no boundaries (any length)
     text  = r"\S.+\S|\S"        # free text, possibly with spaces, only must begin and end with a non-whitespace character; no boundaries
 
-    comment = r"(\A|(?<=\s))#.+$"    # text starting with a "#" until the end of a line; "#" is either the 1st one on the line, or preceded by a whitespace 
-        
-    ISSN = issn = _B % r'\d{4}-\d{3}[\dXx]'
-    IP = ip = _B % r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'            # IP number
+    comment      = r"(\A|(?<=\s))#.+$"              # "# ..." until the end of a line; "#" is either the 1st char on the line, or preceded by a whitespace 
+    html_comment = r"<!--([^\-]|-(?!->))*-->"       # <!-- .. -->, with no '-->' inside
     
-    email = _B % r"[\w\-\._\+%]+@(?:[\w-]+\.)+[\w]{2,6}"            # supports International Domains with Country codes
-    email_nospam = _B % r"[\w\-\._\+%]+(?:@|\(at\)|\{at\})(?:[\w-]+\.)+[\w]{2,6}"           # recognizes obfuscated emails
+    ISSN = issn = _B % r'\d{4}-\d{3}[\dXx]'
+    IP   = ip   = _B % r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'                            # IP number
+    
+    email        = _B % r"[\w\-\._\+%]+@(?:[\w-]+\.)+[\w]{2,6}"                         # supports International Domains with Country codes
+    email_nospam = _B % r"[\w\-\._\+%]+(?:@|\(at\)|\{at\})(?:[\w-]+\.)+[\w]{2,6}"       # recognizes obfuscated emails
 
     # HTML/XML tag detector, from: http://gskinner.com/RegExr/?2rj44
     # Supports: tags (name in group 1) with arguments (group 2); closing tags (name in group 4); self-closing tags ('/' in group 3); 
@@ -205,7 +206,7 @@ def regexEscape(s):
     can be included in regex pattern as a static string that matches occurences of 's'.
     The output of this function is prettier than produced by re.escape() - here we escape only true special chars,
     while re.escape() escapes ALL non-alphanumeric characters, so its output is long and rather ugly."""
-    s = s.encode('string_escape')           # encode non-printable characters
+    s = s.encode('unicode_escape')          # encode non-printable characters
     escape = r".^$*+?{}()[]|"               # no backslash \, it's handled in encode() above
     s = ''.join('\\' + c if c in escape else c for c in s)
     return s

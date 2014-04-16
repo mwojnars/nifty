@@ -15,6 +15,7 @@ You should have received a copy of the GNU General Public License along with Nif
 
 import os, shutil, jsonpickle
 from copy import deepcopy
+from itertools import count
 
 from nifty.util import classname, fileexists, filesize
 from nifty.data.dast import DAST
@@ -378,33 +379,32 @@ class PagedFile(GenericFile):
     """Logical object file partitioned into a number of separate files (pages), named *.1, *.2, ... 
     (TODO:) On write, new part is created after size threshold is reached."""
     
-    new = "new"             # name to be used for the new page (not yet completed); when done, this page is renamed to its ultimate name
+    new = "new"         # name to be used for the new page (not yet completed); when done, this page is renamed to its ultimate name
     
-    def __init__(self, pattern, start = 1, end = None, **kwargs):
-        "Example 'pattern': data.%s, data.%s.json"
+    def __init__(self, pattern, start = 1, stop = None, ids = None, **kwargs):
+        "Example 'pattern': data.%s, data.%s.json. 'ids' (optional) is a list of file IDs to be used instead of (start,stop) range."
         self.pattern = pattern
         self.start = start
-        self.end = end
-        self.page = None                        # page counter: name (index) of the current page
-        self.file = None                        # base file containing the current page, always in open state if present; None if 'self' is closed
+        self.stop = stop                    # 'stop' INclusive, unlike in standard range()
+        self.ids = ids
+#         self.page = None                # page counter: name (index) of the current page
+#         self.file = None                # base file containing the current page, always in open state if present; None if 'self' is closed
         #if not '%s' in pattern: pattern += '.%s'
         super(PagedFile, self).__init__(pattern, **kwargs)
     
-#     def isopen(self):
-#         return self.file is not None
-#         #isopen = (self.file is not None)
-#         #assert not isopen or isinstance(self.file, GenericFile)
-#         #assert not (isopen and not self.file.isopen())
-#         #return isopen
-        
     def _open(self):
         "Invariant of an open file: self.file holds the current page file to be read from, or None if no more pages to be read."
-        self.openNext()
+        self.pages = iter(self.ids) if self.ids != None \
+                     else xrange(self.start, self.stop+1) if self.stop != None \
+                     else count(self.start)
+        self.infinite = isinstance(self.pages, count)   # iterating over infinite range of pages? missing page allowed after 1st one
+        self.file = None                                # base file with the current page
+        self.openNext()                                 # open 1st page
         
     def _close(self):
-        #assert self.file.isopen()
         if self.file: self.file.close()
-        self.file = self.page = None
+        del self.file, self.infinite, self.pages
+        #self.file = self.page = None
         
     def _read(self):
         while True:
@@ -416,23 +416,35 @@ class PagedFile(GenericFile):
 
     def openNext(self):
         "Close the current page and open the next one. Return True if succeeded, False if no more pages, exception when no pages present at all."
+        first = True
+
         # advance page counter
-        if self.page is None:
-            self.page = self.start
-        else:
-            assert self.file is not None
+#         if self.page is None:
+#             self.page = self.start
+#         else:
+#             assert self.file is not None
+#             self.file.close()
+#             self.file = None
+#             self.page += 1
+#             first = False
+#         filename = self.pattern % self.page
+            
+        if self.file:
             self.file.close()
             self.file = None
-            self.page += 1
+            first = False
+        try:
+            filename = self.pattern % self.pages.next()
+        except StopIteration, e:
+            return False                    # no more pages
             
-        filename = self.pattern % self.page
         #if not self.basespace.exists(filename): filename = self.pattern % self.new
         try:
             self.file = self.basespace.open(filename, mode = self.mode)
-        except IOError as e:
-            if self.page == self.start: raise               # 1st page doesn't exist? 'self' file doesn't exist, re-raise
-            return False
-        
+        except IOError, e:
+            if self.infinite and not first: return False
+            raise                           # finite range of pages or 1st page doesn't exist? 'self' file doesn't exist, re-raise
+            
         #print "=====  PAGE %s  =====" % self.page
         return True
         
@@ -505,7 +517,7 @@ class FileSpace(object):
         return self
         
     def addBase(self, base):
-        "Assign 'base' filespace as the most low-level base of the stack of filespaces ending with 'self'."
+        "Assign 'base' filespace as the most low-level base of the stack of filespaces having 'self' at the top."
         space = self
         while space.base: space = space.base
         space.base = base() if isinstance(base, type) else base
@@ -522,6 +534,9 @@ class Paged(FileSpace):
     
 class Json(FileSpace):
     File = JsonFile
+
+class Dast(FileSpace):
+    File = DastFile
 
 
 class ObjectFiles(FileSpace):
