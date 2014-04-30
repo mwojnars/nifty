@@ -14,7 +14,7 @@ You should have received a copy of the GNU General Public License along with Nif
 
 from __future__ import absolute_import
 import __builtin__, os, sys, glob, types as _types, re, numbers, json, time, datetime, calendar
-import logging, random, math, collections, unicodedata, heapq, threading
+import logging, random, math, collections, unicodedata, heapq, threading, inspect
 
 
 #####################################################################################################################################################
@@ -300,6 +300,8 @@ def heapmerge(*inputs):
 ###
 
 class __Object__(type):
+    "Metaclass for Object. Implements labels."
+    
     def __init__(cls, *args):
         cls.__labels__ = []                         # names of attributes that represent labels in this class
         cls.label('__transient__')                  # declare '__transient__' as a label and set up the list of labelled attributes, cls.__transient__
@@ -312,29 +314,77 @@ class __Object__(type):
     
     def normLabel(cls, label):
         "Normalize a list of labelled attributes declared in this class, by converting it from a string or inner class if necessary."
-        attrs = getattr(cls, label, [])                         # list of names of attributes labelled by 'label'
-        if istype(attrs):                                       # inner class?
-            attrs = getattrs(attrs)
-            for name in attrs.iterkeys():                       # check that all attrs can be safely copied to top class, without overwriting regular attr
+        attrs = getattr(cls, label, [])                     # list of names of attributes labelled by 'label'
+        if istype(attrs):                                   # inner class?
+            inner = attrs
+            vals = getattrs(inner)
+            for name in vals.iterkeys():                    # check that all attrs can be safely copied to top class, without overwriting regular attr
                 if not name in cls.__dict__: continue 
                 raise Exception("Attribute %s appears twice in %s: as a regular attribute and inside label class %s" %
                                 (name, cls, label))
-            setattrs(cls, attrs)                                # copy all attrs from the inner class to top class level
-            attrs = attrs.keys()                                # collect attr names
-        elif isstring(attrs):                                   # space-separated list of attribute names?
+            setattrs(cls, vals)                             # copy all attrs from the inner class to top class level
+            attrs = cls._getattrs(inner)
+            #attrs = vals.keys()                            # collect attr names
+        elif isstring(attrs):                               # space-separated list of attribute names?
             attrs = attrs.split()
         setattr(cls, label, attrs)
 
-    def inheritList(cls, label, order = True):
+    def inheritList(cls, label):
         "If 'label' is the name of a special attribute containing a list of items, append lists from base classes to cls's list."
         #"""Find out what attributes are labelled by 'label' in superclasses and label them in this class, too. 
         #'label' is the name of attribute that keeps a list of labelled attrs of a given class."""
         baseitems = [getattr(base, label, []) for base in cls.__bases__]        # get lists defined in base classes
         baseitems = reduce(lambda x,y:x+y, baseitems)                           # combine into one list
         items = getattr(cls, label)
-        combined = unique(baseitems + items, order = order)                     # add cls's items and uniqify
+        combined = unique(items + baseitems, order = True)                      # add cls's items at the BEGINNING and uniqify
         setattr(cls, label, combined)
 
+    def _getattrs(outer, cls):
+        """Get names of all attributes of a given class, arrange them in the same ORDER as in the source code,
+        and return together with their values as an Ord.
+        Warning: only the attributes that appear at the beginning of their line are detected.
+        For example, if attribubes are defined like this:
+            x = y = 0
+        only 'x' will be detected, 'y' will be missed.
+        """
+        from tokenize import generate_tokens
+        from StringIO import StringIO
+        import token
+        
+        src = outer._getsource(cls.__name__)
+        tokens = generate_tokens(StringIO(src).readline)
+        tokens = [(t[1], t[4]) for t in tokens if t[0] == token.NAME]               # pairs (name, line) for all NAME tokens
+        attrs = [name for (name,line) in tokens if line.strip().startswith(name)]   # only take names that start the line
+        attrs = unique(attrs, order = True)                                         # remove duplicates
+        
+        attrdict = getattrs(cls)
+        attrs = [name for name in attrs if name in attrdict]        # remove names that don't appear in 'attrdict'
+        for name in attrdict:                                       # append names that don't appear in 'attrs'
+            if name not in attrs: attrs.append(name)
+        
+        return attrs
+
+    def _getsource(outer, name):
+        """Improved variant of inspect.getsource(), corrected for inner classes.
+        Standard getsource() works incorrectly when two outer classes in the same file have inner classes with the same name.
+        """
+        outsrc = inspect.getsource(outer)           # all source of the outer class, contains somewhere the inner class 'name'
+        pat = re.compile(r'^(\s*)class\s*' + name + r'\b')
+        lines = outsrc.splitlines()
+        for i in range(len(lines)):                 # find the 1st line with "class 'name'"
+            match = pat.match(lines[i])
+            if not match: continue
+            indent = match.group(1)
+            indent1 = indent + ' '
+            indent2 = indent + '\t'
+            j = i + 1
+            while j < len(lines):                   # extract all lines of the block following "class 'name'"
+                line = lines[j]
+                sline = line.strip()
+                if line.startswith(indent1) or line.startswith(indent2) or sline == '' or sline.startswith('#'): j += 1
+                else: break
+            return '\n'.join(lines[i+1:j])
+        return outsrc                           # as a fallback, return all 'outsrc'
 
 class Object(object):
     """For easy creation of objects that can have assigned any attributes, unlike <object> instances. For example: 
@@ -588,6 +638,8 @@ def now():                                return datetime.datetime.now()
 def nowString(fmt = '%Y-%m-%d %H:%M:%S'): return datetime.datetime.now().strftime(fmt)
 def utcnow():                             return datetime.datetime.utcnow()
 
+def formatDatetime(dt): return dt.strftime('%Y-%m-%d %H:%M:%S')     # the most typical format for date+time printout
+
 def timestamp(t, tZone = 'UTC'):
     """Converts datetime or struct_time object 't' into Unix timestamp (int, in seconds).
     tZone specifies in what timezone 't' is in and can be either 'UTC' or 'local'. Should hold:
@@ -730,8 +782,9 @@ def openfile(f, mode = 'wt'):
     if f in [None, '', 'stdout']: return sys.stdout
     if f in ['stderr', 'stdin']: return getattr(sys, f)
     if isstring(f): return open(f, mode)
+    if isinstance(f, Tee): return f
     if not isinstance(f, file) or f.closed:
-        raise Exception("Tee, object of incorrect type passed as a file(name), or a closed file: %s" % f)
+        raise Exception("Object of incorrect type passed as a file(name), or a closed file: %s" % f)
     return f
 
 

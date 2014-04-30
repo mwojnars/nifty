@@ -3,7 +3,7 @@ Data pipes.
 Allow construction of complex networks (pipelines) of data processing units, that combined perform advanced operations, 
 and process large volumes of data (data streams) efficiently thanks to pipelining (processing one item at a time, instead of a full dataset).
 
-- All functional pipes (Operator, Monitor, Filter and subclasses) accept plain python functions 
+- All functional pipes (Transform, Monitor, Filter and subclasses) accept plain python functions 
   as an argument to initializer. This function is called if the core method was left unimplemented.
 
 ---
@@ -217,6 +217,7 @@ class __Cell__(__Object__):
         super(__Cell__, cls).__init__(*args)
         cls.label('__knobs__')
         cls.label('__inner__')
+        #print cls, 'knobs:', cls.__knobs__
 
 
 class Cell(Object):
@@ -244,6 +245,28 @@ class Cell(Object):
     Things to keep in mind:
     - properties defined inside inner classes, __knobs__ and __inner__, are automatically copied to parent class level 
       after class definition.
+      
+    INITIALIZATION.
+    
+    Cell base class provides special mechanism for class initialization to enable transparent setting of knobs during __init__,
+    without writing custom __init__ in each subclass that would only make a series of dumb assignments: self.X = X; self.Y = Y; ...
+    If the subclass doesn't implement __init__, all arguments passed to initializer are interpreted as knobs.
+    This is the case for unnamed arguments, too - they are interpreted as knobs passed in the order of their declaration
+    in the subclass'es __knobs__ property.
+    
+    Thus, Cell subclasses can perform initialization in 3 different ways:
+    1) Leave it entirely to Cell base initialization mechanism that interpretes all arguments as knobs.
+    2) Additionally to (1), override init() method to perform custom post-processing of knob values.
+       This shall only be used in final classes, not in classes intended for further subclassing,
+       so that calling super().init() can be safely omitted in all final classes.
+    3) The subclass can override __init__, possibly calling initKnobs() and init() inside like Cell.__init__ does,
+       but adding custom code in-between. This is a recommended approach for base classes which are intended 
+       for subclassing but still need to do custom post-processing of knob values or other initialization to be done
+       during __init__.
+    
+    Note that many types of initialization can be done also in setup(), _prolog() or open() - often these places
+    are more suitable than __init__, so most classes don't need custom init/__init__ at all.
+    
     """
     __metaclass__ = __Cell__
 
@@ -260,13 +283,37 @@ class Cell(Object):
 
     def __init__(self, *args, **knobs):
         """The client can pass knobs already in __init__, without manual call to setKnobs. 
-        Unnamed args passed down to custom init()."""
-        self.name = knobs.pop('name', None)
-        if knobs: self.setKnobs(knobs)
+        Unnamed args passed down to custom init(), but first interpreted as knobs passed in the order of their declaration
+        in the class."""
+        self.initKnobs(*args, **knobs)
         self.init(*args)
 
-    def init(self):
-        "Override in subclasses to provide custom initialization, without worrying about calling super __init__."
+    def init(self, *args):
+        """Override in subclasses to provide custom initialization, without worrying about calling super __init__.
+        Upon call, knobs are already set, so init() can post-process them or use their values as passed by the client to __init__.        
+        """
+
+    def initKnobs(self, *args, **knobs):
+        self.name = knobs.pop('name', None)         # special knob, not listed in __knobs__
+        unnamed = self._setUnnamedKnobs(*args)
+        if not knobs: return
+        for name in unnamed:                        # check that no unnamed knob value will be overriden by a named one
+            if name in knobs: 
+                raise Exception("Knob %s passed as both named and unnamed argument to __init__ of %s" % (name, self))
+        self.setKnobs(knobs)
+        
+    def _setUnnamedKnobs(self, *args):
+        """Interprets unnamed arguments passed to __init__ as knobs listed in the same order as on the __knobs__ list,
+        and assigns them to attributes of self. Returns names of assigned knobs.
+        """
+        if not args: return []
+        if len(args) > len(self.__knobs__): 
+            raise Exception("More unnamed arguments than knobs passed to _setUnnamedKnobs() of %s", self)
+        knobs = dict(zip(self.__knobs__, args))
+        #print self, knobs
+        self.setKnobs(knobs)
+        #print self.__dict__
+        return knobs.keys()
 
     def copy(self, deep = True):
         """Shorhand for copy(self) or deepcopy(self).
@@ -278,8 +325,8 @@ class Cell(Object):
         return copy(self)
         
     def copy1(self):
-        """Copying 1 step deeper than a shallow copy. Copies all attribute values, too, 
-        so collections (pipes, knobs) can be modified afterwards without affecting original ones."""
+        """Copying 1 step deeper than a shallow copy. Copies all attribute values, too, so inner collections 
+        (lists/dicts) of pipes/knobs can be modified afterwards without affecting original ones."""
         res = copy(self)
         d = res.__dict__
         for k, v in d.iteritems():
@@ -290,12 +337,15 @@ class Cell(Object):
         "Dict with current values of all the knobs of 'self'."
         return {name:getattr(self,name) for name in self.__knobs__}
 
-    def setKnobs(self, knobs, strict = False):
+    def setKnobs(self, knobs = {}, strict = False, **kwargs):
         """Set given dict of 'knobs' onto 'self' and sub-cells. In strict mode, all 'knobs' must be recognized 
         (declared as knobs) in self.
         Subclasses should treat objects inside 'knobs' as *immutable* and must not make any modifications,
         since a given knob instance can be reused multiple times by the client.
         """
+        if kwargs:
+            knobs = knobs.copy()
+            knobs.update(kwargs)
         #print id(self), self, '...'
         #print "  setKnobs:", knobs
         for cell in self.inner(): cell.setKnobs(knobs, strict)          # walk the tree of all inner cells first
@@ -348,7 +398,7 @@ class Cell(Object):
     
     def __str__(self):
         if not self.name: return classname(self)
-        return "%s[%s]" % (self.name, classname(self))
+        return "%s [%s]" % (self.name, classname(self))
 
     def _pushTrace(self, pipe): trace.push(pipe)
     def _popTrace (self, pipe): trace.pop(pipe) if trace else None      # 'if' necessary for unit tests to avoid strange error messages
@@ -486,7 +536,7 @@ class Pipe(Cell):
         self._epilog()
 
     def iter(self):
-        """If you subclass Pipe directly, not via specialized base classes (Operator, Monitor, Filter, ...),
+        """If you subclass Pipe directly, not via specialized base classes (Transform, Monitor, Filter, ...),
         better override iter() not __iter__()."""
         raise NotImplemented()
 
@@ -497,7 +547,7 @@ class Pipe(Cell):
             self.created = True
         if self.iterating: raise Exception("Data pipe %s opened for iteration twice, before previous iteration has been closed" % self)
         self.iterating = True
-        self.count = self.yielded = 0
+        self.yielded = 0
         header = self.open()
         self._pushTrace(self)
         return header
@@ -562,9 +612,11 @@ class Pipe(Cell):
             batch.append(item)
         if batch: yield batch
 
-#     def __mult__(self, other):
-#         """Multiplication '*' operator creates a Zip node that combines items from all input sources, 1 from each, into output tuples."""
-#         return Zip(self, other)
+    def stats(self):
+        """String with detailed statistics of the no. of input & output items that passed through the pipe in the current
+        or last iteration. For reporting and debugging. Can be overridden in subclasses to provide details 
+        specific to the subclass."""
+        return "No. of input/output data items of %s: %s, %s" % (self, self.count, self.yielded)
 
 #     def getSpec(self):
 #         "1-line string with technical specification of this pipe: its name and possibly values of its knobs etc."
@@ -585,29 +637,43 @@ RUN = Pipe()
 
 #####################################################################################################################################################
 ###
+###   FAMILIES
+###
+
+"""
+class Operator(Pipe):
+    "Any flat pipe: without inner pipes. Can be unary or multiary."
+
+class Container(Pipe):
+    "A pipe tha contains inner pipe(s)."
+"""
+
+#####################################################################################################################################################
+###
 ###   FUNCTIONAL PIPES
 ###
 
 class _Functional(Pipe):
-    "Base class for Operator, Monitor and Filter. Implements wrapping up a custom python function into a functional pipe."
+    "Base class for Transform, Monitor and Filter. Implements wrapping up a custom python function into a functional pipe."
 
     fun = None              # plain python function to be used as the class implementation, if core method not overriden
     
-    def __init__(self, *args, **knobs):
-        "Inner function - if present - must be given as 1st and only unnamed argument. All knobs given as keyword args."
-        if args: self.fun = args[0]
-        super(_Functional, self).__init__(**knobs)
+#     def __init__(self, *args, **knobs):
+#         "Inner function - if present - must be given as 1st and only unnamed argument. All knobs given as keyword args."
+#         if args: self.fun = args[0]
+#         super(_Functional, self).__init__(**knobs)
     
-class Operator(_Functional):
+class Transform(_Functional):
     """Plain item-wise processing & filtering function, implemented in the subclass by overloading process() 
     and possibly also open/close(). Method process(item) returns modified version of the item,
     or None to indicate that the item should be dropped (filtered out).
-    For operators that only perform filtering, with no modification of items, see Filter class."""
+    For operators that only perform filtering, with no modification of items, use Filter class instead."""
     
     def __iter__(self):
         header = self._prolog()
         if header is not None: yield header
         try:
+            self.count = 0
             for item in self.source: 
                 self.count += 1
                 res = self.process(item)
@@ -634,27 +700,40 @@ class Monitor(_Functional):
     Subclasses override monitor(item) and possibly open/close() or report(). 
     The monitoring function can also be passed as the 2nd argument to __init__."""
 
-    mode     = 'wt'         # mode to be used for opening files
-    outfiles = []           # list of: <file> or name of file, where logging/reporting should be printed out
-    out      = None         # the actual file object to be used for all printing/logging/reporting in monitor() and report();
+    class __knobs__:
+        outfiles = None     # list of: <file> or name of file, where logging/reporting should be printed out
+        mode     = 'wt'     # mode to be used for opening files
+
+    out = None              # the actual file object to be used for all printing/logging/reporting in monitor() and report();
                             # opened in _prolog(), can stay None if the pipe doesn't need output stream
     
-    def __init__(self, outfiles = None, *args, **kwargs):
-        """'outfiles' can be: None or '' (=stdout), or a <file>, or a filename, or a list of <file>s or filenames 
-        (None, '' and 'stdout' allowed). 'stdout', 'stderr', 'stdin' are special names, mapped to sys.* file objects."""
-        self.outfiles = outfiles if islist(outfiles) else [outfiles]
-        #print self, self.outfiles
-        super(Monitor, self).__init__(*args, **kwargs)
+#     def __init__(self, *args, **kwargs):
+#         """'outfiles' can be: None or '' (=stdout), or a <file>, or a filename, or a list of <file>s or filenames 
+#         (None, '' and 'stdout' allowed). 'stdout', 'stderr', 'stdin' are special names, mapped to sys.* file objects."""
+#         self.initKnobs(*args, **kwargs)
+#         if not islist(self.outfiles): self.outfiles = [self.outfiles]
+#         self.init(*args)
+
+#     def init(self, *args):
+#         if not islist(self.outfiles): self.outfiles = [self.outfiles]
+        
+#     def __init__(self, outfiles = None, *args, **knobs):
+#         """'outfiles' can be: None or '' (=stdout), or a <file>, or a filename, or a list of <file>s or filenames 
+#         (None, '' and 'stdout' allowed). 'stdout', 'stderr', 'stdin' are special names, mapped to sys.* file objects."""
+#         self.outfiles = outfiles if islist(outfiles) else [outfiles]
+#         #print self, self.outfiles
+#         super(Monitor, self).__init__(*args, **knobs)
 
     def __getstate__(self):
-        "Handles serialization/copying of file objects in self.outfiles and self.out."
+        "Handles serialization/copying of file objects in self.outfiles and self.out (standard copy doesn't work for files)."
         state = super(Monitor, self).__getstate__()
         def encode(f, std = {sys.stdout:'stdout', sys.stderr:'stderr', sys.stdin:'stdin'}):
             if not isinstance(f, (file, Tee)): return f
             if f in std: return std[f]
             raise Exception("Monitor.__getstate__, can't serialize/copy a file object: %s" % f)
         
-        if 'outfiles' in state: state['outfiles'] = [encode(f) for f in self.outfiles]
+        if 'outfiles' in state: 
+            state['outfiles'] = [encode(f) for f in self.outfiles] if islist(self.outfiles) else encode(self.outfiles)
         if 'out' in state: state['out'] = encode(self.out)
         return state
         
@@ -668,12 +747,12 @@ class Monitor(_Functional):
     def __iter__(self):
         header = self._prolog()
         if header is not None: yield header
-        self.count = 0
         try:
+            self.count = 0
             for item in self.source: 
                 self.count += 1
                 self.monitor(item)
-                self.yielded += 1           # unlike in Operator, we don't expect any returned result from monitor()
+                self.yielded += 1           # unlike in Transform, we don't expect any returned result from monitor()
                 yield item                  # however, watch out for bugs: monitor() can implicitly modify internals of 'item' unless 'item' is immutable
         
         except GeneratorExit, ex:
@@ -683,6 +762,7 @@ class Monitor(_Functional):
 
     def _prolog(self):
         "Open the output stream, self.out."
+        if not islist(self.outfiles): self.outfiles = [self.outfiles]
         if len(self.outfiles) > 1:
             self.out = Tee(*self.outfiles) 
         elif self.outfiles:
@@ -717,11 +797,12 @@ class Filter(_Functional):
         header = self._prolog()
         if header is not None: yield header
         try:
+            self.count = 0
             for item in self.source: 
                 self.count += 1
                 if self.accept(item): 
                     self.yielded += 1
-                    yield item        # unlike in Operator, we expect only True/False from accept/process(), not an actual data object
+                    yield item        # unlike in Transform, we expect only True/False from accept/process(), not an actual data object
         
         except GeneratorExit, ex:
             self._epilog()
@@ -777,9 +858,9 @@ class File(Pipe):
         else: self.file.reopen()
         return iter(self.file)
     
-class Function(Operator):
+class Function(Transform):
     """An operator OR a filter constructed from a plain python function. A wrapper.
-    Explicit use of Operator or Filter classes instead of this one is recommended."""
+    Explicit use of Transform or Filter classes instead of this one is recommended."""
     def __init__(self, oper = None):
         "oper=None handles the case when processing function is implemented through overloading of process()."
         self.oper = oper
@@ -791,6 +872,10 @@ class Function(Operator):
         if ret is False: return None
         if ret is None: return item         # for monitor- or operator-like functions that don't make final 'return item'
         return ret
+    def __str__(self):
+        if self.oper and hasattr(self.oper, 'func_name'):
+            return "%s %s" % (classname(self), self.oper.func_name)
+        return classname(self)
 
 
 ###  Generators
@@ -834,11 +919,12 @@ class Slice(Pipe):
         return islice(self.source, *self.args)
 
 class Offset(Pipe):
-    "Drop a predefined number of initial items"
+    """Drop a predefined number of initial items.
+    >>> PIPE >> [1,2,3,4,5,6] >> Offset(2) >> Offset(offset=2) >> List >> Print >> RUN
+    [5, 6]
+    """
     class __knobs__:
         offset = 0
-    def init(self, offset):
-        self.offset = offset
     def iter(self):
         count = 0
         for item in self.source: 
@@ -850,15 +936,15 @@ class Limit(Pipe):
     "Terminate the data stream after a predefined number of items. 'Head' is an alias."
     class __knobs__:
         limit = 0
-    def init(self, limit):
-        self.limit = limit
+#     def init(self, limit):
+#         self.limit = limit
     def iter(self):
-        count = 0
-        if count >= self.limit: return
+        self.count = 0
+        if self.count >= self.limit: return
         for item in self.source: 
+            self.count += 1
             yield item
-            count += 1
-            if count >= self.limit: return
+            if self.count >= self.limit: return
 Head = Limit
 
 class DropWhile(Pipe):
@@ -878,16 +964,18 @@ class Subset(Pipe):
     """
     class __knobs__:
         fraction = 1
-    def init(self, fraction):
-        self.fraction = fraction
+#     def init(self, fraction):
+#         self.fraction = fraction
     def iter(self):
         frac = self.fraction
-        count = 0                               # count iterates in cycles from 0 to 'frac', and again from 0 ...
+        batch = 0                               # current batch size, iterates in cycles from 0 to 'frac', and again from 0 ...
+        self.count = 0
         for item in self.source: 
-            count += 1
-            if count == frac: 
+            self.count += 1
+            batch += 1
+            if batch == frac: 
                 yield item
-                count = 0
+                batch = 0
 
 class Sample(Pipe):
     "Random sample of input items. Every input item is decided independently with a given probability, unconditional on what items were chosen earlier."
@@ -910,8 +998,8 @@ class Sort(Pipe):
     """
     class __knobs__:
         size = None
-    def init(self, size = None):
-        self.size = size
+#     def init(self, size = None):
+#         self.size = size
     def iter(self):
         from heapq import heapify, heappush, heappop
         source = iter(self.source)
@@ -950,7 +1038,8 @@ class Print(Monitor):
         outfile: path to external output file or None; disp: shall we print to stdout?; count: shall we print 1-based item number at the begining of a line?
         subset: print every n-th item (see Subset), or None to print all items."""
         if outfile and disp: outfile = [outfile, sys.stdout]
-        Monitor.__init__(self, outfile, *args, **kwargs)
+        kwargs['outfile'] = outfile
+        Monitor.__init__(self, *args, **kwargs)
         #if '%s' not in msg: msg += ' %s'
         self.static = ('%s' not in msg)
         self.message = msg
@@ -979,31 +1068,46 @@ def PrintSubset(subset, func = None, count = True, outfile = None, disp = True):
 
 class Count(Monitor):
     "Counts data items and prints the index before yielding each consecutive item. Indexing is 1-based by default, this can be changed. No newline added by default."
-    def __init__(self, step = 1, msg = "%d", start = 1):
-        "If step is float in (0,1), adaptive step is used: next step is 'step' fraction of the total no. of items read so far."
-        Monitor.__init__(self)
-        if '%d' not in msg: msg = '%d ' + msg
-        self.message = msg
-        if isint(step):
-            self.step, self.frac = (step, None)
+    class __knobs__:
+        step  = 1
+        msg   = "%d "           # thanks to the space after %d you can use: Count >> Print >> ... and print other data after the count on the same line
+        start = 1
+    
+#     def __init__(self, step = 1, msg = "%d", start = 1):
+#         "If step is float in (0,1), adaptive step is used: next step is 'step' fraction of the total no. of items read so far."
+#         Monitor.__init__(self)
+#         if '%d' not in msg: msg = '%d ' + msg
+#         self.msg = msg
+#         if isint(step):
+#             self.step, self.frac = (step, None)
+#         else:
+#             self.step, self.frac = (None, step)
+    def init(self, *args):
+        if '%d' not in self.msg: self.msg = '%d ' + self.msg
+        if isint(self.step):
+            self.step, self.frac = (self.step, None)
         else:
-            self.step, self.frac = (None, step)
+            self.step, self.frac = (None, self.step)
+            
     def open(self):
         self.next = self.step or 1
+        print "Count self.out:", self.out, self.out.files
     def monitor(self, _):
         if self.count >= self.next:
             with self.printlock:
-                print self.message % self.count,
+                self.out.write( self.msg % self.count )
             if self.step: self.next = self.count + self.step
             else: 
                 step = int(self.count * self.frac) + 1
                 digits = int(math.log10(step))              # no. of digits after the 1st one - that many should be zeroed out in 'next'
                 self.next = self.count + step
                 self.next = int(round(self.next, -digits))
+
 def Countn(*args, **kwargs):
     "'Count with newline': like Count, but adds newline instead of space after each printed number."
     return Count(*args, msg = '%d\n', **kwargs)
-        
+
+
 class Progress(Monitor):
     "Like Count, but prints progress as a percentage of 'total' instead of an absolute count. Total no. of items must be known in advance."
     def __init__(self, total, step = 10, msg = "%.0f%%"):
@@ -1021,22 +1125,33 @@ class Progress(Monitor):
     
 class Total(Monitor):
     "Print total no. of items at the end of processing."
-    def init(self, msg = "Data items:   %d"):
-        if msg is None: return
-        try: msg % 0
-        except: msg += " %d"                    # append format character if missing
-        self.msgTotal = msg
+    class __knobs__:
+        msgTotal = "#items:  %d"
+    
+    def init(self, *args):
+        if self.msgTotal is None: return
+        try: self.msgTotal % 0
+        except: self.msgTotal += " %d"                   # append format character if missing
+#     def init(self, msgTotal = "#items:  %d"):
+#         if msgTotal is None: return
+#         try: msgTotal % 0
+#         except: msgTotal += " %d"                   # append format character if missing
+#         self.msgTotal = msgTotal
     def monitor(self, item): pass
     def close(self):
         with self.printlock: print self.msgTotal % self.count
 
 class Time(Monitor):
     "Measure time since the beginning of data iteration. If 'message' is present, print the total time at the end, embedded in 'message'."
-    def init(self, message = "Time elapsed: %.1f s"):
-        self.msgTime = message
-        self.start = None               # time when last open() was run, as Unix timestamp
-        self.elapsed = None             # final time elapsed, in seconds, as float
-    def open(self): 
+    class __knobs__:
+        msgTime = "Time elapsed: %.1f s"
+        
+    start = None                # time when last open() was run, as Unix timestamp
+    elapsed = None              # final time elapsed, in seconds, as float
+
+#     def init(self, msgTime = "Time elapsed: %.1f s"):
+#         self.msgTime = msgTime
+    def open(self):
         self.start = time()
     def current(self):
         return time() - self.start      # current count of time elapsed; can be called during iteration, when 'elapsed' is not yet available
@@ -1171,10 +1286,10 @@ class Pile(Pipe):
         self.emptylines = emptylines
         
     def __iter__(self):
-        if self.source: return self._write(self.source)
+        if self.source: return self._write()
         else: return self._read()
         
-    def _write(self, source):
+    def _write(self):
         if isstring(self.file):
             mode = 'at' if self.append else 'wt'
             rawclass = SafeRewriteFile if self.rewrite else files_File
@@ -1183,7 +1298,9 @@ class Pile(Pipe):
             f = self.file
             f.open()
         
-        for item in source:
+        self.count = 0
+        for item in self.source:
+            self.count += 1
             f.write(item)
             yield item
         f.close()
@@ -1217,7 +1334,9 @@ class List(Pipe):
     "Combines all input items into a list. At the end, this list is output as the only output item; it's also directly available as self.items property."
     def iter(self):
         self.items = []
+        self.count = 0
         for item in self.source:
+            self.count += 1
             self.items.append(item)
         yield self.items
 
@@ -1256,7 +1375,10 @@ class Wrapper(MetaPipe):
     
     pipe = None
     
-    def setKnobs(self, knobs, strict = False):
+    def setKnobs(self, knobs = {}, strict = False, **kwargs):
+        if kwargs:
+            knobs = knobs.copy()
+            knobs.update(kwargs)
         super(Wrapper, self).setKnobs(knobs, strict)            # Wrapper itself has no knobs, but a subclass can define some
         if self.pipe: self.pipe.setKnobs(knobs, strict)
         
@@ -1279,11 +1401,8 @@ class Pipeline(MetaPipe):
     
     #__inner__ = "pipeline"
     
-    def __init__(self, *pipes, **kwargs):
-        "'kwargs' may contain connected=True to indicate that pipes are already connected into a list or a tree (must be sorted in topological order!)."
-        if pipes and islist(pipes[0]): pipes = pipes[0]
+    def __init__(self, *pipes, **knobs):
         self.pipes = list(pipes)
-        #if kwargs.get("connected"): return
         
     def __rshift__(self, other):
         """Append 'other' to the end of the pipeline. Shallow-copy the pipeline beforehand, 
@@ -1301,7 +1420,15 @@ class Pipeline(MetaPipe):
         res.pipes = [other] + res.pipes
         return res
 
-    def setKnobs(self, knobs, strict = False):
+    def __getitem__(self, pos):
+        """Returns either an operating pipe from self.pipeline, or a static pipe from self.pipes, 
+        depending whether called during iteration or not."""
+        return self.pipeline[pos] if self.iterating else self.pipes[pos]
+    
+    def setKnobs(self, knobs = {}, strict = False, **kwargs):
+        if kwargs:
+            knobs = knobs.copy()
+            knobs.update(kwargs)
         super(Pipeline, self).setKnobs(knobs)           # Pipeline itself has no knobs, but a subclass can define some
         for pipe in self.pipes:                         # set knobs in template pipes (some of them can be actual pipes)
             if isinstance(pipe, Cell): pipe.setKnobs(knobs)
@@ -1338,26 +1465,36 @@ class Pipeline(MetaPipe):
             prev = next
             
         # pull data
-        head = self.pipeline[-1]
-        for item in head: yield item
+        head, tail = self.pipeline[-1], self.pipeline[0]
+        for item in head: 
+            self.count = tail.count                         # update indirectly how many items were read from source
+            yield item
+        self.count = tail.count        
     
-    def close(self):
-        if not self.verbose: return
-        with self.printlock:
-            print "Data counts [input, pipe name, output] of", self
-            for pipe in self.pipeline:
-                print "%7d" % pipe.count, pipe, pipe.yielded
+    def flatten(self):
+        "Flattened list of all pipes involved in the current self.pipeline, with nested pipelines replaced with lists of their pipes."
+        def flat(pipes):
+            result = []
+            for p in pipes:
+                if isinstance(p, Pipeline): result += flat(p.pipeline)
+                else: result.append(p)
+            return result
+        return flat(self.pipeline)
     
-    def __getitem__(self, pos):
-        """Returns either an operating pipe from self.pipeline, or a static pipe from self.pipes, 
-        depending whether called during iteration or not.
+    def stats(self):
+        """String with detailed statistics of the no. of input & output items in each pipe of the flattened pipeline.
+        Should be called during or after iteration, when self.pipeline exists, otherwise only general info is returned.
         """
-        return self.pipeline[pos] if self.iterating else self.pipes[pos]
+        if not self.pipeline: return super(Pipeline, self).stats()
+        lines = ["No. of data items (#input, pipe, #output) passing through each pipe of: %s" % self]
+        for pipe in self.flatten():
+            lines += ["%7s %s %s" % (pipe.count, pipe, pipe.yielded)]
+        return '\n'.join(lines)
     
     def __str__(self):
         if self.iterating:
-            return "Open pipeline " + ' >> '.join(map(str, self.pipeline))
-        return "Pipeline " + ' >> '.join(map(str, self.pipes))
+            return "open Pipeline [" + '] >> ['.join(map(str, self.pipeline)) + ']'
+        return "Pipeline [" + '] >> ['.join(map(str, self.pipes)) + ']'
     
 
 #####################################################################################################################################################
@@ -1391,7 +1528,7 @@ class Union(MultiSource):
     TODO: 'mixed' mode (breadth-first, streams interlaced)."""
     def __init__(self, *sources):
         self.sources = _normalize(sources)
-    def __iter__(self):
+    def iter(self):
         return itertools.chain(*self.sources)
     def __add__(self, other):
         res = self.copy1()
@@ -1464,6 +1601,16 @@ class Grid(MetaOptimize):
         self.names = knobs.keys()                           # names of knobs
         self.done = None                                    # no. of runs completed so far
     
+    def createKnobs(self, ID, values):
+        "Creates one combination of knobs using given values and returns as a list of (name,value) pairs."
+        return Knobs([(self.runID, ID)] + zip(self.names, values))
+        
+    def createPipe(self, knobs, forceCopy = False):
+        pipe = self.pipe.copy() if (self.copyPipe or forceCopy) else self.pipe
+        pipe.setKnobs(knobs)
+        #pipe.setup()
+        return pipe
+        
     def iter(self):
         self.done = 0
         if self.maxThreads is None or self.maxThreads > 1:
@@ -1504,16 +1651,6 @@ class Grid(MetaOptimize):
             self.scanParallel(kgroup)
             self.done += len(kgroup)
 
-    def createKnobs(self, ID, values):
-        "Creates one combination of knobs using given values and returns as a list of (name,value) pairs."
-        return Knobs([(self.runID, ID)] + zip(self.names, values))
-        
-    def createPipe(self, knobs, forceCopy = False):
-        pipe = self.pipe.copy() if (self.copyPipe or forceCopy) else self.pipe
-        pipe.setKnobs(knobs)
-        #pipe.setup()
-        return pipe
-        
     def scanSerial(self, value, ID):
         """Single scan over input data, with items passed directly to the single pipe being executed. 
         No parallelism, no multi-threading, no pipe copying.
@@ -1524,21 +1661,23 @@ class Grid(MetaOptimize):
         pipe = self.createPipe(knobs)
         self.printKnobs(knobs)
         PIPE >> self.source >> pipe >> RUN
+        self.count = pipe.count
+        self.report(pipe)
     
     def scanParallel(self, knobsGroup):
         "Single scan over input data, with each item fed to a group of parallel threads."
         with self.printlock: print "Grid, starting next parallel scan for %d runs beginning with ID=%s..." % (len(knobsGroup), knobsGroup[0][0][1])
-        self.count = 0
         threads = self.createThreads(knobsGroup)
         duplicate = deepcopy if self.copyData else lambda x:x
 
+        self.count = 0
         for item in self.source: 
             self.count += 1
-            for _, pipe in threads:                             # feed input data to each pipe in parallel
-                pipe.put(duplicate(item))
+            for _, thread in threads:                           # feed input data to each pipe in parallel
+                thread.put(duplicate(item))
         
         self.closeThreads(threads)
-        
+
     def createThreads(self, knobsGroup):
         threads = []                                            # list of pairs: (knobs, pipe_thread)
         for knobs in knobsGroup:                                # create a copy of the template pipe for each combination of knob values; wrap up in threads
@@ -1548,17 +1687,24 @@ class Grid(MetaOptimize):
             threads.append((knobs, thread))
         return threads
         
-    def closeThreads(self, pipes):
-        for _, pipe in pipes:
-            pipe.emptyFeed()                    # wait until all pipes eat up all remaining input items; note: some pipes may still be processing the last item!
-        sleep(1)
+    def closeThreads(self, threads):
+        for _, thread in threads:
+            thread.emptyFeed()              # wait until all pipes eat up all remaining input items;
+        sleep(1)                            # note: some pipes may still be processing the last item! thus sleep()
         
-        with self.printlock: print "Grid, %d runs done." % (self.done + len(pipes))
-        for knobs, pipe in pipes:
+        for _, thread in threads:           # if verbose, print stats of #items 
+            self.report(thread.pipe)
+        
+        with self.printlock: print "Grid, %d runs done." % (self.done + len(threads))
+        for knobs, thread in threads:
             self.printKnobs(knobs)
-            pipe.end()
-            pipe.join()
+            thread.end()
+            thread.join()
 
+    def report(self, pipe):
+        if not self.verbose: return
+        with self.printlock: print pipe.stats()
+        
     def printKnobs(self, knobs):
         with self.printlock:
             print "----------------------------------------------------------------"
@@ -1579,7 +1725,7 @@ class Controller(Wrapper):
     to its input and manually retrieving items from the output, with possibly some additional operations
     performed before/during/after the item is processed.
     In default implementation of process(), the inner pipe is expected to pull exactly 1 item at a time
-    from the source, otherwise an exception will be raised (typically the pipe is an Operator).
+    from the source, otherwise an exception will be raised (typically the pipe is an Transform).
     However, if a subclass overrides process(), it can expect the inner pipe to exhibit any other type 
     of input-output behavior.
     """
@@ -1656,9 +1802,9 @@ class operator(Controller):
     >>> print fun(['Ala'])
     ['ALA', 'ALA']
     >>> print fun.pipe[0]
-    Function
+    Function <lambda>
     
-    Typically the pipe is an instance of Operator. Even if not, it still must pull exactly 1 item at a time
+    Typically the pipe is an instance of Transform. Even if not, it still must pull exactly 1 item at a time
     from the source, otherwise an exception will be raised.
     Can be used in the same caller's thread, no need to spawn a new thread.
     """
@@ -1736,7 +1882,6 @@ class Thread(threading.Thread, Wrapper):
             if item is Thread.END: break
             yield item
         
-    
 
 #####################################################################################################################################################
 
@@ -1751,32 +1896,7 @@ def _normalize(pipes):
         if isstring(h): return None
         return h
     return filter(None, map(convert, pipes))
-    
-#####################################################################################################################################################
-###
-###   NUMPY ARRAYS
-###
 
-import numpy.linalg as linalg
-
-norm = linalg.norm
-
-###   2D DATA   ###
-
-def zeroSum(X):
-    "Shift values in each row to zero out in-row sums."
-
-def unitSum(X):
-    "Scale 1D vector X, or all rows of 2D array X, to unit sum. All sums must be originally non-zero."
-    if X.ndim == 1:
-        return X / np.sum(X)
-    if X.ndim == 2:
-        scale = 1. / np.sum(X,1)
-        scale = scale[:,np.newaxis]
-        return X * scale                # numpy "broadcasting" activates here, it automatically copies 'scale' to all columns
-    
-def unitNorm(X, p = 2):
-    ""
 
 #####################################################################################################################################################
 

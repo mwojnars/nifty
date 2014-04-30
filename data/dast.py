@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 DAST (DAta STorage) file format. 
-Allows easy, object-oriented, stream-oriented, human-readable serialization and de-serialization of any data structures.
+Allows easy, object-oriented, streamed, human-readable serialization and de-serialization of any data structures.
 
 3 types of value formatting: inline (bounded), endline (unbounded/open, occupies line up to the nearest \n), outline (multiline; possibly mixed with endline)
 

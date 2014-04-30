@@ -12,9 +12,10 @@ You should have received a copy of the GNU General Public License along with Nif
 '''
 
 from __future__ import absolute_import
-import numpy as np
-from numpy import sum, mean, zeros, sqrt, pi, exp, isnan, isinf, arctan
 import random, bisect, json
+import numpy as np
+import numpy.linalg as linalg
+from numpy import sum, mean, zeros, sqrt, pi, exp, isnan, isinf, arctan
 
 from nifty.util import isnumber
 
@@ -42,6 +43,9 @@ def np_dumps(V, format_spec = '%.5g'):
 def np_loads(s):
     "Load numpy vector from a string in JSON format: [x1,x2,...,xn]"
     return np.array(json.loads(s))
+
+# shorthand; norm() calculates norm of a matrix or vector
+norm = linalg.norm
 
 
 ########################################################################################################################
@@ -80,7 +84,7 @@ class WeightedRandom(object):
 
 ########################################################################################################################
 ###
-###   SCALAR & point-wise mathematical transformations
+###   SCALAR functions & point-wise transformations
 ###
 
 def minmax(x):
@@ -96,8 +100,23 @@ def logx(x):
     "Natural logarithm shifted by 1 so that 0-->0, and extended to entire R range, symmetrically respective to (0,0); logx(-1,0,1) == [-log(2), 0, log(2)]."
     return np.log(abs(x) + 1) * np.sign(x)
 
+def mexican(x, std = 1.0, mean = 0.0):
+    '''Values of mexican hat function, calculated in point x (can be an ndarray).
+       See: http://en.wikipedia.org/wiki/Mexican_hat_wavelet
+    '''
+    if mean != 0.0 or std != 1.0:
+        x = (x - mean) / std
+    x2 = x**2
+    f1 = 2.0 / ((3.0*std)**0.5 * pi**0.25)
+    f2 = 1.0 - x2
+    f3 = exp(-x2 / 2)
+    return f1 * f2 * f3
+    
 
-### Sigmoidal functions for use in predictive models and data processing
+########################################################################################################################
+###
+###   SIGMOIDAL functions, for predictive models and data processing
+###
 
 def logistic(x, center = None, slope = None, deriv = False):
     "Logistic function: f(x) = 1/(1+e^(-x)). Derivative: f'(x) = f(x)*(1-f(x))"
@@ -179,19 +198,19 @@ def binarize(x, x01 = 0.1, x09 = 0.9, funsigm = sigmoid_sqrt, delta = 2.0):
         
     return Y
 
-def mexican(x, std = 1.0, mean = 0.0):
-    '''
-    Values of mexican hat function, calculated in point x (can be an ndarray).
-    See: http://en.wikipedia.org/wiki/Mexican_hat_wavelet
-    '''
-    if mean != 0.0 or std != 1.0:
-        x = (x - mean) / std
-    x2 = x**2
-    f1 = 2.0 / ((3.0*std)**0.5 * pi**0.25)
-    f2 = 1.0 - x2
-    f3 = exp(-x2 / 2)
-    return f1 * f2 * f3
-    
+
+########################################################################################################################
+###
+###   VECTOR-to-SCALAR transformations
+###
+
+def normv2(x, axis = -1):
+    "Squared euclidean norm of vectors contained in matrix 'x', along 'axis'. Last axis by default."
+    return np.sum(x*x, axis)
+def normv(x, axis = -1):
+    "Euclidean norm of vectors contained in matrix 'x', along 'axis'. Last axis by default."
+    return np.sqrt(normv2(x,axis))
+
 def softmax(scores, slope = None, eps = 1e-10):
     "softmax function: turns a vector of real-valued scores into unit-sum probabilities by applying exp() and normalization."
     scores = scores - np.max(scores)            # shift values to avoid overflow in exp()
@@ -201,6 +220,27 @@ def softmax(scores, slope = None, eps = 1e-10):
     #print "", Z, list(exps.flat)
     assert not isnan(Z) and not isinf(Z)
     return exps / (Z + eps)                     # 1-d vector
+
+
+########################################################################################################################
+###
+###   VECTOR-to-VECTOR transformations
+###
+
+def zeroSum(X):
+    "Shift values of vector(s) to zero sum."
+
+def unitSum(X):
+    "Scale 1D vector X, or all rows of 2D array X, to unit sum. All sums must be originally non-zero."
+    if X.ndim == 1:
+        return X / np.sum(X)
+    if X.ndim == 2:
+        scale = 1. / np.sum(X,1)
+        scale = scale[:,np.newaxis]
+        return X * scale                # numpy "broadcasting" activates here, it automatically copies 'scale' to all columns
+    
+def unitNorm(X, p = 2):
+    "Scale vector(s) to unit norm."
 
 
 ########################################################################################################################
@@ -215,16 +255,3 @@ def likelihood(probs, log = np.log, exp = False):
     loglike = mean(log(probs))
     return np.exp(loglike) if exp else loglike
     
-
-########################################################################################################################
-###
-###   VECTOR-wise operations
-###
-
-def normv2(x, axis = -1):
-    "Squared euclidean norm of vectors contained in matrix 'x', along 'axis'. Last axis by default."
-    return np.sum(x*x, axis)
-def normv(x, axis = -1):
-    "Euclidean norm of vectors contained in matrix 'x', along 'axis'. Last axis by default."
-    return np.sqrt(normv2(x,axis))
-

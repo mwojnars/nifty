@@ -379,7 +379,8 @@ class PagedFile(GenericFile):
     """Logical object file partitioned into a number of separate files (pages), named *.1, *.2, ... 
     (TODO:) On write, new part is created after size threshold is reached."""
     
-    new = "new"         # name to be used for the new page (not yet completed); when done, this page is renamed to its ultimate name
+    new  = "new"        # name to be used for the new page (not yet completed) during write; when done, renamed to its ultimate name
+    last = "new"        # name of the last file to be tried during reading, when no more regular IDs are present; None if nothing more should be tried
     
     def __init__(self, pattern, start = 1, stop = None, ids = None, **kwargs):
         "Example 'pattern': data.%s, data.%s.json. 'ids' (optional) is a list of file IDs to be used instead of (start,stop) range."
@@ -399,6 +400,7 @@ class PagedFile(GenericFile):
                      else count(self.start)
         self.infinite = isinstance(self.pages, count)   # iterating over infinite range of pages? missing page allowed after 1st one
         self.file = None                                # base file with the current page
+        self.filename = None
         self.openNext()                                 # open 1st page
         
     def _close(self):
@@ -417,18 +419,6 @@ class PagedFile(GenericFile):
     def openNext(self):
         "Close the current page and open the next one. Return True if succeeded, False if no more pages, exception when no pages present at all."
         first = True
-
-        # advance page counter
-#         if self.page is None:
-#             self.page = self.start
-#         else:
-#             assert self.file is not None
-#             self.file.close()
-#             self.file = None
-#             self.page += 1
-#             first = False
-#         filename = self.pattern % self.page
-            
         if self.file:
             self.file.close()
             self.file = None
@@ -436,18 +426,32 @@ class PagedFile(GenericFile):
         try:
             filename = self.pattern % self.pages.next()
         except StopIteration, e:
-            return False                    # no more pages
+            return self.openLast()                                      # no more pages? try once again with the 'last' name
             
-        #if not self.basespace.exists(filename): filename = self.pattern % self.new
+#         if self.infinite and self.last and not self.basespace.exists(filename): 
+#             filename = self.pattern % self.last
         try:
             self.file = self.basespace.open(filename, mode = self.mode)
+            self.filename = filename
+            #print "=====  PAGE %s  =====" % self.page
+            return True
         except IOError, e:
-            if self.infinite and not first: return False
-            raise                           # finite range of pages or 1st page doesn't exist? 'self' file doesn't exist, re-raise
-            
-        #print "=====  PAGE %s  =====" % self.page
-        return True
-        
+            if self.openLast(): return True                             # try once again with the 'last' name
+            if self.filename is None: raise                             # didn't manage to open ANY file yet? 'self' file doesn't exist, re-raise
+            return False
+            #if self.infinite and not first: return False
+
+    def openLast(self):
+        "Try to open the file with self.last ID."
+        if self.last == None: return False
+        filename = self.pattern % self.last
+        if filename == self.filename: return False                      # avoid opening the last file multiple times
+        try:
+            self.file = self.basespace.open(filename, mode = self.mode)
+            self.filename = filename
+            return True
+        except IOError, e:
+            return False
 
 #####################################################################################################################################################
 ###
