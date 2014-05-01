@@ -638,7 +638,8 @@ def now():                                return datetime.datetime.now()
 def nowString(fmt = '%Y-%m-%d %H:%M:%S'): return datetime.datetime.now().strftime(fmt)
 def utcnow():                             return datetime.datetime.utcnow()
 
-def formatDatetime(dt): return dt.strftime('%Y-%m-%d %H:%M:%S')     # the most typical format for date+time printout
+def formatDate(dt): return dt.strftime('%Y-%m-%d')               # the most typical format for date printout; 'dt' can be datetime or date
+def formatDatetime(dt): return dt.strftime('%Y-%m-%d %H:%M:%S')  # the most typical format for datetime printout, with NO milliseconds, unlike str(dt)
 
 def timestamp(t, tZone = 'UTC'):
     """Converts datetime or struct_time object 't' into Unix timestamp (int, in seconds).

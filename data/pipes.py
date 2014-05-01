@@ -707,16 +707,6 @@ class Monitor(_Functional):
     out = None              # the actual file object to be used for all printing/logging/reporting in monitor() and report();
                             # opened in _prolog(), can stay None if the pipe doesn't need output stream
     
-#     def __init__(self, *args, **kwargs):
-#         """'outfiles' can be: None or '' (=stdout), or a <file>, or a filename, or a list of <file>s or filenames 
-#         (None, '' and 'stdout' allowed). 'stdout', 'stderr', 'stdin' are special names, mapped to sys.* file objects."""
-#         self.initKnobs(*args, **kwargs)
-#         if not islist(self.outfiles): self.outfiles = [self.outfiles]
-#         self.init(*args)
-
-#     def init(self, *args):
-#         if not islist(self.outfiles): self.outfiles = [self.outfiles]
-        
 #     def __init__(self, outfiles = None, *args, **knobs):
 #         """'outfiles' can be: None or '' (=stdout), or a <file>, or a filename, or a list of <file>s or filenames 
 #         (None, '' and 'stdout' allowed). 'stdout', 'stderr', 'stdin' are special names, mapped to sys.* file objects."""
@@ -936,8 +926,7 @@ class Limit(Pipe):
     "Terminate the data stream after a predefined number of items. 'Head' is an alias."
     class __knobs__:
         limit = 0
-#     def init(self, limit):
-#         self.limit = limit
+
     def iter(self):
         self.count = 0
         if self.count >= self.limit: return
@@ -964,8 +953,7 @@ class Subset(Pipe):
     """
     class __knobs__:
         fraction = 1
-#     def init(self, fraction):
-#         self.fraction = fraction
+
     def iter(self):
         frac = self.fraction
         batch = 0                               # current batch size, iterates in cycles from 0 to 'frac', and again from 0 ...
@@ -998,8 +986,7 @@ class Sort(Pipe):
     """
     class __knobs__:
         size = None
-#     def init(self, size = None):
-#         self.size = size
+
     def iter(self):
         from heapq import heapify, heappush, heappop
         source = iter(self.source)
@@ -1073,15 +1060,6 @@ class Count(Monitor):
         msg   = "%d "           # thanks to the space after %d you can use: Count >> Print >> ... and print other data after the count on the same line
         start = 1
     
-#     def __init__(self, step = 1, msg = "%d", start = 1):
-#         "If step is float in (0,1), adaptive step is used: next step is 'step' fraction of the total no. of items read so far."
-#         Monitor.__init__(self)
-#         if '%d' not in msg: msg = '%d ' + msg
-#         self.msg = msg
-#         if isint(step):
-#             self.step, self.frac = (step, None)
-#         else:
-#             self.step, self.frac = (None, step)
     def init(self, *args):
         if '%d' not in self.msg: self.msg = '%d ' + self.msg
         if isint(self.step):
@@ -1091,7 +1069,7 @@ class Count(Monitor):
             
     def open(self):
         self.next = self.step or 1
-        print "Count self.out:", self.out, self.out.files
+
     def monitor(self, _):
         if self.count >= self.next:
             with self.printlock:
@@ -1103,9 +1081,10 @@ class Count(Monitor):
                 self.next = self.count + step
                 self.next = int(round(self.next, -digits))
 
-def Countn(*args, **kwargs):
-    "'Count with newline': like Count, but adds newline instead of space after each printed number."
-    return Count(*args, msg = '%d\n', **kwargs)
+class Countn(Count):
+    "Like Count, but adds newline instead of space after each printed number."
+    class __knobs__:
+        msg = '%d\n'
 
 
 class Progress(Monitor):
@@ -1132,11 +1111,6 @@ class Total(Monitor):
         if self.msgTotal is None: return
         try: self.msgTotal % 0
         except: self.msgTotal += " %d"                   # append format character if missing
-#     def init(self, msgTotal = "#items:  %d"):
-#         if msgTotal is None: return
-#         try: msgTotal % 0
-#         except: msgTotal += " %d"                   # append format character if missing
-#         self.msgTotal = msgTotal
     def monitor(self, item): pass
     def close(self):
         with self.printlock: print self.msgTotal % self.count
@@ -1149,8 +1123,6 @@ class Time(Monitor):
     start = None                # time when last open() was run, as Unix timestamp
     elapsed = None              # final time elapsed, in seconds, as float
 
-#     def init(self, msgTime = "Time elapsed: %.1f s"):
-#         self.msgTime = msgTime
     def open(self):
         self.start = time()
     def current(self):
