@@ -1,10 +1,8 @@
 '''
 Data pipes. 
 Allow construction of complex networks (pipelines) of data processing units, that combined perform advanced operations, 
-and process large volumes of data (data streams) efficiently thanks to pipelining (processing one item at a time, instead of a full dataset).
-
-- All functional pipes (Transform, Monitor, Filter and subclasses) accept plain python functions 
-  as an argument to initializer. This function is called if the core method was left unimplemented.
+and process large volumes of data (data streams) efficiently thanks to streamed processing
+(processing one item at a time, instead of a full dataset).
 
 ---
 This file is part of Nifty python package. Copyright (c) 2009-2014 by Marcin Wojnarski.
@@ -32,17 +30,13 @@ from nifty.files import GenericFile, File as files_File, SafeRewriteFile, Object
 
 #####################################################################################################################################################
 ###
-###   SPACE and GRID of values
+###   SPACES and KNOBS
 ###
 
 class Space(object):
-    """A 1D set of values allowed for a given knob. Typically used to restrict the set of all real numbers to a discrete (finite or infinite) evenly-spaced subset.
-    None is disallowed as a value (plays a special role). Can define also a probability density function on the space.
+    """Any 1D set of values, finite or infinite, typically used to specify allowed values for a knob.
+    Can define a probability density function on the space. None value is forbidden, plays a special role. 
     """
-    #name = None                 # optional name of the parameter represented by this space
-    
-    def getKnob(self):
-        "Return an empty (value = None) Knob instance that's compatible with this space and can subsequently be filled in with values of this space."
     
     def __len__(self):
         "No. of elements in this space, or None if infinite."
@@ -69,8 +63,7 @@ class Singular(Space):
 
 class Nominal(Space):
     "A finite discrete set of nominal values of any type (strings, numbers, ...), with no natural ordering. The ordering of values in the collection is used."
-    def __init__(self, *values, **kwargs):
-        #self.name = kwargs.pop('name')
+    def __init__(self, *values):
         if not len(set(values)) == len(values): raise Exception("Nominal: values provided are not unique, %s" % values)
         self.values = v = list(values)
         self.indices = {v[i]:i for i in range(len(v))}          # for metric operation on values from the space
@@ -88,14 +81,14 @@ class Nominal(Space):
         return self.values[j] if 0 <= j < len(self.values) else None
 
 # class Discrete(Space):
-#     "A finite discrete subset of real or integer numbers. Natural ordering."
+#     "A finite discrete subset of real or integer numbers with natural ordering (unlike Nominal)."
 #     def __init__(self, values):
 #         self.values = values
     
 class Cartesian(Space):
-    "Cartesian product of multiple Spaces. A multidimentional set of allowed values for a given combination of knobs. Each multi-value is a tuple."
+    "Cartesian product of multiple Spaces. A multidimensional set of allowed values for a given combination of knobs. Each multi-value is a tuple."
     
-    def __init__(self, *spaces, **namedSpaces):
+    def __init__(self, *spaces):
         "If any given space is a tuple or list instead of a Space instance, it's wrapped up in Nominal or Singular."
         def wrap(space):
             if isinstance(space, Space): return space
@@ -104,10 +97,6 @@ class Cartesian(Space):
             return Nominal(*space)
             
         self.spaces = [wrap(s) for s in spaces]
-#         namedSpaces = [Nominal(*values, name = name) for name, values in namedSpaces.iteritems()]
-#         self.spaces = spaces + namedSpaces
-#         self.names = [s.name for s in self.spaces]
-#         if None in self.names: self.names = None            # if any subspace is unnamed, entire grid is treated as unnamed
     
     def __len__(self):
         prod = 1
@@ -145,66 +134,12 @@ class Cartesian(Space):
         return stop
         
     
-#####################################################################################################################################################
-###
-###   KNOBS & LABELS
-###
-
 class Knobs(OrderedDict):
-    "An ordered dictionary of {name:value} of knobs, representing one particular knobs combination."
+    """An ordered dictionary of {name:value} pairs for a number of knobs, representing one particular knobs combination.
+    Currently equivalent to OrderedDict, with no custom methods.
+    While Spaces are just sets of values, unnamed, knobs are *named*: values are linked to specific names.
+    """
 
-
-# class Label(object):
-#     "A special attribute in a class that keeps meta data about a given object, for reporting purposes, e.g.: algorithm name, execution ID etc."
-# 
-# class Knob(object):
-#     """Knob - a tunable named parameter that can be set on an object by the client. Identified by name, can be assigned specifically to many objects at once.
-#     Also, knobs can keep special information, for reporting purposes, like algorithm name, execution ID etc.
-#     In general, you should avoid using None as a legal knob value, since None is reserved for internal purposes to indicate no value.
-#     """
-#     def __init__(self, name, value = None):
-#         self.name = name                                # full name of the knob; can have any form and contain any characters, only the last dot has special meaning (separates owner name from owner's attribute name)
-#         self.value = value                              # value to be assigned to object attribute when setting the knob
-#         self.owner, self.attr = self._owner(name)       # owner (class/object name) and attribute name parts of full 'name'
-#         
-#     def _owner(self, name):
-#         "Extracts the owner (class/object name) part of 'name'. Owner name is the substring up to the last dot '.', or '' if no dot present."
-#         if '.' not in name: return '', name
-#         return name.rsplit('.', 1)
-# 
-#     def set(self, value):
-#         "Set new value of the knob. Name of the knob is kept unchanged."
-#         self.value = value
-#         
-# 
-# class Knobs(list):
-#     "List of Knob instances."
-#     def __init__(self, *knobs, **namedKnobs):
-#         "'knobs': a sequence of Knob objects, and/or (name,value) pairs to be converted into Knob-s, and/or just names (strings) of empty knobs."
-#         for knob in knobs:
-#             if isstring(knob): knob = Knob(knob)
-#             elif not isinstance(knob, Knob): knob = Knob(*knob)
-#             self.append(knob)
-#         for name, value in namedKnobs.iteritems():
-#             self.append(Knob(name, value))
-# 
-#     def set(self, values):
-#         "Set new values of all knobs in 'self'; names kept unmodified."
-#         if len(self) != len(values): raise Exception("Knobs.set(), the no. of new values to assign differs from the no. of knobs")
-#         for i, v in enumerate(values):
-#             self[i].set(v)
-#         
-
-"""
-Special class properties that can be extracted or assigned in a massive way (in one go) in nested structures (pipelines, metapipes, ...),
-without the need to specify exact access paths to target objects, only with global addressing (naming) of the elements of the structure.
- - Knobs:    (input parameters) passed from outside to inside; allow for massive write in.
- - Signals:  (output parameters) passed from inside to outside; allow for massive read out
- - Controls: (input meta-parameters) like knobs, but not directly involved in data processing, only controling the environment of algorithm execution; e.g., no. of threads to use, log file, ...
- - Labels:   (output meta-parameters) like signals, but containing meta-information unrelated to data processing itself
-
-An attribute can serve as a knob and as a label at the same time.
-"""
 
 #####################################################################################################################################################
 ###
@@ -221,26 +156,18 @@ class __Cell__(__Object__):
 
 
 class Cell(Object):
-    """Element of a data processing network. Participates in signalling pathways.
+    """Element of a data processing network. 
     Typically most cells are Pipes and can appear in vertical (pipelines) as well as horizontal (nesting) relationships with other cells.
     Sometimes, there can be cells that are not pipes - they participate only in vertical relationships 
-    and exhibit their own custom API for data input/output (instead of Pipe's API).
+    and expose their own custom API for data input/output (instead of Pipe's streaming API).
     
     Pipes are elements of horizontal structures of data flow. Typically 1-1 or many-1 relationships.
     Cells are elements of vertical structures of control. Typically 1-1 or 1-many relationships.
     
     Every cell can contain "knobs": parameters configured from the outside by other cells, e.g., by meta-optimizers; input parameters of the cell.
-    Every cell can produce "signals" that can be read by other cells in DPN; output parameters of the cell. 
-    Knobs and signals have a form of attributes located in a particular cell and identified by cell's name/path and attribute's name.
-    Knobs and signals enable implementation of generic meta-algorithms which operate on inner structures without exact knowledge of their identity,
-    only by manipulation of knobs and signals.
-    
-    Addressing.
-    - "experiment/model/submodel.knob" - slash indicates inclusion: inner cell included in an outer cell
-    - "experiment/*"  - star indicates the current cell and all inner cells, but not nested ones
-    - "experiment/**" - like '*', additionally includes nested cells
-    - "experiment/+"  - like '*', but excludes current (outer) cell
-    - "experiment/++"
+    Knobs have a form of attributes located in a particular cell and identified by cell's name/path and attribute's name.
+    Knobs enable implementation of generic meta-algorithms which operate on inner structures without exact knowledge of their identity,
+    only by manipulation of knob values.
     
     Things to keep in mind:
     - properties defined inside inner classes, __knobs__ and __inner__, are automatically copied to parent class level 
@@ -264,15 +191,19 @@ class Cell(Object):
        for subclassing but still need to do custom post-processing of knob values or other initialization to be done
        during __init__.
     
-    Note that many types of initialization can be done also in setup(), _prolog() or open() - often these places
+    Note that many types of initialization can be done also in Pipe's setup(), _prolog() or open() - often these places
     are more suitable than __init__, so most classes don't need custom init/__init__ at all.
+    
+    SERIALIZATION.
+    
+    Serialization is implemented by inheriting from nifty.util.Object class, 
+    which provides __getstate__ and __setstate__ methods.
+    You can serialize a cell by calling, for instance: dast.dump(cell, afile).
     
     """
     __metaclass__ = __Cell__
 
-    __labels__ = []         # names of attributes that serve as labels of a given class
     __knobs__  = []         # names of attributes that serve as knobs of a given class; list, string, or class __knobs__: ...
-    __signals__ = []
     __inner__ = []
 
     name = None             # optional label, not necessarily unique, that identifies this cell instance or a group of cells in signal routing
@@ -377,54 +308,16 @@ class Cell(Object):
             else:
                 yield cell
     
-    # DRAFT
-    def walkInner(self, oper, **kwargs):
-        "Executes given 'oper' in self and all inner cells, visiting cells in post-order."
-    def walkOuter(self, oper, **kwargs): pass
-    
-    def getInnerSignals(self, names = None):
-        "Return dictionary of signals and their values present in 'self' or below."
-    def getOuterSignals(self, names = None):
-        "Signals from the environment: owner and beyond."
-    def getSignals(self, names = None):
-        return self.getInnerSignals(names) + self.getOuterSignals(names)
-        
-
-    def save(self):
-        "Serialization of the cell."
-        raise NotImplemented()
-    def load(self):
-        raise NotImplemented()
-    
     def __str__(self):
         if not self.name: return classname(self)
         return "%s [%s]" % (self.name, classname(self))
 
     def _pushTrace(self, pipe): trace.push(pipe)
     def _popTrace (self, pipe): trace.pop(pipe) if trace else None      # 'if' necessary for unit tests to avoid strange error messages
-    
-# class StackTrace(list):
-#     def __init__(self):
-#         self.dirty = False
-#         self.stack = []         # stack is a list of entries, one for each traced data cell + method
-#         self.exception = None   # the current exception being propagated right now; if a log with another exception comes in, the stack is reset to empty list
-#     def log(self, obj, method = None):
-#         #if ex is not self.exception: self.stack = []
-#         if self.dirty: 
-#             self.stack = []
-#             self.dirty = False
-#         entry = (obj, method)
-#         self.stack.append(entry)
-#     def __str__(self):
-#         if not self.stack: return "  Empty stack trace"
-#         def compile(entry):
-#             obj, method = entry
-#             if method is None: method = "<unknown>"
-#             return "  %s.%s" % (classname(obj), method)
-#         return '\n'.join(map(compile, self.stack))
+
 
 class OpenPipes(list):
-    """List of pipes whose __iter__ is currently running. Usually these pipes form a chain and their __iter__ 
+    """For debugging. List of pipes whose __iter__ is currently running. Usually these pipes form a chain and their __iter__ 
     executions form a stack, but this not always must be the case, e.g. with multi-input pipes 
     - that's why pop() takes a pipe object again.
     """
@@ -445,7 +338,7 @@ class OpenPipes(list):
             lines.append("%d %s" % (i+1, pipe))
         return '\n'.join(lines)    
 
-trace = OpenPipes()
+trace = OpenPipes()             # for debugging
 
     
 #####################################################################################################################################################
@@ -466,16 +359,19 @@ class __Pipe__(__Cell__):
 
 
 class Pipe(Cell):
-    """Base class for data processing objects (pipes) that can be chained together to perform pipelined processing, 
-    each one performing an atomic operation on the data received from preceding pipe(s), or being an initial source of data (loader, generator).
-    Every iterable type - a collection, a generator or any type that implements __iter__() - can be used as a source pipe, too.
+    """Base class for data processing objects (pipes) that can be chained together to perform streamed data processing, 
+    each one performing an atomic operation on the data received from preceding pipe(s), 
+    or being an initial source of data (loader, generator).
+    Every iterable type - a collection, a generator or any type that implements __iter__() 
+    - can be used as a source pipe, too.
     
     Features of data pipes:
-    - operator '>>'
-    - can use classes, not only instances, with >>
-    - can use collections, functions, ... with >> 
+    - operator '>>'; can use classes, not only instances, with >>; can use collections, functions, ... with >>
+      See also PIPE and RUN tokens and Pipeline class.
+    - attributes managed by base classes during execution, can be accessed by subclasses:
+        count, yielded, iterating
     
-    Serialization is implemented by inheriting from Object class.
+    See Cell base class for information about knobs and serialization.
     """
     __metaclass__ = __Pipe__
     __transient__ = "source"    # don't serialize 'source' attribute and exclude it from copy() and deepcopy();
@@ -565,24 +461,6 @@ class Pipe(Cell):
         Typically used for Pipelines which end with a sink and only produce side effects."""
         for item in self: pass
 
-#     def loop(self, times = None):
-#         """Executes this pipe multiple times, or infinitely if times=None. Yields items from all iterations as a single stream of data. 
-#         Client can read self.nloops - the no. of loops completed so far - to find out which loop is being executed right now.
-#         There is NO restarting between loops."""
-#         self.nloops = 0
-#         while True:
-#             if times != None and self.nloops >= times: break
-#             if self.nloops > 0: self.reopen()
-#             empty = True
-#             for item in self: 
-#                 empty = False
-#                 yield item
-#             self.nloops += 1
-#             if times == None and empty: raise Exception("Infinite loop over empty dataset")
-# 
-#     def reopen(self):
-#         "Override in subclasses to perform custom setup before next loop of processing is executed in loop()."
-        
     def __rshift__(self, other):
         """'>>' operator overloaded, enables pipeline creation via 'a >> b >> c' syntax. Returned object is a Pipeline.
         Put RUN token at the end: a >> b >> RUN - to execute the pipeline immediately after creation."""
@@ -624,7 +502,7 @@ class Pipe(Cell):
 
 # TOKENS
 
-class _PIPE(Pipe):
+class _PIPE(Pipe):      # class of PIPE
     def __rshift__(self, other): return Pipeline(other)
 
 # Starts a pipeline. For easy appending of other pipes with automatic type casting: PIPE >> a >> b >> ...
@@ -875,6 +753,13 @@ class Empty(Pipe):
     def __iter__(self):
         return; yield
 
+class Range(Pipe):
+    "Generator of consecutive integers, equivalent to xrange(), same parameters."
+    def __init__(self, *args):
+        self.args = args
+    def __iter__(self):
+        return iter(xrange(*self.args))
+
 class Repeat(Pipe):
     "Returns a given item for the specified number of times, or endlessly if times=None. Like itertools.repeat()"
     def __init__(self, item, times = None):
@@ -891,14 +776,6 @@ class Repeat(Pipe):
                 self.yielded += 1
                 yield item
     
-class Range(Pipe):
-    "Generator of consecutive integers, equivalent to xrange(), same parameters."
-    def __init__(self, *args):
-        self.args = args
-    def __iter__(self):
-        return iter(xrange(*self.args))
-
-
 ###  Filters
 
 class Slice(Pipe):
@@ -943,7 +820,8 @@ class TakeWhile(Pipe):
 class StopOn(Pipe):
     """Terminate the data stream when a given condition becomes True. Condition is a function that takes current item as an argument. 
     This function can also keep an internal state (memory)."""
-
+class Loop(Pipe):
+    """Iterate over the source a number of times, concatenating the repeated input streams into one output stream."""
 
 class Subset(Pipe):
     """Selects every 'fraction'-th item from the stream, equally spaced, yielding <= 1/fraction of all data. Deterministic subset, no randomization.
@@ -1696,9 +1574,9 @@ class Controller(Wrapper):
     """A wrapper that controls input and output of a given pipe, by manually feeding individual items 
     to its input and manually retrieving items from the output, with possibly some additional operations
     performed before/during/after the item is processed.
-    In default implementation of process(), the inner pipe is expected to pull exactly 1 item at a time
+    In default implementation of process() method, the inner pipe is expected to pull exactly 1 item at a time
     from the source, otherwise an exception will be raised (typically the pipe is an Transform).
-    However, if a subclass overrides process(), it can expect the inner pipe to exhibit any other type 
+    However, if a subclass overrides process(), it can request the inner pipe to exhibit any other type 
     of input-output behavior.
     """
 
@@ -1864,7 +1742,7 @@ def _normalize(pipes):
         if issubclass(h, Pipe): return h()
         if isfunction(h): return Function(h)
         if iscontainer(h): return Collection(h)
-        if isinstance(h, (file, GenericFile)): return File(h)
+        if isinstance(h, (file, GenericFile, Tee)): return File(h)
         if isstring(h): return None
         return h
     return filter(None, map(convert, pipes))

@@ -3,7 +3,26 @@
 DAST (DAta STorage) file format. 
 Allows easy, object-oriented, streamed, human-readable serialization and de-serialization of any data structures.
 
-3 types of value formatting: inline (bounded), endline (unbounded/open, occupies line up to the nearest \n), outline (multiline; possibly mixed with endline)
+Main classes, methods and functions:
+- DAST - main class implementing DAST language
+- DAST.dump() - serialize an object into a DAST stream
+- DAST.load() - decode a DAST stream and yield consecutive deserialized objects
+- dump - shorthand for DAST().dump(), uses a global DAST instance created during module initialization
+- load - shorthand for DAST().load(), uses a global DAST instance created during module initialization
+
+Instead of dump/load you can also use encode/decode. The only difference is that dump() adds a newline at the end by default,
+while encode() not - this can be changed by explicitly setting 'newline' argument.
+
+
+SYNTAX.
+
+There are 3 types (modes) of value formatting:
+- inline (bounded/flow) - the code occupies a part of a line; only inline code can be embedded in other inline code: [(2,3),4]
+- endline (unbounded/open) - occupies the rest of line up to the nearest \n: list (2,3), 4
+- outline (multiline/block) - can occupy multiple lines:
+   list
+     (2,3)
+     4
 
 Indented format:
 - atomic values, inline:
@@ -113,9 +132,9 @@ Indented format:
   
 
 >>> in1  = [1,2,3,['ala','kot','pies'],5,6]
->>> out1 = encode(in1, mode = 1)
+>>> out1 = dump(in1, mode = 1)
 >>> out1
-'list 1, 2, 3, ["ala", "kot", "pies"], 5, 6'
+'list 1, 2, 3, ["ala", "kot", "pies"], 5, 6\\n'
 
 >>> print encode({1:'ala', 2:'kot', 3:['ala',{'i','kot'}, {'jaki':'burek',10:'as'}], 4:None}, mode = 2)
 dict:
@@ -395,7 +414,8 @@ class Analyzer(object):
 ###
 
 class Encoder(object):
-    """New encoder is created for every new record, to enable use of instance variables as current state of the encoding, in thread-safe way."""
+    """New encoder is created for every new record to be encoded, to enable use of instance variables 
+    as current state of the encoding, in thread-safe way."""
     
     _params = "indent listsep dictsep keysep0 keysep2 maxindent mode1".split()          # only these parameters will be copied during initialization, for later use
     
@@ -885,26 +905,33 @@ class DAST(object):
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)                    # one-time assignment of all properties
 
-    def encode(self, obj, **kwargs):
-        "Encode object hierarchy rooted at 'obj' and return the resulting code as a string."
-        output = StringIO()
-        self.dump(obj, output, newline = False, **kwargs)
-        return output.getvalue()
+    def dump(self, obj, out = None, newline = True, **kwargs):
+        """Encode object hierarchy rooted at 'obj' and write to 'out' file-like object, or return as a string if out=None. 
+        Add newline(s) at the end of produced code if newline=True (default) or 1+."""
+        return self.encode(obj, out, newline = newline, **kwargs)
     
-    def dump(self, obj, output, newline = True, **kwargs):
-        "Encode object hierarchy rooted at 'obj' and save to 'output' file-like object, with newline(s) at the end if newline=True or 1+."
+    def load(self, input):
+        """Generator. Yields consecutive objects decoded from 'input'. 'input' is either a file (an object that iterates over lines), 
+        or a string, in such case it will be split into lines beforehand."""
+        return self.decode(input)
+    
+    def encode(self, obj, out = None, newline = False, **kwargs):
+        "Like dump(), only newline=False by default. Used internally by dump()."
+        if out is None:
+            out = StringIO()
+            string = True
+        else:
+            string = False
+            
         params = DAST.__dict__.copy()
         params.update(self.__dict__)
         params.update(kwargs)
-        encoder = Encoder(output, params)
-        #self.__dict__.update(kwargs)
-        #encoder = Encoder(output, self.indent, self.listsep, self.dictsep, self.maxindent, self.mode1)
+        encoder = Encoder(out, params)
         encoder.encode(obj, params['mode'], params['level'])
-        if newline: output.write('\n' * int(newline))
+        if newline: out.write('\n' * int(newline))
+        if string: return out.getvalue()
 
     def decode(self, input):
-        """Generator. Yields consecutive objects decoded from 'input'. 'input' is either a file (an object that iterates over lines), 
-        or a string, in such case it will be split into lines beforehand."""
         return Decoder(input, self.decoders).decode()
         #return Decoder(input, self.parser, self.decoders).decode()
 
@@ -920,9 +947,12 @@ class DAST(object):
 
 dast = DAST()
 
+def dump(obj, **kwargs):  return dast.dump(obj, **kwargs)
+def load(input):          return dast.load(input)
+
 def encode(obj, **kwargs):  return dast.encode(obj, **kwargs)
-def decode(input):  return dast.decode(input)
-def decode1(input): return dast.decode1(input)
+def decode(input):          return dast.decode(input)
+def decode1(input):         return dast.decode1(input)
 
 #####################################################################################################################################################
 

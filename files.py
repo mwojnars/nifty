@@ -367,7 +367,7 @@ class DastFile(ObjectFile):
         self.dast = DAST(**dastArgs)
 
     def _write(self, item):
-        self.dast.dump(item, self.file)
+        self.dast.dump(item, self.file, newline = True)
         
     def _read(self):
         return self.dast.decode(self.file.file)
