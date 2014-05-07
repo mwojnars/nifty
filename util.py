@@ -776,17 +776,27 @@ def ifindfiles(pattern):
     return glob.iglob(pattern)
 
 
+def getfile(f):
+    """Returns a file object corresponding to a given special name: 'stdout', 'stderr' or 'stdin'.
+    None and '' are mapped to stdout, too. Also, 'f' can be already a Tee object or an open file,
+    in which case it's returned unchanged. Otherwise, None is returned."""
+    if f in [None, '', 'stdout']: return sys.stdout
+    if f in ['stderr', 'stdin']: return getattr(sys, f)
+    if isinstance(f, Tee): return f
+    if isinstance(f, file) and not f.closed: return f
+    return None
+
 def openfile(f, mode = 'wt'):
     """Smart open(). If f is already an open file, returns it without changes. If f is a string, opens the file path
     denoted by the string ('wt' mode by default). Recognizes special names 'stdout', 'stderr' and 'stdin',
-    and returns corresponding file objects in such cases. Empty string and None map to stdout file."""
-    if f in [None, '', 'stdout']: return sys.stdout
-    if f in ['stderr', 'stdin']: return getattr(sys, f)
-    if isstring(f): return open(f, mode)
-    if isinstance(f, Tee): return f
-    if not isinstance(f, file) or f.closed:
-        raise Exception("Object of incorrect type passed as a file(name), or a closed file: %s" % f)
-    return f
+    and returns corresponding file objects in such cases. Empty string and None map to stdout file.
+    Returns a tuple: the file object and a boolean to indicate if the file was opened here and must be closed by the client.
+    """
+    g = getfile(f)
+    if g is not None: return (g, False)     # 'f' was an existing file; client should not attempt to close it
+    if isstring(f):
+        return (open(f, mode), True)        # 'f' was not an existing file; must open it here and let the client know that it must be closed at the end
+    raise Exception("Object of incorrect type passed as a file(name), or a closed file: %s" % f)
 
 
 class Tee(object):
@@ -799,17 +809,16 @@ class Tee(object):
         they will be opened in 'wt' mode (possible erasure if file exists!).
         None and '' denote stdout. 'stdout', 'stderr', 'stdin' are mapped to sys.* file objects.
         """
-        self.files = [openfile(f, 'wt') for f in files]
-        if len(files) <= 1: self.files.append(sys.stdout)
+        self.files = [openfile(f, 'wt') for f in files]                 # list of (file-object, must-close) pairs
+        if len(files) <= 1: self.files.append((sys.stdout, False))
     def write(self, obj):
-        for f in self.files: f.write(obj)
+        for f, _ in self.files: f.write(obj)
     def flush(self):
-        for f in self.files: f.flush()
+        for f, _ in self.files: f.flush()
     def close(self):
-        "Close all files except sys.stdxxx"
-        exclude = [sys.stdout, sys.stderr, sys.stdin]
-        for f in self.files:
-            if f not in exclude: f.close()
+        "Close all files that were opened here in this object."
+        for f, mustclose in self.files:
+            if mustclose: f.close()
 
         
 #####################################################################################################################################################

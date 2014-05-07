@@ -349,7 +349,7 @@ trace = OpenPipes()             # for debugging
 class __Pipe__(__Cell__):
     "Enables chaining (pipelining) of pipe classes, not only instances. >> and << return a Pipeline instance."
     def __rshift__(cls, other):
-        if other is RUN: Pipeline(cls).execute()
+        if other is RUN: Pipeline(cls).run()
         else: return Pipeline(cls, other)
         
     def __lshift__(cls, other):
@@ -456,7 +456,7 @@ class Pipe(Cell):
         self.close()
         del self.iterating                  # could set self.iterating=False instead, but deleting is more convenient for serialization
 
-    def execute(self):
+    def run(self):
         """Pull all data through the pipe, but don't yield nor return anything. 
         Typically used for Pipelines which end with a sink and only produce side effects."""
         for item in self: pass
@@ -466,7 +466,7 @@ class Pipe(Cell):
         Put RUN token at the end: a >> b >> RUN - to execute the pipeline immediately after creation."""
         # 'self' is a regular Pipe; specialized implementation for Pipeline defined in the subclass
         if other is RUN:
-            Pipeline(self).execute()
+            Pipeline(self).run()
         else:
             return Pipeline(self, other)
 
@@ -534,7 +534,8 @@ class Container(Pipe):
 class _Functional(Pipe):
     "Base class for Transform, Monitor and Filter. Implements wrapping up a custom python function into a functional pipe."
 
-    fun = None              # plain python function to be used as the class implementation, if core method not overriden
+    class __knobs__:
+        fun = None              # plain python function (or lambda) that implements class functionality, if core method not overriden
     
 #     def __init__(self, *args, **knobs):
 #         "Inner function - if present - must be given as 1st and only unnamed argument. All knobs given as keyword args."
@@ -543,8 +544,9 @@ class _Functional(Pipe):
     
 class Transform(_Functional):
     """Plain item-wise processing & filtering function, implemented in the subclass by overloading process() 
-    and possibly also open/close(). Method process(item) returns modified version of the item,
-    or None to indicate that the item should be dropped (filtered out).
+    and possibly also open/close(). Method process(item) returns a new (modified) item to be yielded, 
+    or None to indicate that the same item should be yielded (perhaps with some inner attributes modified),
+    or False to indicate that the item should be dropped entirely (filtered out).
     For operators that only perform filtering, with no modification of items, use Filter class instead."""
     
     def __iter__(self):
@@ -555,9 +557,9 @@ class Transform(_Functional):
             for item in self.source: 
                 self.count += 1
                 res = self.process(item)
-                if res is not None: 
+                if res is not False: #None: 
                     self.yielded += 1
-                    yield res
+                    yield item if res is None else res
         except GeneratorExit, ex:
             self._epilog()
             raise
@@ -584,6 +586,7 @@ class Monitor(_Functional):
 
     out = None              # the actual file object to be used for all printing/logging/reporting in monitor() and report();
                             # opened in _prolog(), can stay None if the pipe doesn't need output stream
+    mustclose = False       # if True, it means that 'out' was opened here (not outside) and it must be closed here, too
     
 #     def __init__(self, outfiles = None, *args, **knobs):
 #         """'outfiles' can be: None or '' (=stdout), or a <file>, or a filename, or a list of <file>s or filenames 
@@ -633,16 +636,16 @@ class Monitor(_Functional):
         if not islist(self.outfiles): self.outfiles = [self.outfiles]
         if len(self.outfiles) > 1:
             self.out = Tee(*self.outfiles) 
+            self.mustclose = True
         elif self.outfiles:
-            self.out = openfile(self.outfiles[0], self.mode)
+            self.out, self.mustclose = openfile(self.outfiles[0], self.mode)
         return super(Monitor, self)._prolog()
 
     def _epilog(self):
         "Run report() and close self.out."
         with self.printlock: self.report()
         super(Monitor, self)._epilog()
-        if self.out not in [None, sys.stdout, sys.stderr]:
-            self.out.close()
+        if self.mustclose: self.out.close()
         del self.out
 
     def monitor(self, item):
@@ -727,18 +730,17 @@ class File(Pipe):
         return iter(self.file)
     
 class Function(Transform):
-    """An operator OR a filter constructed from a plain python function. A wrapper.
+    """A transform OR a filter constructed from a plain python function. A wrapper.
     Explicit use of Transform or Filter classes instead of this one is recommended."""
     def __init__(self, oper = None):
         "oper=None handles the case when processing function is implemented through overloading of process()."
         self.oper = oper
     def process(self, item):
-        "Can return modified item; or None, interpreted as no result (drop item); or True (pass unchanged); or False (drop item)."
         if self.oper is None: raise Exception("Missing operator function (self.oper) in %s" % self)
         ret = self.oper(item)
         if ret is True: return item
-        if ret is False: return None
-        if ret is None: return item         # for monitor- or operator-like functions that don't make final 'return item'
+        if ret is False: return False
+        if ret is None: return item         # for monitor- or transform-like functions that don't make final 'return item'
         return ret
     def __str__(self):
         if self.oper and hasattr(self.oper, 'func_name'):
@@ -749,9 +751,31 @@ class Function(Transform):
 ###  Generators
 
 class Empty(Pipe):
-    "Generates an empty output stream. Useful as an initial pipe in an incremental sum of pipes: p = Empty; p += X[0]; p += X[1] ..."
+    """Generates an empty output stream. Useful as an initial pipe in an incremental sum of pipes: 
+    p = Empty; p += X[0]; p += X[1] ..."""
     def __iter__(self):
         return; yield
+
+class Const(Pipe):
+    """Infinite stream with the same item repeated again and again. The item can be (deep)copied every time, or not.
+    Also, the item can be changed from the outside during iteration, by assigning to self.item
+    (useful when Const is used as a data feed inside metapipes).
+    >>> Const("sample") >> Limit(2) >> Print >> RUN
+    sample
+    sample
+    """
+    class __knobs__:
+        item = None                 # the item to be repeated; can be passed during __init__: Const(x)
+        makecopy = None             # if 'copy' or 'deepcopy', the item will be copied (deepcopied) before each yield
+    def __iter__(self):
+        if not self.makecopy:
+            while True: yield self.item
+        elif self.makecopy == 'copy':
+            while True: yield copy(self.item)
+        elif self.makecopy == 'deepcopy':
+            while True: yield deepcopy(self.item)
+        else:
+            raise Exception("Incorrect knob value: ")
 
 class Range(Pipe):
     "Generator of consecutive integers, equivalent to xrange(), same parameters."
@@ -811,7 +835,6 @@ class Limit(Pipe):
             self.count += 1
             yield item
             if self.count >= self.limit: return
-Head = Limit
 
 class DropWhile(Pipe):
     "Like itertools.dropwhile()."
@@ -1033,9 +1056,12 @@ class Metric(Monitor):
     Subclasses can use self.size attribute, which holds the no. of individual not-None metrics computed so far.
     """
 
+    class __knobs__:
+        fun = None
+    
     #metricname = None           # if not-None, metric of each item will be saved in the item under this name
     last = None                 # most recent individual metric value calculated
-    size = None                 # no. of individual metrics calculated & aggregated so far excluding Nones; 0-based
+    size = None                 # no. of individual metrics calculated & aggregated so far excluding Nones
 
     def _prolog(self):
         self.size = 0
@@ -1056,11 +1082,19 @@ class Metric(Monitor):
         """Override in subclasses to update internal structures for calculation of an aggregated metric, 
         after new individual sample was measured with the result 'metric'."""
         
+    def report(self):
+        """Override in subclasses to print out calculated metrics at the end of data iteration. 
+           Don't use self.printlock! This would cause a deadlock."""
+
+    
 class Mean(Metric):
     """Calculates sample mean & std.deviation of values measured for individual items by a given metric.
-    The metric is either implemented in overridden metric() method, or given as a function - argument of initialization.
+    The metric is either implemented in overridden metric() method, or given as a function - argument of initialization
+    (typically a lambda expression).
     """
-    
+    class __knobs__:
+        title = None                # leading message when printing the report line
+        
     def open(self):
         self.sum = self.sum2 = 0.0
     
@@ -1075,8 +1109,16 @@ class Mean(Metric):
     def deviation(self): 
         "Sample standard deviation"
         N = float(self.size)
-        return sqrt((self.sum2 - self.sum/N * self.sum) / (N-1))
+        return np.sqrt((self.sum2 - self.sum/N * self.sum) / (N-1))
 
+    def report(self):
+        header = "mean +stddev /size:    "
+        if self.title: header = self.title + ' ' + header
+        if self.size:
+            print >>self.out, header + "%.4f +%.2f /%d" % (self.mean(), self.deviation(), self.size)
+        else:
+            print >>self.out, header + "None +None /%s" % self.size
+    
 
 # class Experiment(Monitor):
 #     "Provides subclasses with logging facilities."
@@ -1199,11 +1241,10 @@ class List(Pipe):
 class MetaPipe(Pipe):
     "Wraps up a number of pipes to provide meta-operations on them."
 
-# class Container(MetaPipe):
-#     "Base class for classes that contain multiple pipes inside: self.pipes."
-#     
-#     pipes = []          # any collection of internal pipes
-#     
+class Container(MetaPipe):
+    "Base class for classes that contain multiple pipes inside: self.pipes."
+    pipes = []          # any collection of internal pipes
+    
 #     def copy(self, deep = True):
 #         "Smart shallow copy (in addition to deep copy). In shallow mode, copies the collection of pipes, too, so it can be modified afterwards without affecting the original."
 #         res = super(Container, self).copy(deep)
@@ -1258,7 +1299,7 @@ class Pipeline(MetaPipe):
         """Append 'other' to the end of the pipeline. Shallow-copy the pipeline beforehand, 
         to avoid in-place modifications but preserve '>>' protocol."""
         if other is RUN:
-            self.execute()
+            self.run()
         else:
             res = self.copy1()
             res.pipes.append(other)
@@ -1282,13 +1323,13 @@ class Pipeline(MetaPipe):
         super(Pipeline, self).setKnobs(knobs)           # Pipeline itself has no knobs, but a subclass can define some
         for pipe in self.pipes:                         # set knobs in template pipes (some of them can be actual pipes)
             if isinstance(pipe, Cell): pipe.setKnobs(knobs)
-        if self.pipeline: self.setPipelineKnobs(knobs)
+        if self.pipeline: self.setInnerKnobs(knobs)
         else:
             # no normalized pipeline yet? keep the knobs to apply in the future
             if self.knobs: self.knobs.update(knobs)
             else: self.knobs = knobs
 
-    def setPipelineKnobs(self, knobs):
+    def setInnerKnobs(self, knobs):
         if not knobs: return
         for pipe in self.pipeline:
             pipe.setKnobs(knobs)
@@ -1301,7 +1342,7 @@ class Pipeline(MetaPipe):
     def setup(self):
         #self.pipes = _normalize(self.pipes)
         self.pipeline = _normalize(self.pipes)
-        self.setPipelineKnobs(self.knobs)
+        self.setInnerKnobs(self.knobs)
         self.knobs = None
 #         for pipe in self.pipeline:
 #             pipe.setup()
@@ -1351,27 +1392,6 @@ class Pipeline(MetaPipe):
 
 class MultiSource(Pipe):
     pass
-#     def copy(self, deep = True):
-#         "Shallow copy does copy the list of pipes too (list can be modified afterwards without affecting the original)."
-#         if deep: return deepcopy(self)
-#         res = copy(self)
-#         res.sources = copy(self.sources)
-#         return res
-
-# class Parallel(MultiSource):
-#     "Connects multiple pipes as parallel routes between a single source and a single destination."
-#     def __init__(self, source, handlers):
-#         if handlers and islist(handlers[0]): handlers = handlers[0]
-#         self.pipes = _normalize(handlers)
-#         for h in handlers:
-#             h.source = source
-# 
-# class Hub(MultiSource):
-#     "Branching of pipes: a central pipe (hub) with multiple parallel sources."
-#     def __init__(self, sources, hub):
-#         self.sources = hub.sources = _normalize(sources)
-#         self.hub = hub
-#         self.pipes = self.sources + [hub]            # for open() & close()
 
 class Union(MultiSource):
     """Combine items from multiple sources by concatenating corresponding streams one after another: all items from the 1st source; then 2nd... then 3rd...
@@ -1408,6 +1428,41 @@ class MergeSort(MultiSource):
             self.sources = sources
     def iter(self):
         for item in heapq.merge(*self.sources): yield item
+
+class Ensemble(MetaPipe, Transform):   # DRAFT
+    ""
+    def __init__(self, *algs, **knobs):
+        self.pipes = list(algs)
+        self.feed = Const()
+
+    def process(self, item):
+        self.feed.item = item
+        
+    def vote(self, item):
+        "Override in subclasses to provide custom extraction of vote value from the output item yielded by an algorithm."
+        return item
+    
+    def merge(self, votes):
+        "Override in subclasses to provide custom merging of votes into final decision. Default: numerical averaging (mean)."
+        return sum(votes) / len(votes)
+        
+    def output(self, item, vote):
+        "Override in subclasses to output final votes in a custom way (typically, to store it inside 'item' instead of yielding directly)."
+        return vote
+        
+
+class Parallel(MetaPipe):   # DRAFT
+    """Connects multiple pipes as parallel routes from a single source and no destination.
+    Each parallel route is wrapped up in a Thread object, so that 'push' interface can be used
+    to feed data to every route. Output items - if generated by the routes - are ignored.
+    Instead, the entire Parallel pipe yields input items on its output.
+    Note that there can be a delay in thread execution such that an output item can be yielded
+    when some thread hasn't consumed it yet - take this into account when monitoring side effects
+    of execution on particular routes. However, it's guaranteed that when all iteration ends,
+    all the threads have already finished their execution.
+    """
+    def __init__(self, *pipes, **knobs):
+        self.pipes = list(pipes)
 
 #####################################################################################################################################################
 
@@ -1671,7 +1726,12 @@ class operator(Controller):
 
 class Thread(threading.Thread, Wrapper):
     """A thread object that executes given pipe(line) in a separate thread.
-    Can serve also as a pipe and be included in a pipeline, if only the inner pipe takes no input data (has no source)."""
+    Can serve also as a pipe and be included in a pipeline, if only the inner pipe takes no input data (has no source).
+    Instantly after creation, the thread itself starts internally pulling output items from the pipe,
+    which can block the thread until input items are fed - see run().
+    This effectively makes the interface to be a "PUSH" one, not "pull" one, unlike in all other Pipes,
+    which makes Thread very distinct from other pipes and which is useful for impelementing parallelism of pipes.
+    """
     
     END = object()      # token to be put into a queue (input or output) to indicate end of data stream
     

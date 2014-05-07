@@ -148,7 +148,7 @@ dict:
     dict:
       10: "as"
       "jaki": "burek"
-  4: -
+  4: ~
 
 
 ---
@@ -416,8 +416,9 @@ class Analyzer(object):
 class Encoder(object):
     """New encoder is created for every new record to be encoded, to enable use of instance variables 
     as current state of the encoding, in thread-safe way."""
-    
-    _params = "indent listsep dictsep keysep0 keysep2 maxindent mode1".split()          # only these parameters will be copied during initialization, for later use
+
+    # only these parameters will be copied during initialization, for later use    
+    _params = "indent listsep dictsep keysep0 keysep2 none maxindent mode1".split()
     
     def __init__(self, out, params): #indent, listsep, dictsep, maxindent, mode1):
         #self.indent, self.listsep, self.dictsep, self.maxindent, self.mode1  =  indent, listsep, dictsep, maxindent, mode1
@@ -453,7 +454,7 @@ class Encoder(object):
         prefix = self.indent * self.level
         return prefix + s.replace('\n', '\n' + prefix)
     
-    def _none (self, x, m, l): self._write('-')
+    def _none (self, x, m, l): self._write(self.none)
     def _bool (self, x, m, l): self._write(str(x))
     def _int  (self, x, m, l): self._write(str(x))
     def _float(self, x, m, l): self._write(str(x))
@@ -890,8 +891,9 @@ class DAST(object):
     indent  = "  "
     listsep = ", "
     dictsep = ": "
-    keysep0  = "="          # separator for keyword notation of pairs: key=value, used in modes 0 and 1 
-    keysep2  = " = "        # separator for keyword notation of pairs: key=value, used in mode 2
+    keysep0 = "="           # separator for keyword notation of pairs: key=value, used in modes 0 and 1 
+    keysep2 = " = "         # separator for keyword notation of pairs: key=value, used in mode 2
+    none    = "~"           # what string to use for Nones; only '~', '-', 'null' or 'None' allowed
     maxindent = 3
     mode1 = True            # use mode-1 when possible (True) or mode-0 instead (False)
 
