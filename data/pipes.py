@@ -1726,7 +1726,7 @@ class operator(Controller):
 
 class Thread(threading.Thread, Wrapper):
     """A thread object that executes given pipe(line) in a separate thread.
-    Can serve also as a pipe and be included in a pipeline, if only the inner pipe takes no input data (has no source).
+    Can serve also as a pipe and be included in a pipeline, but only if the inner pipe takes no input data (has no source).
     Instantly after creation, the thread itself starts internally pulling output items from the pipe,
     which can block the thread until input items are fed - see run().
     This effectively makes the interface to be a "PUSH" one, not "pull" one, unlike in all other Pipes,
@@ -1786,7 +1786,8 @@ class Thread(threading.Thread, Wrapper):
     def emptyFeed(self): self.feed.join()
     
     def iter(self):
-        if self.source: raise Exception("Pipe of class Thread can't be used with a source attached. It can't synchronize input and output by itself.")
+        if self.source: 
+            raise Exception("Pipe of class Thread can't be used with a source attached. It can't synchronize input and output by itself.")
         while True:
             item = self.get()
             if item is Thread.END: break

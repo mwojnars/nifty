@@ -851,15 +851,19 @@ class Decoder(object):
         
 
 def _import(path):
-    """Load the module and return the class/function/var, given its full package/module path (there always must be a module name in the path).
+    """Load the module and return the class/function/var, given its full package/module path.
+    If no module name is present, __main__ is used.
 
     >>> _import('nifty.util.Object')
     <class 'nifty.util.Object'>
     >>> _import('__builtin__.int')()
     0
     """
-    if '.' not in path: raise Exception("Can't import an object without module/package name: %s" % path)
-    mod, name = path.rsplit('.', 1)
+    if '.' not in path:
+        mod, name = '__main__', path
+        #raise Exception("Can't import an object without module/package name: %s" % path)
+    else:
+        mod, name = path.rsplit('.', 1)
     module = __import__(mod, fromlist = [mod])
     #print mod, name
     #print module
@@ -880,7 +884,7 @@ class DAST(object):
     
     Special properties and methods that can be present in encoded/decoded classes:
      __dast_format__ - dict of {attr: mode} pairs that defines what mode level should be used for encoding of specified attributes of this class'es objects.
-     __dast__ - custom encoding method; returns an object that will be subsequently DAST-encoded in usual (recursive) way.
+     __dast__ - custom encoding method; returns an object that will be subsequently DAST-encoded in usual (recursive) way. [TODO]
      __dast_init__ - method to be called instead of __init__ during decoding and instantiating of the class.
      
     Usage:
@@ -894,7 +898,7 @@ class DAST(object):
     keysep0 = "="           # separator for keyword notation of pairs: key=value, used in modes 0 and 1 
     keysep2 = " = "         # separator for keyword notation of pairs: key=value, used in mode 2
     none    = "~"           # what string to use for Nones; only '~', '-', 'null' or 'None' allowed
-    maxindent = 3
+    maxindent = 3           # no. of nesting levels before the encoder turns from mode-2 to mode-1 or 0 
     mode1 = True            # use mode-1 when possible (True) or mode-0 instead (False)
 
     # initial mode and level, for encoding root node of object hierarchy
@@ -913,8 +917,10 @@ class DAST(object):
         return self.encode(obj, out, newline = newline, **kwargs)
     
     def load(self, input):
-        """Generator. Yields consecutive objects decoded from 'input'. 'input' is either a file (an object that iterates over lines), 
-        or a string, in such case it will be split into lines beforehand."""
+        """Generator. Yields consecutive objects decoded from 'input'. 
+        'input' is either a file object, or a name of file to be opened.
+        If you have a string with encoded data, not a file, use decode() instead."""
+        if isstring(input): input = open(input, 'rt')
         return self.decode(input)
     
     def encode(self, obj, out = None, newline = False, **kwargs):

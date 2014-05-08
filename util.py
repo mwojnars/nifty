@@ -510,7 +510,8 @@ class JsonReversibleDecoder(json.JSONDecoder):      ###  DRAFT
 
 class JsonDict(dict):
     """A dictionary that's linked to a JSON file on disk: initial data is loaded from file upon __init__; 
-    sync() and close() save dict contents back to file, by re-opening and rewriting all file contents. File is closed between syncs."""
+    sync() and close() save dict contents back to the file, by re-opening and rewriting all file contents. 
+    The file is closed between syncs."""
     def __init__(self, filename, load = True, indent = 2, **json_kwargs):
         super(JsonDict, self).__init__()
         self.filename = filename
