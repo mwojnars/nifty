@@ -19,8 +19,8 @@ from collections import defaultdict
 from array import array
 from itertools import imap
 
-from nifty.util import isstring, islist, bound, flatten, merge_spaces
-import nifty.util as util
+from .util import isstring, islist, bound, flatten, merge_spaces
+from . import util
 
 
 #########################################################################################################################################################

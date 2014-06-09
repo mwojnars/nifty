@@ -17,7 +17,7 @@ import numpy as np
 import numpy.linalg as linalg
 from numpy import sum, mean, zeros, sqrt, pi, exp, isnan, isinf, arctan
 
-from nifty.util import isnumber
+from .util import isnumber
 
 
 ########################################################################################################################

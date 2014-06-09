@@ -14,8 +14,8 @@ You should have received a copy of the GNU General Public License along with Nif
 
 import os, collections, json, re, datetime
 
-from nifty.util import jsondump, getattrs, isfunction
-from nifty.web import isxdoc, noscript
+from util import jsondump, getattrs, isfunction
+from web import isxdoc, noscript
 
 
 ########################################################################################################################################################

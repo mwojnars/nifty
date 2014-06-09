@@ -25,9 +25,9 @@ from urllib2 import HTTPError, URLError
 from socket import timeout as Timeout
 #from lxml.html.clean import Cleaner        -- might be good for HTML sanitization (no scritps, styles, frames, ...), but not for general HTML tag filering 
 
-from nifty.util import islinux, isint, islist, isnumber, isstring, jsondump, JsonDict, mnoise, unique, copyattrs, classname, noLogger, defaultLogger
-from nifty.text import regex, xbasestring
-import nifty.util as util
+from .util import islinux, isint, islist, isnumber, isstring, jsondump, JsonDict, mnoise, unique, copyattrs, classname, noLogger, defaultLogger
+from .text import regex, xbasestring
+from . import util
 
 now = time.time                 # shorthand for calling now() function, for process-local time measurement
 
@@ -840,7 +840,11 @@ class Crawler(object):
 ###
 
 from scrapy.selector import HtmlXPathSelector, XmlXPathSelector, XPathSelector
-from scrapy.selector.list import XPathSelectorList
+try:
+    from scrapy.selector.unified import SelectorList as XPathSelectorList       # newer versions of Scrapy
+except ImportError:
+    from scrapy.selector.list import XPathSelectorList                          # older versions of Scrapy; TODO: drop entirely
+
 
 def xpath_escape(s):
     """Utility function that works around XPath's lack of escape character and converts given string (if necessary) into concat(...) expression, 
@@ -867,73 +871,6 @@ class XNoneType(HtmlXPathSelector):
     def __bool__(self): return False
     __nonzero__ = __bool__
 XNone = XNoneType()
-
-# def XPathSelector_node(self, xpath, none = False):
-#     "Similar to nodes() [equiv. of select()] but returns always 1 node rather than a list of nodes. None or XNone if no node has been found"
-#     l = self.nodes(xpath)
-#     if l: return l[0]
-#     return None if none else XNone
-#     
-# def XPathSelector_text(self, xpath = ".", norm = True):
-#     """ Returns all text contained in the 1st node selected by 'xpath', as a list of x-strings (xbasestring) 
-#     with tags stripped out and entities decoded. Empty string if 'xpath' doesn't select any node.
-#     If norm=True, whitespaces are normalized: multiple spaces merged, leading/trailing spaces stripped out.
-#     """
-#     xpath = "string(" + xpath + ")"
-#     if norm: xpath = "normalize-space(" + xpath + ")"
-#     return xbasestring(self.nodes(xpath)[0].extract())
-# 
-# def XPathSelector_texts(self, xpath, norm = True):
-#     """ Returns all texts selected by given 'xpath', as a list of x-strings (xbasestring),
-#     with tags stripped out and entities decoded. Empty list if 'xpath' doesn't select any node.
-#     If norm=True, whitespaces are normalized: multiple spaces merged, leading/trailing spaces stripped out.
-#     """
-#     nodes = self.nodes(xpath)
-#     return [n.text(".", norm) for n in nodes]
-# 
-# XPathSelector._path_anchor       = "(self::node()[name()='a']|.//a)/@href"
-# XPathSelector._path_class        = ".//%s[contains(concat(' ', @class, ' '), ' %s ')]"
-# XPathSelector._path_id           = ".//%s[@id='%s']"
-# XPathSelector._path_after        = "(.//th|.//td)[contains(.,%s)]/following-sibling::td[1]"
-# XPathSelector._path_after_exact  = "(.//th|.//td)[.=%s]/following-sibling::td[1]"
-# 
-# def XPathSelector_anchor(self, xpath = None, none = False):
-#     "Extracts href attribute from self (if <a>) or from the 1st <a> descendant. If 'xpath' can't be found and none=False (default), returns '', else None"
-#     node = self.node(xpath) if xpath else self
-#     if not node: return None if none else ''
-#     return node.text(self._path_anchor)
-# 
-# def XPathSelector_nodeWithID(self, cls, tag = "*", none=False):
-#     return self.node(self._path_id % (tag,cls), none)
-# 
-# def XPathSelector_nodeOfClass(self, cls, tag = "*", none=False):
-#     "Checks for inclusion of 'cls' in the class list, rather than strict equality."
-#     return self.node(self._path_class % (tag,cls), none)
-# 
-# def XPathSelector_nodesOfClass(self, cls, tag = "*"):
-#     "Checks for inclusion of 'cls' in the class list, rather than strict equality."
-#     return self.nodes(self._path_class % (tag,cls))
-# 
-# def XPathSelector_nodeAfter(self, title = None, exact = None, none=False):
-#     """Returns first (only 1) <TD> element that follows <TD>...[title]...</TD> or <TH>. If 'title' is None, 'exact' is matched instead, 
-#     using equality match rather than contains(). Usually used to extract contents of a table cell given title of the row"""
-#     if title is not None:
-#         return self.node(self._path_after % xpath_escape(title), none)
-#     return self.node(self._path_after_exact % xpath_escape(exact), none)
-# 
-# def XPathSelector_textAfter(self, title = None, exact = None, norm = True):
-#     "Like nodeAfter(), but returns text of the node"
-#     if title is not None:
-#         return self.text(self._path_after % xpath_escape(title), norm)
-#     return self.text(self._path_after_exact % xpath_escape(exact), norm)
-# 
-# def XPathSelector_unicode(self):
-#     return self.extract()
-# def XPathSelector_str(self):
-#     return unicode(self).encode('utf-8')
-# def XPathSelector_contains__(self, s):
-#     "Checks for occurence of a given plain text in the document (tags stripped out). Shorthand for 's in x.text()'."
-#     return s in self.text()
 
 
 class XPathSelectorPatch(object):

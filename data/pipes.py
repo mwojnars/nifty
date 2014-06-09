@@ -22,11 +22,18 @@ from Queue import Queue
 from itertools import islice
 from collections import OrderedDict
 
-from nifty.util import isint, islist, isstring, issubclass, isfunction, iscontainer, istype, \
-                       classname, getattrs, setattrs, divup, Tee, openfile
-from nifty.util import Object, __Object__, NoneLock
-from nifty.files import GenericFile, File as files_File, SafeRewriteFile, ObjectFile, JsonFile, DastFile
-
+# nifty; whenever possible, use relative imports to allow embedding of the library inside higher-level packages;
+# only when executed as a standalone file, for unit tests, do an absolute import
+if __name__ != "__main__":
+    from .. import util
+    from ..util import isint, islist, isstring, issubclass, isfunction, iscontainer, istype, \
+                       classname, getattrs, setattrs, Tee, openfile, Object, __Object__
+    from ..files import GenericFile, File as files_File, SafeRewriteFile, ObjectFile, JsonFile, DastFile
+else:
+    from nifty import util
+    from nifty.util import isint, islist, isstring, issubclass, isfunction, iscontainer, istype, \
+                       classname, getattrs, setattrs, Tee, openfile, Object, __Object__
+    from nifty.files import GenericFile, File as files_File, SafeRewriteFile, ObjectFile, JsonFile, DastFile
 
 #####################################################################################################################################################
 ###
@@ -186,7 +193,7 @@ class Cell(Object):
     2) Additionally to (1), override init() method to perform custom post-processing of knob values.
        This shall only be used in final classes, not in classes intended for further subclassing,
        so that calling super().init() can be safely omitted in all final classes.
-    3) The subclass can override __init__, possibly calling initKnobs() and init() inside like Cell.__init__ does,
+    3) The subclass can override __init__, possibly calling initKnobs() and init() inside, like Cell.__init__ does,
        but adding custom code in-between. This is a recommended approach for base classes which are intended 
        for subclassing but still need to do custom post-processing of knob values or other initialization to be done
        during __init__.
@@ -212,16 +219,19 @@ class Cell(Object):
 
     printlock = threading.Lock()          # mutual exclusion of printing (on stdout); assign NoneLock to switch synchronization off
 
-    def __init__(self, *args, **knobs):
+    def __init__(self, *args, **kwargs):
         """The client can pass knobs already in __init__, without manual call to setKnobs. 
         Unnamed args passed down to custom init(), but first interpreted as knobs passed in the order of their declaration
         in the class."""
-        self.initKnobs(*args, **knobs)
-        self.init(*args)
+        self.initKnobs(*args, **kwargs)
+        self.init(*args, **kwargs)
 
-    def init(self, *args):
+    def init(self, *args, **kwargs):
         """Override in subclasses to provide custom initialization, without worrying about calling super __init__.
-        Upon call, knobs are already set, so init() can post-process them or use their values as passed by the client to __init__.        
+        Upon call, knobs are already set, so init() can post-process them or use their values to set other attributes.
+        It's recommended to read knobs values from 'self' not 'knobs'.
+        The 'knobs' dict is given here only to enable passing of regular non-knob arguments, 
+        not declared as __knobs__ of the class.
         """
 
     def initKnobs(self, *args, **knobs):
@@ -918,27 +928,50 @@ class Print(Monitor):
     use self.out as the output stream: 'print >>self.out, ...' 
     - it redirects to stdout and/or file, appropriately."""
 
-    subset = None
+    class __knobs__:
+        msg     = "%s"      # format string of messages, may contain 1 parameter %s to print the data item in the right place
+        func    = None      # optional function called on every item before printing, its output is printed instead of the actual item
+        file    = None      # path to external output file or None
+        disp    = True      # shall we print to stdout? (can be combined with 'outfile')
+        step    = None      # print every step-th item, or all items if None
+        index   = False     # shall we print 1-based item number at the begining of a line?
 
-    def __init__(self, msg = "%s", func = None, outfile = None, disp = True, count = False, subset = None, *args, **kwargs):
-        """msg: format string of messages, may contain 1 parameter %s to print the data item in the right place.
-        func: optional function called on every item before printing, its output is printed instead of the actual item.
-        outfile: path to external output file or None; disp: shall we print to stdout?; count: shall we print 1-based item number at the begining of a line?
-        subset: print every n-th item (see Subset), or None to print all items."""
-        if outfile and disp: outfile = [outfile, sys.stdout]
-        kwargs['outfile'] = outfile
-        Monitor.__init__(self, *args, **kwargs)
-        #if '%s' not in msg: msg += ' %s'
-        self.static = ('%s' not in msg)
-        self.message = msg
-        self.func = func
-        self.index = count
-        if subset: self.subset = subset
-        #print "created Print() instance, message '%s'" % self.message
+    def __init__(self, *args, **kwargs):
+        self.initKnobs(*args, **kwargs)
+
+        if 'subset' in kwargs: self.step = kwargs['subset']         # 'subset' is an alias for 'step'
+        if 'count' in kwargs: self.index = kwargs['count']          # 'count' is an alias for 'index'
+        self.static = ('%s' not in self.msg)
+        self.message = self.msg
+        
+        # set 'outfiles' for Monitor base class
+        if self.file and disp: 
+            self.outfiles = [self.file, sys.stdout]
+        else:
+            self.outfiles = self.file
+
+        self.init(*args, **kwargs)
+
+#     def __init__(self, msg = "%s", func = None, outfile = None, disp = True, count = False, subset = None, *args, **kwargs):
+#         """msg: format string of messages, may contain 1 parameter %s to print the data item in the right place.
+#         func: optional function called on every item before printing, its output is printed instead of the actual item.
+#         outfile: path to external output file or None; disp: shall we print to stdout?; 
+#         count: shall we print 1-based item number at the begining of a line?
+#         subset: print every n-th item (see Subset), or None to print all items."""
+#         if outfile and disp: outfile = [outfile, sys.stdout]
+#         kwargs['outfile'] = outfile
+#         Monitor.__init__(self, *args, **kwargs)
+#         #if '%s' not in msg: msg += ' %s'
+#         self.static = ('%s' not in msg)
+#         self.message = msg
+#         self.func = func
+#         self.index = count
+#         if subset: self.subset = subset
+#         #print "created Print() instance, message '%s'" % self.message
 
     def monitor(self, item):
         #print "Print.monitor()", self.subset, self.index
-        if self.subset and self.count % self.subset != 0: return
+        if self.step and self.count % self.step != 0: return
         with self.printlock:
             if self.index: print >>self.out, self.count,
             self.print1(item)
@@ -1104,10 +1137,12 @@ class Mean(Metric):
 
     def mean(self): 
         "Sample mean"
+        if self.size <= 0: return None
         return self.sum / float(self.size)
 
     def deviation(self): 
         "Sample standard deviation"
+        if self.size <= 1: return None
         N = float(self.size)
         return np.sqrt((self.sum2 - self.sum/N * self.sum) / (N-1))
 
@@ -1481,13 +1516,13 @@ class Grid(MetaOptimize):
     No output produced, only empty stream.
     """
     
-    runID        = "runID"          # name of a special knob inside 'pipe' that will be set with an ID (integer >= 1) of the current run
-    startID      = 0                # ID of the first run, to start counting from
-    maxThreads   = 0                # max. no. of parallel threads; <=1 for serial execution; None for full parallelism, with only 1 scan over input data
-    threadBuffer = 10               # length of input queue in each thread; 1 enforces perfect alignment of threads execution; 
-                                    # 0: no alignment, queues can get big when input data are produced faster than consumed
-    copyPipe     = True             # shall we make a separate deep copy of the pipe for each run?
-    copyData     = True             # shall we make separate deep copies of data items for each parallel run? no copy in serial mode
+    runID        = "runID"      # name of a special knob inside 'pipe' that will be set with an ID (integer >= 1) of the current run
+    startID      = 0            # ID of the first run, to start counting from
+    maxThreads   = 0            # max. no. of parallel threads; <=1 for serial execution; None for full parallelism, with only 1 scan over input data
+    threadBuffer = 10           # length of input queue in each thread; 1 enforces perfect alignment of threads execution; 
+                                # 0: no alignment, queues can get big when input data are produced faster than consumed
+    copyPipe     = True         # shall we make a separate deep copy of the pipe for each run? Applies to serial scan only; in parallel, copy is always done
+    copyData     = True         # shall we make separate deep copies of data items for each parallel run? no copy in serial mode
     
     def __init__(self, pipe, **kwargs):
         #"""'space', if present, is a Cartesian or another Space instance, 
@@ -1531,7 +1566,7 @@ class Grid(MetaOptimize):
             self.done += 1
         
     def iterParallel(self):
-        scans = divup(len(self.space), self.maxThreads) if self.maxThreads else 1
+        scans = util.divup(len(self.space), self.maxThreads) if self.maxThreads else 1
         with self.printlock: print "Grid: %d runs to be executed, in %d scan(s) over input data..." % (len(self.space), scans)
         
         def knobsStream():
@@ -1553,6 +1588,7 @@ class Grid(MetaOptimize):
             if group: yield group
 
         for kgroup in knobsGroups():
+            kgroup = list(kgroup)
             self.scanParallel(kgroup)
             self.done += len(kgroup)
 
@@ -1571,7 +1607,7 @@ class Grid(MetaOptimize):
     
     def scanParallel(self, knobsGroup):
         "Single scan over input data, with each item fed to a group of parallel threads."
-        with self.printlock: print "Grid, starting next parallel scan for %d runs beginning with ID=%s..." % (len(knobsGroup), knobsGroup[0][0][1])
+        with self.printlock: print "Grid, starting next parallel scan for %d runs beginning with ID=%s..." % (len(knobsGroup), knobsGroup[0]['runID'])
         threads = self.createThreads(knobsGroup)
         duplicate = deepcopy if self.copyData else lambda x:x
 
@@ -1718,7 +1754,7 @@ class operator(Controller):
         super(operator, self).__init__(pipe)
         self._prolog()
 
-    # processing can be invoked with op(item), like a function, not only op.process(item)
+    # processing can be invoked with op(item), like a function, in addition to op.process(item) defined in base class
     __call__ = Controller.process
     
 

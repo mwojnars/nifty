@@ -162,14 +162,22 @@ You should have received a copy of the GNU General Public License along with Nif
 """
 
 
+from __future__ import absolute_import
 import re, numpy as np
 from StringIO import StringIO
 from itertools import izip
 from datetime import datetime, date, time
 from collections import OrderedDict, defaultdict, namedtuple, Iterator
 
-from nifty.util import isstring, isdict, isbound, classname, subdict, Object
-from nifty.text import regex
+# nifty; whenever possible, use relative imports to allow embedding of the library inside higher-level packages;
+# only when executed as a standalone file, for unit tests, do an absolute import
+if __name__ != "__main__":
+    from ..util import isstring, isdict, isbound, classname, subdict, Object
+    from ..text import regex
+else:
+    from nifty.util import isstring, isdict, isbound, classname, subdict, Object
+    from nifty.text import regex
+
 
 ########################################################################################################################################################
 
@@ -869,9 +877,6 @@ def _import(path):
     #print module
     #print module.__dict__
     return getattr(module, name)
-
-
-#_import('nifty.util.Object')
 
 
 ########################################################################################################################################################

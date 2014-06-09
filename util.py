@@ -556,7 +556,7 @@ class JSON(object):         ###  DRAFT
 ### DAST printing ###
 
 def printdast(obj, **kwargs):
-    import nifty.data.dast as dast
+    from .data import dast
     print dast.encode(obj, **kwargs)
 
 
@@ -634,7 +634,11 @@ DAY    = 60*60*24
 WEEK   = 60*60*24*7
 YEAR   = 60*60*24*365.2425
 
-# current date+time in structural form; use time.time() for flat form of #seconds from Epoch
+# current date in structural form, as datetime.date
+def today():                              return datetime.date.today()
+def todayString(fmt = '%Y-%m-%d'):        return datetime.date.today().strftime(fmt)
+
+# current date+time in structural form, as datetime.datetime; use time.time() for flat form of #seconds from Epoch
 def now():                                return datetime.datetime.now()
 def nowString(fmt = '%Y-%m-%d %H:%M:%S'): return datetime.datetime.now().strftime(fmt)
 def utcnow():                             return datetime.datetime.utcnow()
@@ -798,6 +802,13 @@ def openfile(f, mode = 'wt'):
     if isstring(f):
         return (open(f, mode), True)        # 'f' was not an existing file; must open it here and let the client know that it must be closed at the end
     raise Exception("Object of incorrect type passed as a file(name), or a closed file: %s" % f)
+
+def resource(reference, name):
+    """Takes the directory part of 'reference' path (usually __file__ of the calling function) and appends 'name'
+    (a *relative* file path) to obtain full path to a given resource file, located inside the directory tree 
+    of the application source code. Doesn't work in python zip packages. See also pkgutil.get_data()."""
+    folder = os.path.split(reference)[0]
+    return folder + '/' + name
 
 
 class Tee(object):

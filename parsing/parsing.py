@@ -41,7 +41,7 @@ You should have received a copy of the GNU General Public License along with Nif
 '''
 
 import copy
-from nifty.util import isstring, escape, flatten
+from ..util import isstring, escape, flatten
 
 try:
     import waxeye           # you can use this object in client code when you need to access internal Waxeye objects

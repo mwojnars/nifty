@@ -17,8 +17,8 @@ import os, shutil, jsonpickle
 from copy import deepcopy
 from itertools import count
 
-from nifty.util import classname, fileexists, filesize
-from nifty.data.dast import DAST
+from util import classname, fileexists, filesize
+from data.dast import DAST
 
 
 #####################################################################################################################################################

@@ -472,12 +472,21 @@ import copy, urllib
 from collections import namedtuple
 from datetime import datetime
 
-import nifty.util as util
-from nifty.util import isstring, islist, isdict, istuple, issubclass, subdict, prefix, ObjDict, lowerkeys, classname
-from nifty.text import merge_spaces, decode_entities, regexEscape
-from nifty.web import urljoin, xdoc
+# nifty; whenever possible, use relative imports to allow embedding of the library inside higher-level packages;
+# only when executed as a standalone file, for unit tests, do an absolute import
+if __name__ != "__main__":
+    from .. import util
+    from ..util import isstring, islist, isdict, istuple, issubclass, subdict, prefix, ObjDict, lowerkeys, classname
+    from ..text import merge_spaces, decode_entities, regexEscape, html2text
+    from ..web import urljoin, xdoc
+    from ..parsing import parsing
+else:
+    import nifty.util as util
+    from nifty.util import isstring, islist, isdict, istuple, issubclass, subdict, prefix, ObjDict, lowerkeys, classname
+    from nifty.text import merge_spaces, decode_entities, regexEscape, html2text
+    from nifty.web import urljoin, xdoc
+    import nifty.parsing.parsing as parsing
 
-import nifty.parsing.parsing as parsing
 import pattern_parser
 
 
@@ -1104,8 +1113,8 @@ class PatternOr(Pattern):
 ###  Standard converters for use in Pattern.convert
 ###
 
-from nifty.text import html2text             # use html2text in Pattern.convert if you want extracted HTML code to be converted into raw text
-from decimal import Decimal                 # for parsing floating-point numbers without rounding errors
+html2text = html2text               # use html2text in Pattern.convert if you want extracted HTML code to be converted into raw text
+from decimal import Decimal         # for parsing floating-point numbers without rounding errors
 
 def url(s, baseurl):
     """Turn the (relative) URL 's' into an absolute URL anchored at 'baseurl'. Do NOT unquote! 
