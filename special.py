@@ -72,7 +72,13 @@ class RichException(Snapshot, Exception):
         if self.context: items.append(jsondump(self.context)[:300])
         return " ".join(items)
         
-    def dump(self, path):
+    def html(self):
+        "HTML context of this exception, as string (if present), or None."
+        html = self.context.get('html')
+        if html is None: return None
+        return str(html)
+    
+    def dump(self, path = None):
         return json.dumps(self, indent = 2, cls = RichException.JsonEncoder(path))
 #        def dump(name, val):
 #            return '"%s": ' % name + jsondump(val)
@@ -91,10 +97,11 @@ class RichException(Snapshot, Exception):
         path = os.path.normpath(path)
         with open(path + "/exception.json", 'wt') as f:
             f.write(self.dump(path))
-        html = self.context.get('html')
-        if not html: return
+
+        html = self.html()
+        if html is None: return
         with open(path + "/exception.html", 'wt') as f:
-            f.write(str(html))
+            f.write(html)
 
 
     class JsonEncoder(json.JSONEncoder):
@@ -105,8 +112,8 @@ class RichException(Snapshot, Exception):
             * other objects: outputs __dict__ truncated to regular properties.
         For printing, not reversible.
         """
-        def __init__(self, path):
-            self.path = path
+        def __init__(self, path = None):
+            self.path = path            # if not-None, additional files will be created for each xdoc sub-documents (see makefile())
             self.nfiles = 0             # no. of files created in makefile() method
             
         def __call__(self, *args, **kwargs):
@@ -155,11 +162,13 @@ class RichException(Snapshot, Exception):
         def xdoc(self, doc):
             #d = collections.OrderedDict()
             #d['OBJECT'] = self.classname(obj)
-            html = doc.html()
-            fname = self.makefile(html)
-            url = "file://" + fname
+            html = noscript(doc.html())                             # disable javascript code
             #html = merge_spaces(html)
-            return url
+            if self.path:
+                fname = self.makefile(html)
+                return "file://" + fname
+            else:
+                return html
         
         def anyclass(self, cls):
             d = collections.OrderedDict()
@@ -194,7 +203,6 @@ class RichException(Snapshot, Exception):
             return attrs
             
         def makefile(self, html):
-            html = noscript(html)               # disable javascript code
             self.nfiles += 1
             fname = self.path + "exception_%d.html" % self.nfiles
             with open(fname, 'wt') as f:

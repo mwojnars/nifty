@@ -15,6 +15,7 @@ You should have received a copy of the GNU General Public License along with Nif
 from __future__ import absolute_import
 import __builtin__, os, sys, glob, types as _types, re, numbers, json, time, datetime, calendar
 import logging, random, math, collections, unicodedata, heapq, threading, inspect
+from StringIO import StringIO
 
 
 #####################################################################################################################################################
@@ -128,6 +129,12 @@ def list2str(l, sep = " ", f = str):
     "Convert all items of list 'l' into strings of type 'f' (str) and concatenate into one string separated by 'sep'. 'f' can also be any mapping function."
     return sep.join(map(f, l))
 
+def str2list(s, sep = None):
+    """Return s.split(sep), but first check if 's' is not already a list or None (return unchanged in such case). 
+    For convenient definition of string lists: either as lists or as sep-separated strings of words."""
+    if s is None or islist(s): return s
+    return s.split(sep)
+
 def obj2dict(obj):
     'Convert nested objects into plain (but still nested) dictionaries. Handles also lists.'
     if hasattr(obj, "__iter__"):
@@ -169,20 +176,29 @@ def lowerkeys(d):
     "Copy dictionary 'd' with all keys changed to lowercase. Class of 'd' is preserved (can be other than dict)."
     return d.__class__((k.lower(), v) for k,v in d.iteritems())
 
-def getattrs(obj, names = None, exclude = "__", default = None, missing = True):
+def getattrs(obj, names = None, exclude = "__", default = None, missing = True, usedict = False):
     """Similar to built-in getattr(), but takes a list of many attribute names at once (or a string with 1+ space-separated names) 
     and returns as a dictionary of name->value pairs.
-    Can be used to retrieve all attributes (names=None) except special ones: with prefix 'exclude'.
+    Can be used to retrieve all __dict__ attributes (names=None) except special ones: with prefix 'exclude'.
+    By default, all attributes are retrieved using getattr(), which fires up descriptors (if any) and returns methods 
+    as <unbound method> not <function>, in contrast to __dict__[key]. Only if usedict=True, attributes are taken directly from __dict__,
+    which can be faster, but in some cases behaves differently than getattr().  
     Returns None for missing attributes if missing=True (default), skips them if missing=None, or raises an exception if missing=False. 
     """
-    if isstring(names):
-        if ' ' not in names:
-            return {names: getattr(obj, names)}         # a single name given
-        names = names.split()
+    if names is None:                                                               # retrieving all attributes?
+        if usedict:                                                                 # use faster but less correct approach: __dict__
+            d = obj.__dict__.copy()
+            if exclude is None: return d
+            for k in d.keys():
+                if k.startswith(exclude): del d[k]
+            return d
+        names = filter(lambda n: not n.startswith(exclude), obj.__dict__.keys())    # move on to a slower but fully correct approach: getattr()
+    
+    if isstring(names):                                                             # retrieving an explicit list of attributes?
+        if ' ' not in names: return {names: getattr(obj, names)}                    # a single name given
+        names = names.split()                                                       # multiple names
+    
     d = {}
-    if names is None:
-        names = obj.__dict__.keys()
-        names = filter(lambda n: not n.startswith(exclude), names)
     if missing:
         for k in names: d[k] = getattr(obj, k, default)
     elif missing == False:
@@ -299,20 +315,22 @@ def heapmerge(*inputs):
 ###   OBJECTS
 ###
 
-class __Object__(type):
-    "Metaclass for Object. Implements labels."
-    
+class __Labelled__(type):
+    "Metaclass that implements labels for the actual class: inheritable lists of attributes that exhibit a special behavior."
+
     def __init__(cls, *args):
         cls.__labels__ = []                         # names of attributes that represent labels in this class
-        cls.label('__transient__')                  # declare '__transient__' as a label and set up the list of labelled attributes, cls.__transient__
 
-    def label(cls, name):
+    def labels(cls, names): #@NoSelf
+        for name in str2list(names): cls.label(name)
+        
+    def label(cls, name): #@NoSelf
         "Declare 'name' as a label and set up the list of labelled attributes, the list to be stored under 'name'."
         cls.normLabel(name)                         # convert cls's own labelling to canonical representation
         cls.inheritList(name)                       # inherit labellings from superclasses
         cls.__labels__.append(name)                 # mark 'name' as a label
     
-    def normLabel(cls, label):
+    def normLabel(cls, label): #@NoSelf
         "Normalize a list of labelled attributes declared in this class, by converting it from a string or inner class if necessary."
         attrs = getattr(cls, label, [])                     # list of names of attributes labelled by 'label'
         if istype(attrs):                                   # inner class?
@@ -329,7 +347,7 @@ class __Object__(type):
             attrs = attrs.split()
         setattr(cls, label, attrs)
 
-    def inheritList(cls, label):
+    def inheritList(cls, label): #@NoSelf
         "If 'label' is the name of a special attribute containing a list of items, append lists from base classes to cls's list."
         #"""Find out what attributes are labelled by 'label' in superclasses and label them in this class, too. 
         #'label' is the name of attribute that keeps a list of labelled attrs of a given class."""
@@ -339,7 +357,7 @@ class __Object__(type):
         combined = unique(items + baseitems, order = True)                      # add cls's items at the BEGINNING and uniqify
         setattr(cls, label, combined)
 
-    def _getattrs(outer, cls):
+    def _getattrs(outer, cls): #@NoSelf
         """Get names of all attributes of a given class, arrange them in the same ORDER as in the source code,
         and return together with their values as an Ord.
         Warning: only the attributes that appear at the beginning of their line are detected.
@@ -348,7 +366,6 @@ class __Object__(type):
         only 'x' will be detected, 'y' will be missed.
         """
         from tokenize import generate_tokens
-        from StringIO import StringIO
         import token
         
         src = outer._getsource(cls.__name__)
@@ -364,7 +381,7 @@ class __Object__(type):
         
         return attrs
 
-    def _getsource(outer, name):
+    def _getsource(outer, name): #@NoSelf
         """Improved variant of inspect.getsource(), corrected for inner classes.
         Standard getsource() works incorrectly when two outer classes in the same file have inner classes with the same name.
         """
@@ -384,7 +401,15 @@ class __Object__(type):
                 if line.startswith(indent1) or line.startswith(indent2) or sline == '' or sline.startswith('#'): j += 1
                 else: break
             return '\n'.join(lines[i+1:j])
-        return outsrc                           # as a fallback, return all 'outsrc'
+        return outsrc                               # as a fallback, return all 'outsrc'
+
+
+class __Object__(__Labelled__):
+    "Metaclass for Object. Implements __transient__ label."
+    def __init__(cls, *args): #@NoSelf
+        super(__Object__, cls).__init__(cls, *args)
+        cls.label('__transient__')                  # declare '__transient__' as a label and set up the list of labelled attributes, cls.__transient__
+
 
 class Object(object):
     """For easy creation of objects that can have assigned any attributes, unlike <object> instances. For example: 
@@ -416,7 +441,7 @@ class Object(object):
     __metaclass__ = __Object__
     __transient__ = []                      # list of names of attributes to be excluded from serialization 
     
-    def __init__(self, __dict__ = {}, **kwargs):
+    def __init__(self, __dict__ = {}, **kwargs):                                        #@ReservedAssignment
         self.__dict__.update(__dict__)
         self.__dict__.update(kwargs)
     def __eq__(self, other): 
@@ -783,12 +808,12 @@ def ifindfiles(pattern):
 
 def getfile(f):
     """Returns a file object corresponding to a given special name: 'stdout', 'stderr' or 'stdin'.
-    None and '' are mapped to stdout, too. Also, 'f' can be already a Tee object or an open file,
+    None and '' are mapped to stdout, too. Also, 'f' can be already a Tee object, a StringIO or an open file,
     in which case it's returned unchanged. Otherwise, None is returned."""
     if f in [None, '', 'stdout']: return sys.stdout
     if f in ['stderr', 'stdin']: return getattr(sys, f)
     if isinstance(f, Tee): return f
-    if isinstance(f, file) and not f.closed: return f
+    if isinstance(f, (file, StringIO)) and not f.closed: return f
     return None
 
 def openfile(f, mode = 'wt'):
@@ -864,50 +889,78 @@ class NoneLock(NoneObject):
 
 #####################################################################################################################################################
 ###
-###   LOGGING & other stuff (DRAFT)
+###   LOGGING & other stuff
 ###
 
-class Logger():
+class Logger(object):
+    """
+    Generates log files. Features:
+    
+    - Levels.
+    - Thread safety. Optional mutual exclusion between all threads using the same Logger instance.
+    - Customizable message format.
+    - Customizable time format.
+    - Raw printing.
+    - Block printing.
+    
+    - Context. Every message can be accompanied with context data: a dict of key-value pairs, like time or place 
+      of execution that caused this message, or data being processed when the event happened.
+      Context can be passed on per-message basis and/or set globally for all subsequent messages.
+      When a message is to be logged, named parameters in the message string are filled with context values.
+    
+    - Context stack. Value of a given item in global context can be replaced with another value and pushed to stack using push(),
+      to be recovered again using pop(). This enables easy context management in nested execution.
+    
+    Other:
+    - a shorthand: can use log(...) instead of log.message(...)
+    """
+    
     # class-level constants, mostly the same values as in standard 'logging' module, with small exceptions
     EMPTY, DEBUG, INFO, WARN, WARNING, ERROR, CRITICAL, FATAL = 0, 10, 20, 30, 30, 40, 50, 50
-    levels = {0:'', 10:'DEBUG', 20:'INFO', 30:'WARN', 40:'ERROR', 50:'CRITICAL',
-              None:0, '':0, 'DEBUG': 10, 'INFO':20, 'WARN':30, 'WARNING':30, 'ERROR':40, 'CRITICAL':50, 'FATAL':50}
+    levels = {0: '', 10: 'DEBUG', 20: 'INFO', 30: 'WARN', 40: 'ERROR', 50: 'CRITICAL',
+              None: 0, '': 0, 'DEBUG': 10, 'INFO': 20, 'WARN': 30, 'WARNING': 30, 'ERROR': 40, 'CRITICAL': 50, 'FATAL': 50}
     
     # defaults of instance-level properties
-    mutex = NoneLock()                              # logger can be made thread-safe (no messages mixed up) by assigning a Lock object to 'mutex'
-    out = sys.stderr
-    format = '%(time)s %(level)-5s  %(message)s'                                                    #@ReservedAssignment
+    mutex      = NoneLock()                         # logger can be made thread-safe (no messages mixed up) by assigning a Lock object to 'mutex'
+    out        = sys.stderr                         # any file-like object with write() method
+    format     = '%(time)s %(level)-5s  %(message)s'                                                    #@ReservedAssignment
     timeformat = '%Y-%m-%d %H:%M:%S'
-    fields = {}                                     # default values for fields inserted in log string, if not overriden explicitly during log call
-    minlevel = None                                 # if set, a number with minimum message level to be printed out; lower levels and None-level will be ignored
+    context    = {}                                 # global context, applicable to all messages; selected values can be overriden during log call
+    minlevel   = None                               # if set, a number with minimum message level to be printed out; lower levels and None-level will be ignored
+
+    content    = None                               # a StringIO buffer that keeps everything written to the logger; only if buffer=True in __init__
     
-    def __init__(self, format = None, timeformat = None, minlevel = None, mutex = NoneLock(), **fields):                  #@ReservedAssignment
-        self.out = sys.stderr
+    def __init__(self, format = None, timeformat = None, minlevel = None, out = None, buffer = False, mutex = NoneLock(), **ctx):                  #@ReservedAssignment
+
+        # set output stream
+        self.out = out if out else sys.stderr
+        if buffer:                                      # buffer all output stream in 'content'?
+            self.content = StringIO()
+            self.out = Tee(self.out, self.content)
+            
+        # set other parameters    
         if format: self.format = format
         if timeformat: self.timeformat = timeformat
         self.minlevel = minlevel
-        self.fields = {'level':''}
-        self.fields.update(fields)
-        #self.prefix = prefix
-        self.stacks = collections.defaultdict(list)     # stacks of previous field values stored by push(), old value can be recovered by pop()
+        self.context = {'level':''}
+        self.context.update(ctx)
+        self.stacks = collections.defaultdict(list)     # stacks of previous context values stored by push(), old value can be recovered by pop()
         if mutex is True: mutex = Lock()
         self.mutex = mutex
     
-    def __setitem__(self, field, val):
-        self.fields[field] = val
-    def __getitem__(self, field):
-        return self.fields[field]
-    def __delitem__(self, field):
-        del self.fields[field]
+    def __setitem__(self, key, val):    self.context[key] = val
+    def __getitem__(self, key):         return self.context[key]
+    def __delitem__(self, key):         del self.context[key]
 
-    def push(self, field, val):
-        if field in self.fields:
-            self.stacks[field].append(self.fields[field])
-        self.fields[field] = val
-    def pop(self, field):
-        if self.stacks[field]:
-            self.fields[field] = self.stacks[field].pop()
-        else: del self.fields[field]
+    def push(self, key, val):
+        if key in self.context:
+            self.stacks[key].append(self.context[key])
+        self.context[key] = val
+    
+    def pop(self, key):
+        if self.stacks[key]:
+            self.context[key] = self.stacks[key].pop()
+        else: del self.context[key]
     
     def acquire(self): self.mutex.acquire()             # for manual control over thread separation; alternatively you can use 'log.mutex' directly
     def release(self): self.mutex.release()
@@ -940,12 +993,12 @@ class Logger():
             if not args[0]: args = args[1:]
         msg = ' '.join(str(arg) for arg in args)
         
-        fields = self.fields.copy()
-        fields.update(kwargs)
-        fields['message'] = msg
+        ctx = self.context.copy()
+        ctx.update(kwargs)
+        ctx['message'] = msg
         if '%(time)s' in format:
-            fields['time'] = datetime.datetime.strftime(now(), timeformat)
-        msg = format % fields + end     # self.prefix + ...
+            ctx['time'] = datetime.datetime.strftime(now(), timeformat)
+        msg = format % ctx + end
         
         self._print(msg, lock)
         return True
@@ -961,12 +1014,13 @@ class Logger():
     warning = warn
 
     def raw(self, *args, **kwargs):
-        "Print raw string: no formatting, no newlines; locking omitted by defult."
+        """Print raw string: no formatting (attributes format, timeformat, context ignored), no implicit newlines. 
+        Locking disabled by defult, pass lock=True to enable."""
         lock = kwargs.get('lock', False)
         self._print(' '.join(str(arg) for arg in args), lock)
 
     def block(self, *args, **kwargs):
-        "Like raw(), but indents all lines and prints newline at the end."
+        "Like raw(), but indents all lines by 'indent' spaces (2 by default) and prints newline ('end'='\n' by default) at the end."
         end = kwargs.pop('end', '\n')
         lock = kwargs.get('lock', False)
         _indent = kwargs.get('indent', 2)
@@ -982,10 +1036,12 @@ logging._levelNames[''] = 0
 logging._levelNames[None] = 0
 
 
+###  DRAFT below  ###
+
 # TODO: *context* can be attached to log messages and to Logger2 itself; then used for filtering messages ......
 
 class Logger2(logging.Logger):
-    "Extends standard Logger2 with more convenient handling of context parameters: passed to methods directly as named attributes instead of wraping up in 'extra' dictionary"
+    "Extends standard Logger with more convenient handling of context parameters: passed to methods directly as named attributes instead of wraping up in 'extra' dictionary"
     def debug(self, msg, *args, **kwargs):
         super(Logger2, self).debug(msg, *args, **self._rewrite(kwargs))
     def info(self, msg, *args, **kwargs):
@@ -1020,7 +1076,6 @@ class Logger2(logging.Logger):
         record.__dict__ = d
         return record
 
-        
 class LoggerContext(object):
     """Wrapper (view) for a Logger2 object, which transparently appends predefined parameters to each call to logging methods.
     One Logger2 object can have multiple LoggerContext wrappers at the same time.
@@ -1029,10 +1084,9 @@ class LoggerContext(object):
     def __init__(self, logger, **kwargs):
         self.logger = logger
         self.context = kwargs
-        
-        
 
-# default format for logging, to be used when creating loggers
+
+# default format for logging, for use when creating loggers
 logging_formatter = logging.Formatter('%(asctime)s %(task) %(levelname)-8s %(message)s', '%Y-%m-%d %H:%M:%S')
 
 # default logging handler: prints all messages (level=DEBUG) to stderr
@@ -1052,6 +1106,8 @@ from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
 # see: http://stackoverflow.com/questions/8467978/python-want-logging-with-log-rotation-and-compression#comment10473658_8468041 
 #      http://docs.python.org/library/logging.handlers.html
 
+
+#####################################################################################################################################################
 
 if __name__ == "__main__":
     import doctest

@@ -194,9 +194,9 @@ class Cell(Object):
        This shall only be used in final classes, not in classes intended for further subclassing,
        so that calling super().init() can be safely omitted in all final classes.
     3) The subclass can override __init__, possibly calling initKnobs() and init() inside, like Cell.__init__ does,
-       but adding custom code in-between. This is a recommended approach for base classes which are intended 
-       for subclassing but still need to do custom post-processing of knob values or other initialization to be done
-       during __init__.
+       but adding custom code in-between; or calling super().__init__(). 
+       This is a recommended approach for base classes which are intended for subclassing, but still need to do 
+       custom post-processing of knob values or other initialization during __init__.
     
     Note that many types of initialization can be done also in Pipe's setup(), _prolog() or open() - often these places
     are more suitable than __init__, so most classes don't need custom init/__init__ at all.
@@ -1692,8 +1692,9 @@ class Controller(Wrapper):
                 for item in items: yield item
 
     
-    def __init__(self, pipe):
-        self.pipe = pipe                        # client can use this for later introspection of the inner pipe(s)
+    def __init__(self, pipe, *args, **kwargs):
+        self.pipe = pipe                                # client can use this for later introspection of the inner pipe(s)
+        super(Controller, self).__init__(*args, **kwargs)
     
     def _prolog(self):
         self.feed = Controller.Feed()
@@ -1709,15 +1710,23 @@ class Controller(Wrapper):
         """Subclasses can override this method to handle other types (not 1-1) of input-output relationship
         implemented by the inner pipe. In such case, process() can also be overridden, or left unused.
         """
-        for item in self.source: yield self.process(item)
+        for item in self.source: 
+            res = self.process(item)
+            if res is not False:                            # False interpreted as "drop this item"
+                self.yielded += 1
+                yield item if res is None else res          # None interpreted as "yield the same item"
     
     def process(self, item):
         """Subclasses can override this method to perform additional operations before/during/after 
         the item is processed. In such case, remember to call self.put(item) and self.get() in appropriate places,
-        or alternatively super(X,self).process(item), which runs put() and get() altogether."""
+        or alternatively self.push(item), which runs put() and get() altogether."""
+        return self.push(item)
+    
+    def push(self, item):
+        "put + get in one step"
         self.put(item)
         return self.get()
-    
+
     def put(self, item): self.feed.set(item)
     def get(self): return self.iterator.next()
 

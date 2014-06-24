@@ -14,7 +14,7 @@ You should have received a copy of the GNU General Public License along with Nif
 '''
 
 from __future__ import absolute_import
-import os, subprocess, threading
+import os, sys, subprocess, threading
 #os.environ['http_proxy'] = ''                       # to fix urllib2 problem:  urllib2.URLError: <urlopen error [Errno -2] Name or service not known> 
 
 import urllib2, urlparse, random, time, socket, json, re
@@ -590,7 +590,7 @@ class handlers(object):
             created = os.path.getmtime(filename)
             if now() - created > self.refresh: return None, None        # we have a copy, but time to refresh (don't delete instantly for safety, if web access fails)
             with open(filename) as f:
-                time = util.filetime(filename)
+                time = util.filedatetime(filename)
                 return f.read(), time
             
         
@@ -650,9 +650,10 @@ class WebClient(object):    # ?? base class: urllib2.OpenerDirector, mechanize.B
     
     # atomic handlers that comprise the 'handlers' chain, in the same order 
     _history = _cache = _useragent = _referer = _timeout = _retryCustom = _retryOnError = _retryOnTimeout = _delay = _customHandlers = _client = None
+    _tor = False            # self._tor is a read-only attr., changing it does NOT influence whether Tor is used or not, this is decided in __init__ and can't be changed
 
-    handlers = None         # head (!) of the chain of handlers
-    logger = None
+    handlers = None         # head (only!) of the chain of handlers
+    logger   = None         # the logger that was passed down to all handlers in setLogger()
     
     
     def __init__(self, timeout = None, identity = True, referer = True, cache = None, cacheRefresh = None, tor = False, history = 5, delay = None, 
@@ -684,7 +685,7 @@ class WebClient(object):    # ?? base class: urllib2.OpenerDirector, mechanize.B
         if retryOnTimeout: self._retryOnTimeout = H.RetryOnTimeout(retryOnTimeout)
         if retryCustom:    self.setRetryCustom(retryCustom)
         if customHandlers: self._customHandlers = customHandlers
-        if tor:         urllib2hand.append(urllib2.ProxyHandler({'http': '127.0.0.1:8118'}))
+        if tor:         self._tor = True; urllib2hand.append(urllib2.ProxyHandler({'http': '127.0.0.1:8118'}))
         self._client = H.StandardClient(urllib2hand)
         self._rebuild()                                             # connect all the handlers into a chain
         
@@ -706,7 +707,7 @@ class WebClient(object):    # ?? base class: urllib2.OpenerDirector, mechanize.B
         self.logger = logger
         if not self.handlers: return
         for h in self.handlers.list():
-            h.log = logger
+            h.log = self.logger
         
     def _rebuild(self):
         "Rearrange handlers into a chain once again."
@@ -962,18 +963,22 @@ class XPathSelectorPatch(object):
         "Checks for occurence of a given plain text in the document (tags stripped out). Shorthand for 's in x.text()'."
         return s in self.text()
     
-    
-# copy methods and properties to XPathSelector (monkey patching):
-copyattrs(XPathSelector, XPathSelectorPatch)                                                    # all properties with standard names (excludes __*__)
-copyattrs(XPathSelector, XPathSelectorPatch, "__unicode__ __str__ __contains__ __getitem__")    # additionally these special properties
-#XPathSelector.__str__ = XPathSelectorPatch.__str__
-#XPathSelector.__unicode__ = XPathSelectorPatch.__unicode__
 
-# additional patches...
-def XPathSelectorList_text(self, xpath = ".", norm = True):
-    "Runs text() method on all selectors contained in this list"
-    return [x.text(xpath, norm) for x in self]
-XPathSelectorList.text     = XPathSelectorList_text
+def monkeyPatch():
+    # copy methods and properties to XPathSelector (monkey patching):
+    methods = filter(lambda k: not k.startswith('__'), XPathSelectorPatch.__dict__.keys())          # all properties with standard names (no __*__)
+    methods += "__unicode__ __str__ __contains__ __getitem__".split()                               # additionally these special names
+    for name in methods:
+        method = getattr(XPathSelectorPatch, name)          # here, MUST use getattr not __dict__[name] - they give different results!!! <unbound method> vs <function>!
+        setattr(XPathSelector, name, method) 
+
+    # additional patches...
+    def XPathSelectorList_text(self, xpath = ".", norm = True):
+        "Runs text() method on all selectors contained in this list"
+        return [x.text(xpath, norm) for x in self]
+    XPathSelectorList.text     = XPathSelectorList_text
+
+monkeyPatch()
 
 
 #class XDoc(object):
