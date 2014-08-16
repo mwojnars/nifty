@@ -206,6 +206,7 @@ class RichException(Snapshot, Exception):
             self.nfiles += 1
             fname = self.path + "exception_%d.html" % self.nfiles
             with open(fname, 'wt') as f:
+                if isinstance(html, unicode): html = html.encode("utf-8")
                 f.write(html)
             return fname
 

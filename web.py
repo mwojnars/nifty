@@ -25,10 +25,15 @@ from urllib2 import HTTPError, URLError
 from socket import timeout as Timeout
 #from lxml.html.clean import Cleaner        -- might be good for HTML sanitization (no scritps, styles, frames, ...), but not for general HTML tag filering 
 
-from .util import islinux, isint, islist, isnumber, isstring, jsondump, JsonDict, mnoise, unique, copyattrs, classname, noLogger, defaultLogger
-from .text import regex, xbasestring
-from . import util
-
+if __name__ != "__main__":
+    from .util import islinux, isint, islist, isnumber, isstring, JsonDict, mnoise, unique, classname, noLogger, defaultLogger
+    from .text import regex, xbasestring
+    from . import util
+else:
+    from nifty.util import islinux, isint, islist, isnumber, isstring, JsonDict, mnoise, unique, classname, noLogger, defaultLogger
+    from nifty.text import regex, xbasestring
+    from nifty import util
+    
 now = time.time                 # shorthand for calling now() function, for process-local time measurement
 
 
@@ -343,8 +348,8 @@ class handlers(object):
             self.added = [h.__class__.__name__ for h in addHandlers]
         def handle(self, req):
             assert isinstance(req, Request)
-            #self.log.info("web.StandardClient, downloading page. Request & handlers: " + jsondump([req, self.added]))
-            self.log.info("web.StandardClient, downloading", req.url)
+            #self.log.info("nifty.web.StandardClient, downloading page. Request & handlers: " + jsondump([req, self.added]))
+            self.log.info("nifty.web.StandardClient, downloading", req.url)
             try:
                 if req.timeout:
                     stream = self.opener.open(req, timeout = req.timeout)
@@ -840,11 +845,15 @@ class Crawler(object):
 ###  Scrapy home: http://scrapy.org/ 
 ###
 
-from scrapy.selector import HtmlXPathSelector, XmlXPathSelector, XPathSelector
-try:
-    from scrapy.selector.unified import SelectorList as XPathSelectorList       # newer versions of Scrapy
-except ImportError:
-    from scrapy.selector.list import XPathSelectorList                          # older versions of Scrapy; TODO: drop entirely
+try:                                                                            # newer versions of Scrapy
+    from scrapy.selector.unified import SelectorList as XPathSelectorList
+    from scrapy import Selector
+    HtmlXPathSelector = XmlXPathSelector = XPathSelector   =   Selector
+    OLD_SCRAPY = False
+except ImportError:                                                             # older versions of Scrapy; TODO: drop entirely
+    from scrapy.selector.list import XPathSelectorList
+    from scrapy.selector import HtmlXPathSelector, XmlXPathSelector, XPathSelector
+    OLD_SCRAPY = True
 
 
 def xpath_escape(s):
@@ -868,6 +877,10 @@ def isxdoc(obj):
 # like None evaluates to False, but at the same time is a regular X node and thus has all XPath methods defined (they return empty strings or XNone's).
 # Useful when more operations are to be executed on the result node, to prevent exceptions of access to non-existing methods.  
 class XNoneType(HtmlXPathSelector):
+    """
+    >>> bool(XNone)
+    False
+    """
     def __init__(self): HtmlXPathSelector.__init__(self, text = "<_XNone_></_XNone_>")
     def __bool__(self): return False
     __nonzero__ = __bool__
@@ -877,11 +890,11 @@ XNone = XNoneType()
 class XPathSelectorPatch(object):
     "All the methods and properties below will be copied subsequently to XPathSelector (monkey patching). @staticmethod is necessary for this."
     
-    nodes = XPathSelector.select                    # nodes() will be an alias for select()
+    nodes = xpath = XPathSelector.select if OLD_SCRAPY else Selector.xpath          # nodes() and xpath() will be aliases for select/xpath()
     
     @staticmethod
     def node(self, xpath, none = False):
-        "Similar to nodes() [equiv. of select()] but returns always 1 node rather than a list of nodes. None or XNone if no node has been found"
+        "Similar to nodes() but returns always 1 node rather than a list of nodes. None or XNone if no node has been found"
         l = self.nodes(xpath)
         if l: return l[0]
         return None if none else XNone
@@ -1071,3 +1084,7 @@ tree = lxml.html.fromstring(dom.toxml())
 
 """
 
+if __name__ == "__main__":
+    import doctest
+    print doctest.testmod()
+    

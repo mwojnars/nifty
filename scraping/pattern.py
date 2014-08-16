@@ -60,13 +60,10 @@ or match, match1 functions, which compile and match the pattern in one step.
 They all return matched values of variables (groups):
 
     >>> pat.match1('<A href="http://google.com"></A>')
-    u'http://google.com'
+    'http://google.com'
     
     >>> match1('<a href="{URL}"></a>', '<A href="http://google.com"></A>')
-    u'http://google.com'
-
-For clarity of examples below, we request patterns to use plain <str> type during matching instead of default <unicode>:
->>> Pattern.strtype = str
+    'http://google.com'
 
 
 REDEX SYNTAX.
@@ -191,7 +188,7 @@ Address: ..        -- Two dots (..) match any sequence of 0+ characters except t
                       
                       >>> pat = Pattern('<td>{CELL}</td>')
                       >>> pat.match1('<td>  apples \\n &amp; oranges  </td>')
-                      'apples & oranges'
+                      u'apples & oranges'
                       >>> pat.html = False
                       >>> pat.match1('<td>  apples \\n &amp; oranges  </td>')
                       '  apples \\n &amp; oranges  '
@@ -721,7 +718,7 @@ class Pattern(object):
     extract   = {}      # stand-alone extractors: functions that take an entire document and return extracted value or object for a given item; dict
     case      = False   # shall regex matching be case-sensitive (True)? INsensitive (False) by default
     tolower   = False   # shall all item names be converted to lowercase at the end of parsing?
-    html      = True    # shall match() perform HTML entity decoding and normalization of spaces in extracted items? (done before extractors/converters)
+    html      = True    # shall match() perform HTML entity decoding and normalization of spaces in extracted items? done before extractors/converters. May produce <unicode>!
     mapping   = {}      # mapping of item names, for easier integration with other parts of the application (currently unused!)
     strtype   = unicode # what type of string to cast the document onto before parsing; this determines also the type of returned result strings
     dicttype  = ObjDict # what type of dictionary to return; ObjDict allows .xxx access to values in addition to standard ['xxx']
@@ -904,11 +901,14 @@ class Pattern(object):
         return items, match.end()
         
     def _convert(self, items, doc, model = None, baseurl = None, testing = False):
-        "Postprocessing of variables extracted from 'doc': cleansing, type casting, converting to object. Can modify 'items'."
+        "Postprocessing of variables extracted from 'doc': entity decoding, merging spaces, type casting, converting to object. Can modify 'items'."
         
-        def clean(val, isstring = None):
-            if not isstring and islist(val): return [clean(s,True) for s in val]
-            return self.strtype(decode_entities(merge_spaces(val)))
+        def rawtext(val, isstring = None):
+            "Convert HTML text to raw text: merge spaces, decode HTML entities. Outputs <unicode> (!) because entities may represent Unicode characters."
+            if not isstring and islist(val): return [rawtext(s,True) for s in val]
+            return decode_entities(merge_spaces(val))
+            #return self.strtype(decode_entities(merge_spaces(val)))
+            
         #def absolute(url, isstring = None):
         #    if baseurl is None: return url
         #    if not isstring and islist(url): return [absolute(u,True) for u in url]
@@ -926,12 +926,13 @@ class Pattern(object):
             # match regex pattern
             if items is None: return None
             
-            # clean extracted text, but only for variables which don't contain longfills "..." in their pattern; 
-            # longfills match HTML tags, therefore simple cleaning can be incorrect, because entity decoding should be accompanied by tag stripping  
+            # convert extracted HTML text to raw text (merge spaces, decode HTML entities), but only for variables 
+            # which don't contain longfills "..." in their pattern: longfills match HTML tags, therefore simple cleaning
+            # can be incorrect, because entity decoding should be accompanied by tag stripping  
             if self.html:
                 var = self.semantics.variables
                 for name, val in items.iteritems():
-                    if val and not var[name].longfill: items[name] = clean(val)
+                    if val and not var[name].longfill: items[name] = rawtext(val)
             
             # run standalone per-item extractors
             for name, fun in self.extract.iteritems():
@@ -975,7 +976,7 @@ class Pattern(object):
         with extracted and converted values, possibly wrapped up in model() if not-None 
         ('model' can be given here as function argument, or as a property of the object or class); 
         or the entire matched string if the pattern doesn't contain any variables. None on failure.
-        Typically 'doc' is a string, but it can also be any other type of object convertable into str() 
+        Typically 'doc' is a string, but it can also be any other type of object convertable into <str> or <unicode>
         - this is useful if custom extractors are to be used that require another type of object. 
         If 'baseurl' is given, all extracted URLs will be turned into absolute URLs based at 'baseurl'.
         'testing': True in unit tests, indicates that final processing (item names renaming, class wrapping) 
@@ -986,7 +987,10 @@ class Pattern(object):
             if isstring(doc): doc = xdoc(doc)
             doc = doc.node(path)
         
-        doc = self.strtype(doc).lstrip()                    # convert the doc to a string and remove leading whitespace
+        if not isinstance(doc, basestring):                 # convert the doc to str/unicode from an object
+            doc = self.strtype(doc)
+        doc = doc.lstrip()                                  # remove leading whitespace
+        #doc = self.strtype(doc).lstrip()                   # convert the doc to a string and remove leading whitespace
         
         if self.variables:                                  # extract variables?
             items, _ = self._matchRaw(doc)
@@ -1021,7 +1025,7 @@ class Pattern(object):
         
     def _matchAllRegex(self, doc, **kwargs):
         data = []; pos = 0
-        udoc = self.strtype(doc)
+        udoc = self.strtype(doc) if not isinstance(doc, basestring) else doc                # convert the doc to str/unicode from an object        
         while True:
             items, pos = self._matchRaw(udoc, pos)
             if items is None: return data

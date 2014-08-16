@@ -540,7 +540,12 @@ class Encoder(object):
         self._generic_object(mode, level, "defaultdict", args0 = (d.default_factory,), args2 = (dict(d),))
         
     def _object(self, x, mode, level):
-        "Encode object of an arbitrary class."
+        """Encode object of an arbitrary class. The following approaches to get the state are tried, in this order:
+        - x.__getstate__()
+        - x.__dict__; if x.__transient__ list of attribute names is present, these attributes are excluded from the state.
+        Regardless of how the state was retrieved, arguments for new() are retrieved from __getnewargs__() 
+        if present and serialized as unnamed arguments, too.
+        """
         def getstate(x):
             getstate = getattr(x, '__getstate__', None)
             if getstate is None: return None
@@ -569,6 +574,11 @@ class Encoder(object):
             except:
                 raise Exception("dast.Encoder, can't encode object %s of type <%s>, "
                                 "unable to retrieve its __dict__ property" % (repr(x), typename))
+            
+            trans = getattr(x, "__transient__", None)           # remove attributes declared as transient
+            if trans:
+                state = state.copy()
+                for attr in trans: state.pop(attr, None)
         
         fmt = getattr(x, '__dast_format__', {}) if mode == 2 else None
         self._generic_object(mode, level, typename, args2 = newargs, kwargs2 = state, fmt = fmt)
@@ -957,6 +967,9 @@ class DAST(object):
 
     
 #####################################################################################################################################################
+###
+###  HELPER functions
+###
 
 dast = DAST()
 
@@ -966,6 +979,9 @@ def load(input):          return dast.load(input)
 def encode(obj, **kwargs):  return dast.encode(obj, **kwargs)
 def decode(input):          return dast.decode(input)
 def decode1(input):         return dast.decode1(input)
+
+def printdast(obj, **kwargs): print encode(obj, **kwargs)
+
 
 #####################################################################################################################################################
 
@@ -1050,60 +1066,65 @@ FLOAT_REPR = repr
 
 #####################################################################################################################################################
 
-# testing...
-
-class RichText(Object):
-    def __init__(self, text):
-        self.content = text
-        self.info = "nothing special"
-
-class Comment(Object):
-    def __init__(self, text, dt):
-        self.text = RichText(text)
-        self.date = dt
-        
-class User(Object):
-    def __init__(self):
-        comm1 = Comment("Ala ma kota", datetime(2013,1,20,10,10,10))
-        comm2 = Comment("Ala ma kota", datetime(2013,2,20,10,10,10))
-        comm3 = Comment("Ala ma kota", datetime(2013,3,20,10,10,10))
-        self.comments = [comm1, comm2, comm3]
-        self.pagesVisited = {123,643,76554}
-
-class Class(Object): pass
-
-Point = namedtuple("Point", "x y") 
-
-
-def test1(x, verbose = False, **kwargs):
-    "Test that consists of encoding 'x' and then decoding back from the resulting code."
-    if verbose: print "input:   ", x
-    y = encode(x, **kwargs)
-    if verbose: 
-        print "encoded: ",
-        if '\n' in y: print
-    print y
-    z = decode1(y)
-    if verbose: print "decoded: ", z
-
-    same = (x == z)
-    if isinstance(same, np.ndarray): same = np.all(same)
-    if verbose: 
-        print "OK" if same else "DIFFERENT"
-        print
-    if not same:
-        print "decoded:", z
-        raise Exception("test1, decoded object differs from the original one")
-
-def test(x):
-    print
-    test1(x, mode=0)
-    test1(x, mode=1)
-    test1(x, mode=2)
-
 if __name__ == "__main__":
     import doctest
     print doctest.testmod()
+
+    class RichText(Object):
+        def __init__(self, text):
+            self.content = text
+            self.info = "nothing special"
+    
+    class Comment(Object):
+        def __init__(self, text, dt):
+            self.text = RichText(text)
+            self.date = dt
+            
+    class User(Object):
+        __transient__ = "generator"
+        def __init__(self):
+            comm1 = Comment("Ala ma kota", datetime(2013,1,20,10,10,10))
+            comm2 = Comment("Ala ma kota", datetime(2013,2,20,10,10,10))
+            comm3 = Comment("Ala ma kota", datetime(2013,3,20,10,10,10))
+            self.comments = [comm1, comm2, comm3]
+            self.pagesVisited = {123,643,76554}
+            self.generator = (x for x in range(5))
+    
+    class Class(Object): pass
+    
+    Point = namedtuple("Point", "x y") 
+    
+    
+    def test1(x, verbose = False, **kwargs):
+        "Test that consists of encoding 'x' and then decoding back from the resulting code."
+        if verbose: print "input:   ", x
+        y = encode(x, **kwargs)
+        if verbose: 
+            print "encoded: ",
+            if '\n' in y: print
+        print y
+        z = decode1(y)
+        if verbose: print "decoded: ", z
+    
+        # for comparing x and z, we first must remove transient attributes if present in x
+        trans = getattr(x, '__transient__', [])
+        for name in trans:
+            if hasattr(x, name): delattr(x, name)
+    
+        same = (x == z)
+        if isinstance(same, np.ndarray): same = np.all(same)
+        if verbose: 
+            print "OK" if same else "DIFFERENT"
+            print
+        if not same:
+            print "decoded:", z
+            raise Exception("test1, decoded object differs from the original one")
+    
+    def test(x):
+        print
+        test1(x, mode=0)
+        test1(x, mode=1)
+        test1(x, mode=2)
 
 #     class _ndarray_(object):
 #         def __eq__(self, other):
@@ -1111,11 +1132,14 @@ if __name__ == "__main__":
 #             return np.all(boolarray)
 #     np.ndarray.__eq__ = _ndarray_.__eq__
 
+
+    ### testing...
+    
     test([True, 8.23, "x y z \n abc"])
     test({3,5,7,'ala'})
     test({5: 643, "pies i kot": None, None: True})
     test(Comment("Ala ma kota", datetime(2013,4,20,10,10,10)))
-    test(User())                                # user-defined object
+    test(User())                                # user-defined object; contains transient attribute
     test(np.array([1, 2, 3.0]))                 # numpy arrays
     test(np.array([[]]))
     test(np.array([[3, 4], [2, 1], [8, 9]]))
@@ -1123,10 +1147,11 @@ if __name__ == "__main__":
     test(Point(2,3))                            # instance of <namedtuple>
     test(defaultdict(int, {3:'x', 'ala ma':'kota'}))
 
+    test(x for x in range(5))                   # generator object... how to handle?
     test(Class)                                 # user-defined type with custom (inherited) __metaclass__
 
     print "\ndone"
     
-#__main__.Comment(date = datetime "2013-04-20 10:10:10", text = __main__.RichText(content = "Ala ma kota"))
+    #__main__.Comment(date = datetime "2013-04-20 10:10:10", text = __main__.RichText(content = "Ala ma kota"))
 
 

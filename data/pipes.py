@@ -147,6 +147,20 @@ class Knobs(OrderedDict):
     While Spaces are just sets of values, unnamed, knobs are *named*: values are linked to specific names.
     """
 
+class KnobSpace(object):
+    "A collection of knobs combinations: each value is a Knobs instance. Similar to Space, but with knob names assigned."
+
+class KGrid(KnobSpace):
+    "Knobs produced from a grid (cartesian product) of allowed values specified for each knob/dimension."
+    def __init__(self, **knobs):
+        self.space = Cartesian(*knobs.values())             # value space of all possible knob values
+        self.names = knobs.keys()                           # names of knobs
+    def __len__(self): return len(self.space)
+    def __iter__(self):
+        "Generates knob combinations. Every combination is a list of (name,value) pairs, one pair for each knob."
+        for vector in self.space:
+            yield Knobs(zip(self.names, vector))
+            #yield Knobs([(self.runID, self.startID + i)] + zip(self.names, v))
 
 #####################################################################################################################################################
 ###
@@ -273,6 +287,12 @@ class Cell(Object):
         for k, v in d.iteritems():
             d[k] = copy(v)
         return res
+        
+    def dup(self, knobs = {}, strict = False, deep = True):
+        "copy() + setKnobs() combined, for easy generation of duplicates that differ only in knobs setting."
+        dup = self.copy(deep)
+        dup.setKnobs(knobs, strict)
+        return dup
         
     def getKnobs(self):
         "Dict with current values of all the knobs of 'self'."
@@ -1147,10 +1167,13 @@ class Mean(Metric):
         return np.sqrt((self.sum2 - self.sum/N * self.sum) / (N-1))
 
     def report(self):
+        def _s(x, f): return None if x is None else f % x
         header = "mean +stddev /size:    "
         if self.title: header = self.title + ' ' + header
         if self.size:
-            print >>self.out, header + "%.4f +%.2f /%d" % (self.mean(), self.deviation(), self.size)
+            mean = _s(self.mean(), "%.4f")
+            dev = _s(self.deviation(), "%.2f")
+            print >>self.out, header + "%s +%s /%d" % (mean, dev, self.size)
         else:
             print >>self.out, header + "None +None /%s" % self.size
     
@@ -1499,6 +1522,9 @@ class Parallel(MetaPipe):   # DRAFT
     def __init__(self, *pipes, **knobs):
         self.pipes = list(pipes)
 
+class Serial(MetaPipe): pass
+class Sequential(MetaPipe): pass
+
 #####################################################################################################################################################
 
 class MetaOptimize(Wrapper):
@@ -1515,6 +1541,8 @@ class Grid(MetaOptimize):
     the pipe with this setting outside Grid and see if it produces the same results as inside Grid.
     No output produced, only empty stream.
     """
+    
+    # TODO: 3rd mode: sequential
     
     runID        = "runID"      # name of a special knob inside 'pipe' that will be set with an ID (integer >= 1) of the current run
     startID      = 0            # ID of the first run, to start counting from
@@ -1536,20 +1564,37 @@ class Grid(MetaOptimize):
         self.copyPipe = kwargs.pop('copyPipe', self.copyPipe)
         self.copyData = kwargs.pop('copyData', self.copyData)
         
-        knobs = kwargs
-        self.space = Cartesian(*knobs.values())             # value space of all possible knob values
-        self.names = knobs.keys()                           # names of knobs
+        self.grid = KGrid(**kwargs)
+        self.runs = len(self.grid)                          # no. of runs to be done
         self.done = None                                    # no. of runs completed so far
-    
-    def createKnobs(self, ID, values):
-        "Creates one combination of knobs using given values and returns as a list of (name,value) pairs."
-        return Knobs([(self.runID, ID)] + zip(self.names, values))
         
-    def createPipe(self, knobs, forceCopy = False):
-        pipe = self.pipe.copy() if (self.copyPipe or forceCopy) else self.pipe
-        pipe.setKnobs(knobs)
-        #pipe.setup()
-        return pipe
+#         knobs = kwargs
+#         self.space = Cartesian(*knobs.values())             # value space of all possible knob values
+#         self.names = knobs.keys()                           # names of knobs
+    
+#         def setID(i, knobs):
+#             return Knobs([(self.runID, self.startID + i)] + knobs.items())
+#         knobspace = KGrid(**kwargs)
+#         self.knobspace = (setID(i, knobs) for i, knobs in enumerate(knobspace))
+    
+    def knobspace(self):
+        "wrapper for the iterator of self.grid, to append runID"
+        for i, knobs in enumerate(self.grid):               # append runID to each knobs combination
+            yield Knobs([(self.runID, self.startID + i)] + knobs.items())
+    
+#     def createKnobs(self, ID, values):
+#         "Creates one combination of knobs using given values and returns as a list of (name,value) pairs."
+#         return Knobs([(self.runID, ID)] + zip(self.names, values))
+        
+#     def createPipe(self, knobs, forceCopy = False):
+#         if self.copyPipe or forceCopy:          # make a duplicate ...
+#             return self.pipe.dup(knobs)
+#         self.pipe.setKnobs(knobs)               # ... or use the original pipe again
+#         return self.pipe
+#         #pipe = self.pipe.copy() if (self.copyPipe or forceCopy) else self.pipe
+#         #pipe.setKnobs(knobs)
+#         ##pipe.setup()
+#         #return pipe
         
     def iter(self):
         self.done = 0
@@ -1560,27 +1605,45 @@ class Grid(MetaOptimize):
         return; yield                                       # to make this method work as a generator (only an empty one)
         
     def iterSerial(self):
-        with self.printlock: print "Grid: %d serial runs to be executed..." % len(self.space)
-        for i, value in enumerate(self.space):
-            self.scanSerial(value, self.startID + i)
+        with self.printlock: print "Grid: %d serial runs to be executed..." % self.runs
+        #for i, value in enumerate(self.space):
+        #    knobs = self.createKnobs(self.startID + i, value)
+        for knobs in self.knobspace():
+            self.scanSerial(knobs)
             self.done += 1
         
+    def scanSerial(self, knobs):
+        """Single scan over input data, with items passed directly to the single pipe being executed. 
+        No parallelism, no multi-threading, no pipe copying.
+        The same pipe object is reused in all runs - watch out against interference between consecutive runs.
+        """
+        with self.printlock: print "Grid, starting next serial scan for run ID=%s..." % knobs[self.runID]
+        self.printKnobs(knobs)
+        pipe = self.pipe.copy() if self.copyPipe else self.pipe
+        pipe.setKnobs(knobs)
+        #pipe = self.createPipe(knobs)
+        PIPE >> self.source >> pipe >> RUN
+        self.count = pipe.count
+        self.report(pipe)
+    
     def iterParallel(self):
-        scans = util.divup(len(self.space), self.maxThreads) if self.maxThreads else 1
-        with self.printlock: print "Grid: %d runs to be executed, in %d scan(s) over input data..." % (len(self.space), scans)
+        scans = util.divup(self.runs, self.maxThreads) if self.maxThreads else 1
+        with self.printlock: print "Grid: %d runs to be executed, in %d scan(s) over input data..." % (self.runs, scans)
         
-        def knobsStream():
-            "Generates knob combinations. Every combination is a list of (name,value) pairs, one pair for each knob."
-            for i, v in enumerate(self.space):
-                yield self.createKnobs(self.startID + i, v)
+#         def knobsStream():
+#             "Generates knob combinations. Every combination is a list of (name,value) pairs, one pair for each knob."
+#             for i, v in enumerate(self.space):
+#                 yield self.createKnobs(self.startID + i, v)
 
         def knobsGroups():
             "Partitions stream generated by knobsStream() into groups of up to 'maxThreads' size each."
-            if not self.maxThreads: 
-                yield knobsStream()
+            if not self.maxThreads:                     # yield all knobs combinations at once?
+                yield list(self.knobspace())
+                #yield list(knobsStream())
                 return
             group = []
-            for knobs in knobsStream():
+            for knobs in self.knobspace():              # make groups of 'maxThreads' knob combinations each
+            #for knobs in knobsStream():
                 group.append(knobs)
                 if len(group) >= self.maxThreads:
                     yield group
@@ -1588,23 +1651,9 @@ class Grid(MetaOptimize):
             if group: yield group
 
         for kgroup in knobsGroups():
-            kgroup = list(kgroup)
             self.scanParallel(kgroup)
             self.done += len(kgroup)
 
-    def scanSerial(self, value, ID):
-        """Single scan over input data, with items passed directly to the single pipe being executed. 
-        No parallelism, no multi-threading, no pipe copying.
-        The same pipe object is reused in all runs - watch out against interference between consecutive runs.
-        """
-        with self.printlock: print "Grid, starting next serial scan for run ID=%s..." % ID
-        knobs = self.createKnobs(ID, value)
-        pipe = self.createPipe(knobs)
-        self.printKnobs(knobs)
-        PIPE >> self.source >> pipe >> RUN
-        self.count = pipe.count
-        self.report(pipe)
-    
     def scanParallel(self, knobsGroup):
         "Single scan over input data, with each item fed to a group of parallel threads."
         with self.printlock: print "Grid, starting next parallel scan for %d runs beginning with ID=%s..." % (len(knobsGroup), knobsGroup[0]['runID'])
@@ -1622,7 +1671,7 @@ class Grid(MetaOptimize):
     def createThreads(self, knobsGroup):
         threads = []                                            # list of pairs: (knobs, pipe_thread)
         for knobs in knobsGroup:                                # create a copy of the template pipe for each combination of knob values; wrap up in threads
-            pipe = self.createPipe(knobs, forceCopy = True)
+            pipe = self.pipe.dup(knobs)
             thread = Thread(pipe, self.threadBuffer)
             thread.start()
             threads.append((knobs, thread))

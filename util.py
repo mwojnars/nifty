@@ -580,6 +580,10 @@ class JSON(object):         ###  DRAFT
     
 ### DAST printing ###
 
+def dumpdast(obj, **kwargs):
+    from .data import dast
+    return dast.encode(obj, **kwargs)
+
 def printdast(obj, **kwargs):
     from .data import dast
     print dast.encode(obj, **kwargs)
@@ -779,7 +783,7 @@ def normdir(folder, full = False):
     return folder + os.path.sep
 
 def listdir(root, onlyfiles = False, onlydirs = False, recursive = False, fullpath = False):
-    """Generic routine for listing directory contents: files or subfolders or both. More universal than standard os.listdir(), 
+    """Generic routine for listing directory contents: files or subfolders or both. More versatile than standard os.listdir(), 
     can be used as a replacement. For large folders, with many files/dirs, listing all items is much faster 
     than 'onlyfiles' or 'onlydirs' (file/dir check for each item is very time consuming).
     """
