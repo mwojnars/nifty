@@ -30,7 +30,7 @@ For example, the following simple redex pattern:
 is compiled to a much more complicated regex:
 
     >>> print Pattern(redex).regex.pattern
-    (|(?<=>)\s*)<a(?=\s|/|>)([^<>]*?['"\s=]|)href\s*=\s*("|')(?P<URL>[^<>]*?)("|')(['"\s=][^<>]*?|)>the\s+link\s+we\s+are\s+looking\s+for(|(?<=>)\s*)</a(?=\s|/|>)(['"\s=][^<>]*?|)>
+    (|(?<=>)\s*)<a(?=\s|/|>)([^<>]*?['"\s=]|)(\s*|(['"\s=][^<>]*?['"\s=]))href\s*=\s*("|')(?P<URL>[^<>]*?)("|')(['"\s=][^<>]*?|)>the\s+link\s+we\s+are\s+looking\s+for(|(?<=>)\s*)</a(?=\s|/|>)(['"\s=][^<>]*?|)>
 
 This regex takes care of all intricacies of HTML documents: optional spaces in different places, 
 additional surrounding attributes inside tags, different equivalent quoting characters (' or ") 

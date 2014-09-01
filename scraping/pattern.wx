@@ -19,7 +19,7 @@
 #
 
 
-document    <=  exprA
+document    <=  dropspace exprA
 
 
 # TOKENS
@@ -42,7 +42,7 @@ escaped     <=  :'{' special :'}'			# matches the special character literally
 
 space0      <-  space						# maybe-space, output semantics: 0+ spaces, greedy 
 space1      <-  space						# must-space, output semantics: 1+ spaces, greedy
-spaceX      <-  space						# all-space, output semantics: short-filler with 1st and last char (if any) being a space
+spaceX      <-  space						# around-space, output semantics: like dot2, but 1st and last char are in-tag separators ['"\s=]; or 0+ spaces
 dropspace   <:  ?space						# optional leading spaces, to be omitted in AST 
 
 word        <-  +(!special !space .)		# any word interpreted as-is, no spaces
@@ -54,8 +54,8 @@ wordB       <-  word						# in tags, don't parse 'static' node to allow for spac
 # "xA" are top-level expressions matching text outside <...> tags (but possibly containing tags inside)
 # "xB" are in-tag expressions, matching text between '<' and '>' characters
 
-exprA       <-  dropspace *(escaped | regex | atomic | varA | optionalA | static | tag | tilde | dot3 | dot2 | dot1 | space0)
-exprB       <-  dropspace *(escaped | regex | atomic | varB | optionalB | wordB | tilde | dot2 | dot1 | spaceX)
+exprA       <-  *(escaped | regex | atomic | varA | optionalA | static | tag | tilde | dot3 | dot2 | dot1 | space0)
+exprB       <-  *(escaped | regex | atomic | varB | optionalB | wordB | tilde | dot2 | dot1 | spaceX)
 
 tagspecial  <-  ?('/' | ':')
 tagname     <-  word
@@ -72,6 +72,6 @@ vexprB		<=  !'~' :?space exprB
 
 varA		<-  :'{' ?repeat ?(varname ?vregex) ?vexprA :'}'	# ...{VAR} ...{VAR ab{CD}} ...{VAR~\w+} ...{* repeated} ...{*VAR_REPEATED xyz}
 varB		<-  :'{' ?repeat ?(varname ?vregex) ?vexprB :'}'
+atomic      <-  :'{>' :?space exprA :'}'						# atomic grouping, see: www.regular-expressions.info/atomic.html; 'space' is consumed only for similarity with other {...} operators
 optionalA	<-  :'[' exprA :']'
 optionalB	<-  :'[' exprB :']'
-atomic      <-  :'{>' exprA :'}'								# atomic grouping, see: www.regular-expressions.info/atomic.html
