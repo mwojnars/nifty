@@ -861,6 +861,29 @@ class Tee(object):
         for f, mustclose in self.files:
             if mustclose: f.close()
 
+
+def runCommand(context = {}, args = None):
+    """Take from 'sys' all command-line arguments passed to the script and interpret them as a name 
+    of a callable (function) from 'context' (module or dict, typically globals() of the caller), 
+    and possibly its parameters; find the function, execute with given parameters (passed as unnamed strings) 
+    and return its result. If the command is not present in 'context' and there are no parameters,
+    pass it to eval(), which is more general and can execute an arbitrary expression, not only a global-scope function. 
+    If 'args' list is present, use it as arguments instead of sys.argv[1:]. 
+    Note: the called function should convert internally the parameters from a string to a proper type and 
+    this conversion is done in a local context of the function, so it may be hard to pass variables as parameters.
+    """
+    if args is None: args = sys.argv[1:]                        # argv[0] is the script name, omit
+    if not args: return None                                    # no command? do nothing 
+    if not isdict(context): context = context.__dict__
+    cmd = args[0]
+    params = tuple(args[1:])
+    if cmd in context:
+        fun = context[cmd]
+        return fun(*params)
+    elif not params:
+        return eval(cmd, context)
+    raise Exception("Object can't be found: '%s'" % cmd)
+
         
 #####################################################################################################################################################
 ###
