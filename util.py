@@ -1027,7 +1027,7 @@ class Logger(object):
                 print >>self.out
                 args[0] = args[0][1:]
             if not args[0]: args = args[1:]
-        msg = ' '.join(str(arg) for arg in args)
+        msg = ' '.join(unicode(arg) for arg in args)
         
         ctx = self.context.copy()
         ctx.update(kwargs)
@@ -1053,14 +1053,14 @@ class Logger(object):
         """Print raw string: no formatting (attributes format, timeformat, context ignored), no implicit newlines. 
         Locking disabled by defult, pass lock=True to enable."""
         lock = kwargs.get('lock', False)
-        self._print(' '.join(str(arg) for arg in args), lock)
+        self._print(' '.join(unicode(arg) for arg in args), lock)
 
     def block(self, *args, **kwargs):
         "Like raw(), but indents all lines by 'indent' spaces (2 by default) and prints newline ('end'='\n' by default) at the end."
         end = kwargs.pop('end', '\n')
         lock = kwargs.get('lock', False)
         _indent = kwargs.get('indent', 2)
-        msg = ' '.join(str(arg) for arg in args)
+        msg = ' '.join(unicode(arg) for arg in args)
         msg = indent(msg, _indent) + end
         self._print(msg, lock)
         
