@@ -776,6 +776,15 @@ def writefile(filename, obj, mode = "wt"):
     with open(filename, mode) as f:
         f.write(obj)
 
+def dirname(path, level = 1):
+    """Like standard os.path.dirname returns the directory component of the 'path', but additionally accepts the 'level' 
+    parameter which indicates how many levels to go up the directory tree (default: 1). With level=0, 'path' is returned.
+    >>> dirname("/home/user/docs/project/file.txt", 3)
+    '/home/user'
+    """
+    for _ in range(level): path = os.path.dirname(path)
+    return path
+
 def normdir(folder, full = False):
     "Ending of folder path normalized to always contain trailing slash: 'some/dir/'. If full=True, all path will also be normalized to shortest form with normpath()."
     if full: return normpath(folder) + os.path.sep
