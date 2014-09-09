@@ -768,6 +768,13 @@ class WebClient(object):    # ?? base class: urllib2.OpenerDirector, mechanize.B
         "Clear history"
         self._history.reset()
 
+    def publicIP(self, api = "http://icanhazip.com"):
+        """Connects with a public API that returns our current public IP number. Returns this number in text form, 
+        as received from the API. Skips all the handlers chain and uses only the last one: self._client."""
+        req = Request(fix_url(api))
+        resp = self._client.handle(req)
+        return resp.read()        
+        
 
 ########################################################################################################################################################################
 ###
