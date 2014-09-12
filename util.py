@@ -107,10 +107,17 @@ def runCommand(context = {}, params = None):
     if not isdict(context): context = context.__dict__
     cmd = params[0]; params = params[1:]
     if cmd in context:
-        args = tuple(arg for arg in params if not '=' in arg)
-        kwargs = dict(tuple(arg.split('=',1)) for arg in params if '=' in arg)
+        args = []; kwargs = {}
+        for arg in params:
+            if '=' in arg:
+                k, v = arg.split('=',1)
+                if not (k and v): raise Exception("There can be no spaces around '=' on the argument list: %s" % arg)
+                kwargs[k] = v
+            else:
+                if kwargs: raise Exception("Unnamed argument cannot follow a keyword argument: %s" % arg)
+                args.append(arg)
         fun = context[cmd]
-        return fun(*args, **kwargs)
+        return fun(*tuple(args), **kwargs)
     elif params:
         raise Exception("Object can't be found: '%s'" % cmd)        # when parameters present, we can't call eval() - don't know what to do with params?
     return eval(cmd, context)
