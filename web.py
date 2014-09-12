@@ -558,7 +558,7 @@ class handlers(object):
             
             if islinux():                                           # on Linux, use faster shell command (find) to find and remove old files, in one step
                 retain = self.retain / (24*60*60) + 1               # retension time in days, for 'find' command
-                subprocess.call("find '%s' -type f -maxdepth 1 -mtime +%d -exec rm '{}' \;" % (self.path, retain), shell=True)
+                subprocess.call("find '%s' -maxdepth 1 -type f -mtime +%d -exec rm '{}' \;" % (self.path, retain), shell=True)
             else:
                 MAX_CLEAN = 10000                                   # for performance reasons, if there are many files in cache check only a random subset of MAX_CLEAN ones for removal
                 _now = now()

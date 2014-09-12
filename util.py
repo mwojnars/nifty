@@ -92,27 +92,28 @@ def asobject(name, context = {}):
     raise Exception("Object can't be found: '%s'" % name)
     
 
-def runCommand(context = {}, args = None):
+def runCommand(context = {}, params = None):
     """Takes from 'sys' all command-line arguments passed to the script and interprets them as a name 
     of a callable (function) from 'context' (module or dict, typically globals() of the caller), 
     and possibly its parameters; finds the function, executes with given parameters (passed as unnamed strings) 
     and returns its result. If the command is not present in 'context' and there are no parameters,
     pass it to eval(), which is more general and can execute an arbitrary expression, not only a global-scope function. 
-    If 'args' list is present, use it as arguments instead of sys.argv[1:]. 
+    If 'params' list is present, use it as arguments instead of sys.argv[1:]; strings with '=' sign treated as keyword args. 
     Note: the called function should convert internally the parameters from a string to a proper type and 
     this conversion is done in a local context of the function, so it may be hard to pass variables as parameters.
     """
-    if args is None: args = sys.argv[1:]                        # argv[0] is the script name, omit
-    if not args: return None                                    # no command? do nothing 
+    if params is None: params = sys.argv[1:]                        # argv[0] is the script name, omit
+    if not params: return None                                      # no command? do nothing 
     if not isdict(context): context = context.__dict__
-    cmd = args[0]
-    params = tuple(args[1:])
+    cmd = params[0]; params = params[1:]
     if cmd in context:
+        args = tuple(arg for arg in params if not '=' in arg)
+        kwargs = dict(tuple(arg.split('=',1)) for arg in params if '=' in arg)
         fun = context[cmd]
-        return fun(*params)
-    elif not params:
-        return eval(cmd, context)
-    raise Exception("Object can't be found: '%s'" % cmd)
+        return fun(*args, **kwargs)
+    elif params:
+        raise Exception("Object can't be found: '%s'" % cmd)        # when parameters present, we can't call eval() - don't know what to do with params?
+    return eval(cmd, context)
 
 
 #####################################################################################################################################################
