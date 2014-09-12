@@ -348,8 +348,8 @@ class handlers(object):
             self.added = [h.__class__.__name__ for h in addHandlers]
         def handle(self, req):
             assert isinstance(req, Request)
-            #self.log.info("nifty.web.StandardClient, downloading page. Request & handlers: " + jsondump([req, self.added]))
-            self.log.info("nifty.web.StandardClient, downloading", req.url)
+            #self.log.info("StandardClient, downloading page. Request & handlers: " + jsondump([req, self.added]))
+            self.log.info("StandardClient, downloading", req.url)
             try:
                 if req.timeout:
                     stream = self.opener.open(req, timeout = req.timeout)
@@ -439,7 +439,7 @@ class handlers(object):
                     delay = self.test(e, attempt)
                     if not delay: raise
                     delay *= mnoise(1.1)
-                    self.log.warning("web.RetryCustom, attempt #%d, trying again after %d seconds... Caught %s" % (attempt, delay, e))
+                    self.log.warning("RetryCustom, attempt #%d, trying again after %d seconds... Caught %s" % (attempt, delay, e))
                     time.sleep(delay)
             return self.next.handle(req)
     
@@ -554,7 +554,7 @@ class handlers(object):
             if self.state['lastClean'] and (now() - self.state['lastClean']) < self.clean: return
             self.state['lastClean'] = now()
             self.state.sync()
-            self.log.warn("web.Cache, cleaning of the cache started in a separate thread...")
+            self.log.warn("Cache, cleaning of the cache started in a separate thread...")
             
             if islinux():                                           # on Linux, use faster shell command (find) to find and remove old files, in one step
                 retain = self.retain / (24*60*60) + 1               # retension time in days, for 'find' command
@@ -563,14 +563,14 @@ class handlers(object):
                 MAX_CLEAN = 10000                                   # for performance reasons, if there are many files in cache check only a random subset of MAX_CLEAN ones for removal
                 _now = now()
                 files = os.listdir(self.path)
-                self.log.info("web.Cache, cleaning, got file list...")
+                self.log.info("Cache, cleaning, got file list...")
                 if len(files) > MAX_CLEAN: files = random.sample(files, MAX_CLEAN)
                 for f in files:
                     f = self.path + f
                     created = os.path.getmtime(f)
                     if (_now - created) > self.retain:
                         os.remove(f)
-            self.log.info("web.Cache, cleaning completed.")
+            self.log.info("Cache, cleaning completed.")
         
         def _url2file_old(self, url, ext = "html"):  
             # Deprecated
@@ -615,7 +615,7 @@ class handlers(object):
             resp.fromCache = True
             resp.url = url
             resp.time = min(time1 or time2, time2 or time1)
-            self.log.info("web.Cache, loaded from cache: " + req.url + (" -> " + url if url != req.url else ""))
+            self.log.info("Cache, loaded from cache: " + req.url + (" -> " + url if url != req.url else ""))
             return resp
         
         def handle(self, req):
@@ -636,7 +636,7 @@ class handlers(object):
                 with open(filename, 'wt') as f:
                     f.write(url)                                                    # .redirect file contains only the target URL in plain text form
             
-            self.log.info("web.Cache, downloaded from web: " + req.url + (" -> " + url if url != req.url else ""))
+            self.log.info("Cache, downloaded from web: " + req.url + (" -> " + url if url != req.url else ""))
             
             lastClean = self.state['lastClean']
             if not lastClean or (now() - lastClean) > self.clean:                   # remove old files from the cache before proceeding
@@ -721,7 +721,7 @@ class WebClient(object):    # ?? base class: urllib2.OpenerDirector, mechanize.B
         self.setLogger(self.logger)
     
     def response(self, url = None):
-        """Returns current (last) response object (if not url), or makes a new request like open() and returns full response object. 
+        """Return current (last) response object if url=None, or make a new request like open() and return full response object. 
         The method is aware of movements along history: back(), forward(), ..."""
         if not url:
             last = self._history.last()
@@ -749,14 +749,18 @@ class WebClient(object):    # ?? base class: urllib2.OpenerDirector, mechanize.B
         with open(filename, 'wt') as f:
             f.write(page)
     
-    def redirect(self):
-        "If redirect happened in the last web access, return final URL. None otherwise."
+    def url(self):
+        "Return requested URL of the last web access. (Use response() to get last response object.)"
         last = self._history.last()
-        return last.resp.redirect if last else None
+        return last.req.url if last else None
     def final(self):
         "Return final URL of the last web access, after all redirections."
         last = self._history.last()
         return last.resp.url if last else None
+    def redirect(self):
+        "Return final URL of the last web access, but only if redirection happened. None otherwise."
+        last = self._history.last()
+        return last.resp.redirect if last else None
     
     def back(self):
         "Move 1 step back in history"

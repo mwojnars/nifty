@@ -60,6 +60,61 @@ def islinux():
     return os.name == "posix"
 
 
+########################################################################################################################################################
+###
+###  CONVERSIONS & COMMAND-LINE
+###
+
+# Conversions of un-structured values, typically strings received from the console (sys.argv), to different types of structured objects.
+# If an input value is already a structured one (None value in particular), it is returned unchanged.
+
+def asbool(s):
+    if isstring(s): s = s.tolower()
+    if s in [False, 0, 0.0, "0", "", "false", "no", "n"]: return False
+    if s in [True, 1, 1.0, "1", "true", "yes", "y"]: return True
+    raise Exception("Unrecognized value passed to asbool(): %s" % s)
+
+def asint(s):
+    if not isstring(s): return s
+    return int(s)
+
+def asnumber(s):
+    if not isstring(s): return s
+    try: return int(s)
+    except: pass
+    return float(s)
+
+def asobject(name, context = {}):
+    "Find an object defined inside 'context' (dict, object, module) by its name."
+    if not isstring(name): return name
+    if not isdict(context): context = context.__dict__
+    if name in context: return context[name]
+    raise Exception("Object can't be found: '%s'" % name)
+    
+
+def runCommand(context = {}, args = None):
+    """Takes from 'sys' all command-line arguments passed to the script and interprets them as a name 
+    of a callable (function) from 'context' (module or dict, typically globals() of the caller), 
+    and possibly its parameters; finds the function, executes with given parameters (passed as unnamed strings) 
+    and returns its result. If the command is not present in 'context' and there are no parameters,
+    pass it to eval(), which is more general and can execute an arbitrary expression, not only a global-scope function. 
+    If 'args' list is present, use it as arguments instead of sys.argv[1:]. 
+    Note: the called function should convert internally the parameters from a string to a proper type and 
+    this conversion is done in a local context of the function, so it may be hard to pass variables as parameters.
+    """
+    if args is None: args = sys.argv[1:]                        # argv[0] is the script name, omit
+    if not args: return None                                    # no command? do nothing 
+    if not isdict(context): context = context.__dict__
+    cmd = args[0]
+    params = tuple(args[1:])
+    if cmd in context:
+        fun = context[cmd]
+        return fun(*params)
+    elif not params:
+        return eval(cmd, context)
+    raise Exception("Object can't be found: '%s'" % cmd)
+
+
 #####################################################################################################################################################
 ###
 ###  CLASSES
@@ -136,13 +191,11 @@ def str2list(s, sep = None):
     return s.split(sep)
 
 def obj2dict(obj):
-    'Convert nested objects into plain (but still nested) dictionaries. Handles also lists.'
+    'Recursively convert a tree of nested objects into nested dictionaries. Iterables converted to lists.'
     if hasattr(obj, "__iter__"):
         return [obj2dict(v) for v in obj]
     elif hasattr(obj, "__dict__"):
-        return dict([(key, obj2dict(value)) 
-            for key, value in obj.__dict__.iteritems() 
-            if not callable(value) and not key.startswith('_')])
+        return dict([(k, obj2dict(v)) for k,v in obj.__dict__.iteritems() if not callable(v) and not k.startswith('_')])
     else:
         return obj
         
@@ -153,6 +206,17 @@ def dict2obj(d, cls, obj = None):
         obj = cls()
     setattrs(obj, d)
     return obj
+
+def class2dict(cls, exclude = "__", methods = False):
+    """Retrieves all attributes of a class, possibly except methods if methods=False (default), and returns as a dict.
+    Similar to getattrs() called with names=None, but detects inherited class attributes, too."""
+    names = filter(lambda n: not n.startswith(exclude), dir(cls))
+    if methods: return {n: getattr(cls, n) for n in names}
+    d = {}
+    for n in names: 
+        v = getattr(cls, n)
+        if not isfunction(v): d[n] = v
+    return d
 
 def subdict(d, keys, strict = False, default = False):
     "Creates a sub-dictionary from dict 'd', by selecting only the given 'keys' (list). If strict=True, all 'keys' must be present in 'd'."
@@ -177,13 +241,13 @@ def lowerkeys(d):
     return d.__class__((k.lower(), v) for k,v in d.iteritems())
 
 def getattrs(obj, names = None, exclude = "__", default = None, missing = True, usedict = False):
-    """Similar to built-in getattr(), but takes a list of many attribute names at once (or a string with 1+ space-separated names) 
-    and returns as a dictionary of name->value pairs.
-    Can be used to retrieve all __dict__ attributes (names=None) except special ones: with prefix 'exclude'.
-    By default, all attributes are retrieved using getattr(), which fires up descriptors (if any) and returns methods 
-    as <unbound method> not <function>, in contrast to __dict__[key]. Only if usedict=True, attributes are taken directly from __dict__,
+    """Similar to built-in getattr(), but returns many attributes at once, as a dict.
+    Attribute names are given in 'names' as a list of strings, or a string with 1+ space-separated names.
+    By default, attributes are retrieved using getattr(), which detects class attributes, 
+    fires up descriptors (if any) and returns methods as <unbound method> not <function>. 
+    Only if names=None and usedict=True, attributes are taken directly from __dict__,
     which can be faster, but in some cases behaves differently than getattr().  
-    Returns None for missing attributes if missing=True (default), skips them if missing=None, or raises an exception if missing=False. 
+    For missing attributes: returns None if missing=True (default), skips if missing=None, raises an exception if missing=False. 
     """
     if names is None:                                                               # retrieving all attributes?
         if usedict:                                                                 # use faster but less correct approach: __dict__
@@ -192,7 +256,10 @@ def getattrs(obj, names = None, exclude = "__", default = None, missing = True, 
             for k in d.keys():
                 if k.startswith(exclude): del d[k]
             return d
-        names = filter(lambda n: not n.startswith(exclude), obj.__dict__.keys())    # move on to a slower but fully correct approach: getattr()
+        
+        # proceed to a slower but fully correct approach: getattr() ...
+        if exclude is None: names = obj.__dict__.keys()
+        else: names = filter(lambda n: not n.startswith(exclude), obj.__dict__.keys())
     
     if isstring(names):                                                             # retrieving an explicit list of attributes?
         if ' ' not in names: return {names: getattr(obj, names)}                    # a single name given
@@ -871,29 +938,6 @@ class Tee(object):
             if mustclose: f.close()
 
 
-def runCommand(context = {}, args = None):
-    """Take from 'sys' all command-line arguments passed to the script and interpret them as a name 
-    of a callable (function) from 'context' (module or dict, typically globals() of the caller), 
-    and possibly its parameters; find the function, execute with given parameters (passed as unnamed strings) 
-    and return its result. If the command is not present in 'context' and there are no parameters,
-    pass it to eval(), which is more general and can execute an arbitrary expression, not only a global-scope function. 
-    If 'args' list is present, use it as arguments instead of sys.argv[1:]. 
-    Note: the called function should convert internally the parameters from a string to a proper type and 
-    this conversion is done in a local context of the function, so it may be hard to pass variables as parameters.
-    """
-    if args is None: args = sys.argv[1:]                        # argv[0] is the script name, omit
-    if not args: return None                                    # no command? do nothing 
-    if not isdict(context): context = context.__dict__
-    cmd = args[0]
-    params = tuple(args[1:])
-    if cmd in context:
-        fun = context[cmd]
-        return fun(*params)
-    elif not params:
-        return eval(cmd, context)
-    raise Exception("Object can't be found: '%s'" % cmd)
-
-        
 #####################################################################################################################################################
 ###
 ###   CONCURRENCY
@@ -922,6 +966,8 @@ class NoneLock(NoneObject):
     def locked(self): return False
     def __enter__(self): pass
     def __exit__(self, *args): pass
+    def reacquire(self, delay = None): pass
+
 
 #####################################################################################################################################################
 ###
