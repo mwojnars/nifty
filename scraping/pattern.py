@@ -70,7 +70,7 @@ REDEX SYNTAX.
     
 Static text        -- Regular text (static text) is matched as-is, case-insensitive by default.
                       Spaces between static words match any sequence of 1+ whitespaces.
-                      Spaces delimited by a non-static expression on either side 
+                      Spaces surrounding non-static expressions on either side 
                       (a variable, optional expression, ...) match 0+ whitespaces (can match empty string).
                       Spaces inside <...> tags match 0+ whitespaces, as well as any sequence of chars 
                       delimited by in-tag separators: ', ", =, or a space.
@@ -181,7 +181,7 @@ Address: ..        -- Two dots (..) match any sequence of 0+ characters except t
                       without tags, undergo HTML cleansing after extraction: striping of leading/trailing spaces,
                       merging of multiple whitespaces (incl. newlines and tabs) into a single regular space ' ',
                       and HTML entity decoding.
-                      To switch this behavior off, set 'html' property of your Pattern subclass to False,
+                      To switch this behavior off, set self.html=False in your pattern,
                       either permanently in the subclass definition or before calling Pattern.match().
                       Compare the two calls below, the 1st one executed with the default setting of html=True,
                       and the 2nd one with 'html' changed to False:
@@ -610,13 +610,14 @@ class Tree(BaseTree):
         def __str__(self): return '<%s%s%s%s' % (self.tagspecial, self.name, prefix(' ', self.expr), self.closing)
         def compile(self):                                                                              #@ReservedAssignment
             def comp(node): return node.compile() if node else ''
-            gap = r'(?=\s|/|>)'                 # checks for separator between tag name and attribute list
-            end = r'''['"\s=]'''
+            lead = r'(|(?<=>)\s*)'              # backward-check for a preceeding tag, then match 0+ spaces between both tags
+            gap  = r'(?=\s|/|>)'                # forward-check for a separator between the tag name and attribute list, or a tag end if no sep 
+            end  = r'''['"\s=]'''
             spaceL = r'([^<>]*?%s|)' % end      # match attributes on the left of 'expr', or nothing
             spaceR = r'(%s[^<>]*?|)' % end      # match attributes on the right of 'expr', or nothing
             expr = comp(self.expr)
             expr = spaceL + expr if expr else ''
-            return r'(|(?<=>)\s*)' + '<' + comp(self.tagspecial) + comp(self.name) + gap + expr + spaceR + comp(self.closing)
+            return lead + '<' + comp(self.tagspecial) + comp(self.name) + gap + expr + spaceR + comp(self.closing)
     
     class xrepeat(static): pass
     class xregex(static): pass

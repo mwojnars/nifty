@@ -69,6 +69,7 @@ def islinux():
 # If an input value is already a structured one (None value in particular), it is returned unchanged.
 
 def asbool(s):
+    if s is None: return s
     if isstring(s): s = s.tolower()
     if s in [False, 0, 0.0, "0", "", "false", "no", "n"]: return False
     if s in [True, 1, 1.0, "1", "true", "yes", "y"]: return True
@@ -952,7 +953,7 @@ class Tee(object):
 ###
 
 class Lock(object):
-    """Built-in lock is of type thread.LockType, which can't be inherited from. 
+    """Wrapper for built-in threading.Lock. The built-in lock is of type thread.LockType, which can't be inherited from. 
        If you need to subclass LockType, use this class as a base instead."""
     def __init__(self):
         self.lock = threading.Lock()
