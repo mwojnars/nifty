@@ -1149,7 +1149,10 @@ def pdate(s):
     if '-' in s: return check("%Y-%m-%d", "%Y-%m")                         # 2010-11-25, 2010-11
     if '.' in s: return check("%d.%m.%Y", "%d.%m.%y")                      # 25.11.2010, 25.11.10
     if '/' in s: return check("%m/%d/%Y", "%m/%d/%y")                      # 11/25/2010, 11/25/10 (US style: day in the middle, year at the end)
-    if ' ' in s: return check("%B %d, %Y", "%B %Y")                        # November 25, 2010; November 2010
+    if ' ' in s: 
+        if s[0].isdigit(): return check("%d %B %Y", "%d %b %Y")            # 25 November 2010; 25 Nov 2010
+        elif ',' in s: return check("%B %d, %Y", "%b %d, %Y")              # November 25, 2010; Nov 25, 2010
+        else: return check("%B %Y", "%b %Y")                               # November 2010; Nov 2010
     return check("%Y", "%Y%m", "%Y%m%d")                                   # 2010; 201011; 20101125
 
 def pdatetime(s):
