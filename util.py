@@ -70,7 +70,7 @@ def islinux():
 
 def asbool(s):
     if s is None: return s
-    if isstring(s): s = s.tolower()
+    if isstring(s): s = s.lower()
     if s in [False, 0, 0.0, "0", "", "false", "no", "n"]: return False
     if s in [True, 1, 1.0, "1", "true", "yes", "y"]: return True
     raise Exception("Unrecognized value passed to asbool(): %s" % s)
@@ -828,7 +828,8 @@ def convertTimezone(t, fromzone, tozone, tzinfo = False):
 ###
 
 # aliases for most commonly used standard methods, imported here for easy access:
-fileexists = os.path.exists
+fileexists = os.path.isfile
+pathexists = os.path.exists
 normpath = os.path.normpath             # path normalization: convert to shortest string (no trailing slashes! no '.' etc.)
 
 def filesize(name): return os.stat(name).st_size            # file size in bytes
