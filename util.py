@@ -67,30 +67,50 @@ def islinux():
 
 # Conversions of un-structured values, typically strings received from the console (sys.argv), to different types of structured objects.
 # If an input value is already a structured one (None value in particular), it is returned unchanged.
+# If 'default' is given, it is returned in case of an exception, otherwise exceptions are passed to the caller.
 
-def asbool(s):
+RAISE = object()            # a token used in as*() functions to indicate that exceptions should be re-raised
+
+def asbool(s, default = RAISE):
     if s is None: return s
     if isstring(s): s = s.tolower()
     if s in [False, 0, 0.0, "0", "", "false", "no", "n"]: return False
     if s in [True, 1, 1.0, "1", "true", "yes", "y"]: return True
-    raise Exception("Unrecognized value passed to asbool(): %s" % s)
+    if default is RAISE: raise Exception("Unrecognized value passed to asbool(): %s" % s)
+    return default
 
-def asint(s):
+def asint(s, default = RAISE):
     if not isstring(s): return s
-    return int(s)
+    try: return int(s)
+    except:
+        if default is RAISE: raise
+        return default
 
-def asnumber(s):
+def asnumber(s, default = RAISE):
     if not isstring(s): return s
     try: return int(s)
     except: pass
-    return float(s)
+    try: return float(s)
+    except:
+        if default is RAISE: raise
+        return default
 
-def asobject(name, context = {}):
+def asdatetime(d, fmt = '%Y-%m-%d %H:%M:%S', default = RAISE):
+    "String parsed as '%Y-%m-%d %H:%M:%S' by default. <date> converted to a datetime with hour=second=0. If a datetime or None, returned unchanged"
+    if isinstance(d, datetime.date): return datetime.datetime(d.year, d.month, d.day)
+    if not isstring(d): return d
+    try: return datetime.datetime(d, fmt)
+    except:
+        if default is RAISE: raise
+        return default
+
+def asobject(name, context = {}, default = RAISE):
     "Find an object defined inside 'context' (dict, object, module) by its name."
     if not isstring(name): return name
     if not isdict(context): context = context.__dict__
     if name in context: return context[name]
-    raise Exception("Object can't be found: '%s'" % name)
+    if default is RAISE: raise Exception("Object can't be found: '%s'" % name)
+    return default
     
 
 def runCommand(context = {}, params = None):
@@ -764,11 +784,6 @@ def timestamp(t, tZone = 'UTC'):
     elif tZone == "local":
         return int(time.mktime(t))      # here, more precise floating point result might be possible
     raise Exception("timestamp(), incorrect timezone specifier: " + tZone + ". Only 'UTC' or 'local' allowed.")
-
-def asdatetime(d):
-    "Convert date to a datetime with hour=seconds=0. If 'd' is already a datetime, return 'd' without changes."
-    if isinstance(d, datetime.datetime): return d
-    return datetime.datetime(d.year, d.month, d.day)
 
 # Precise measurement of t2-t1 time difference, at the most fine-grained level (microseconds), only rescaled to desired units: minutes, hours, ... 
 # Timezone-agnostic. Arguments can be 'datetime' or 'date' objects, but both must have the same type. 
