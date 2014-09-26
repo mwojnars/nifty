@@ -99,7 +99,7 @@ def asdatetime(d, fmt = '%Y-%m-%d %H:%M:%S', default = RAISE):
     "String parsed as '%Y-%m-%d %H:%M:%S' by default. <date> converted to a datetime with hour=second=0. If a datetime or None, returned unchanged"
     if isinstance(d, datetime.date): return datetime.datetime(d.year, d.month, d.day)
     if not isstring(d): return d
-    try: return datetime.datetime(d, fmt)
+    try: return datetime.datetime.strptime(d, fmt)
     except:
         if default is RAISE: raise
         return default
