@@ -734,9 +734,17 @@ class Timer(object):
     def __init__(self): self.start = time.time()
     def reset(self):     self.start = time.time()
     def elapsed(self): return time.time() - self.start          # time elapsed until now, in seconds, floating-point
+    
+    # floating-point results
     def seconds(self): return self.elapsed()
     def minutes(self): return self.elapsed() / 60
     def hours(self):   return self.elapsed() / (60 * 60)
+
+    # integer results (rounded down)
+    def iseconds(self): return int(self.seconds())
+    def iminutes(self): return int(self.minutes())
+    def ihours(self):   return int(self.hours())
+
     def __str__(self):
         d = self.elapsed()
         if d < 60*10: return "%.1f s" % d
