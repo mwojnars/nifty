@@ -2,24 +2,23 @@
 """
 Flexible context-based pattern matching in HTML/XML/markup/plaintext documents.
 
-Pattern is a new type of tool for extracting data from any markup document. 
+Redex Pattern is a new type of tool for extracting data from any markup document. 
 It defines a new language, "redex" (REgular Document EXpressions, similarity with "regex" intentional),
 for concise description of text patterns occuring in documents 
-and defining which parts of text should be extracted as data during scraping.
+and defining which parts of text should be extracted as data during analysis.
 
 Redex patterns define layout of the document: subsequent portions of text that must be present in given locations, 
-and places where substrings - if matched - should be extracted for further analysis.
+and places where substrings - if matched - should be extracted as variables.
 
 Redex combines consistency and compactness of regexes (single pattern matches all document 
 and extracts multiple variables at once) with strength and precision of XPaths: 
 it is much simpler than regexes and allows patterns to span multiple fragments of the document, 
 thus providing precise *context* where each fragment is allowed to match.
-Single Pattern can substitute a dozen of XPaths.
-Redex patterns are also much more readable than both regexes and XPath rules, thanks to their
-literal resemblance to the documents being parsed.
+Single Pattern can substitute a dozen of XPaths. Redex patterns are also much more readable than 
+both regexes and XPath rules, thanks to their literal resemblance to the documents being parsed.
 Pattern/redex is tailored to markup languages and is aware of characteristic parts of tagged documents,
-making parsing process more reliable.
-Redex patterns bridge the gap between regexes and XPaths as used in web scraping.
+making parsing process more reliable. Redex patterns bridge the gap between regexes and XPaths 
+as used in web scraping.
 
 Every Pattern instance is built from a string written in redex. 
 This string is compiled internally to a regex and subsequently matched against documents.
