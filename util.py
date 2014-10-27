@@ -132,7 +132,7 @@ def runCommand(context = {}, params = None):
         for arg in params:
             if '=' in arg:
                 k, v = arg.split('=',1)
-                if not (k and v): raise Exception("There can be no spaces around '=' on the argument list: %s" % arg)
+                if not k: raise Exception("There can be no spaces around '=' on the argument list: %s" % arg)
                 kwargs[k] = v
             else:
                 if kwargs: raise Exception("Unnamed argument cannot follow a keyword argument: %s" % arg)
