@@ -29,7 +29,7 @@ Text processing routines in [nifty.text](https://github.com/mwojnars/nifty/blob/
 - **Bag-of-words** model with **TF-IDF** weights: *WordsModel*
 - **N-grams**: *ngrams*
 
-Web scraping tools in [nifty.scraping.pattern](https://github.com/mwojnars/nifty/blob/master/scraping/pattern.py):
+Web scraping tools in [nifty.redex.pattern](https://github.com/mwojnars/nifty/blob/master/redex/pattern.py):
 - **Pattern** class - a brand new type of tool for extracting data from any markup document. 
   Bridges the gap between regexes and XPaths as used in web scraping.
   Combines consistency and compactness of regexes (single pattern matches all document and extracts multiple variables at once)
@@ -42,4 +42,4 @@ Data storage and object serialization with a new **DAST** format, in [nifty.data
 
 For more information, check pydocs and comments in the source code. Other modules to be documented in the near future.
 
-Nifty includes code of [Waxeye](http://waxeye.org/), a PEG parser generator (MIT license) used to generate parser for [Patterns](https://github.com/mwojnars/nifty/blob/master/scraping/pattern.py).
+Nifty includes code of [Waxeye](http://waxeye.org/), a PEG parser generator (MIT license) used to generate parser for [Patterns](https://github.com/mwojnars/nifty/blob/master/redex/pattern.py).

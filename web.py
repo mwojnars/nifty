@@ -651,7 +651,7 @@ class handlers(object):
 ###  WEB CLIENT
 ###
 
-class WebClient(object):    # ?? base class: urllib2.OpenerDirector, mechanize.Browser ??
+class WebClient(object):
     
     # atomic handlers that comprise the 'handlers' chain, in the same order 
     _history = _cache = _useragent = _referer = _timeout = _retryCustom = _retryOnError = _retryOnTimeout = _delay = _customHandlers = _client = None
