@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Text representation, text processing, text mining. Regular expressions.
 Basic routines for HTML processing (see also nifty.web module for more).
@@ -323,6 +324,8 @@ def stopwords(words, *stopLists, **params):
     Comparison is done in lowercase, but original case is left in the result.
     >>> stopwords("This is an example string.")
     'example string'
+    >>> stopwords(u"Echte of neppatiënten")         # unicode characters recognized correctly inside words
+    u'Echte neppati\\xc3 nten'
     """
     numbers = params.get('numbers', True)
     singles = params.get('singles', True)
@@ -337,7 +340,7 @@ def stopwords(words, *stopLists, **params):
     
     if isstring(words):
         if asstring is None: asstring = True
-        words = re.split(r'\W+', words)
+        words = re.split(r'\W+', words, flags = re.UNICODE)
             
     res = []
     for w in words:
