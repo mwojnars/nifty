@@ -19,8 +19,12 @@ from collections import defaultdict
 from array import array
 from itertools import imap
 
-from .util import isstring, islist, bound, flatten, merge_spaces
-from . import util
+if __name__ != "__main__":
+    from .util import isstring, islist, bound, flatten, merge_spaces
+    from . import util
+else:
+    from nifty.util import isstring, islist, bound, flatten, merge_spaces
+    from nifty import util
 
 
 #########################################################################################################################################################
@@ -281,32 +285,68 @@ def substitute_text(text, subst):
     return text
 
 
-# Stopwords - list of common words (long)
-STOP = set(
-       "a about above above across after afterwards again against all almost alone along already also although always am among amongst amoungst amount an and another any anyhow anyone anything anyway anywhere are around as at " \
-       "back be became because become becomes becoming been before beforehand behind being below beside besides between beyond bill both bottom but by " \
-       "call can cannot cant co con could couldnt cry de describe detail do done down due during " \
-       "each eg eight either eleven else elsewhere empty enough etc even ever every everyone everything everywhere except " \
-       "few fifteen fifty fill find fire first five for former formerly forty found four from front full further " \
-       "get give go had has hasnt have he hence her here hereafter hereby herein hereupon hers herself him himself his how however hundred " \
-       "ie if in inc indeed interest into is it its itself keep last latter latterly least less ltd " \
-       "made many may me meanwhile might mill mine more moreover most mostly move much must my myself " \
-       "name namely neither never nevertheless next nine no nobody none noone nor not nothing now nowhere " \
-       "of off often on once one only onto or other others otherwise our ours ourselves out over own " \
-       "part per perhaps please put rather re same see seem seemed seeming seems serious several she should show side since sincere six sixty so some somehow someone something sometime sometimes somewhere still such system " \
-       "take ten than that the their them themselves then thence there thereafter thereby therefore therein thereupon these they thick thin third this those though three through throughout thru thus to together too top toward towards twelve twenty two " \
-       "un under until up upon us very via was we well were what whatever when whence whenever where whereafter whereas whereby wherein whereupon wherever whether which while whither who whoever whole whom whose why will with within without would " \
-       "yet you your yours yourself yourselves " \
-       .split())
+###  STOPWORDS - lists of common words: short, medium and long one
 
-def filter_words(words, stop = ""):
-    "filter out: stopwords, numbers and single letters, using STOP list optionally extended with custom words 'stop'"
-    stop = set(stop.split()) | STOP
+STOP1 = set("I a about an are as at be by com for from how in is it of on or that the this to was what when where who will with the www".split())
+
+STOP2 = set("a about above after again against all am an and any are aren't as at be because been before being below between both but by " \
+            "can't cannot could couldn't did didn't do does doesn't doing don't down during each few for from further " \
+            "had hadn't has hasn't have haven't having he he'd he'll he's her here here's hers herself him himself his how how's " \
+            "i i'd i'll i'm i've if in into is isn't it it's its itself let's me more most mustn't my myself no nor not " \
+            "of off on once only or other ought our ours ourselves out over own same shan't she she'd she'll she's should shouldn't so some such " \
+            "than that that's the their theirs them themselves then there there's these they they'd they'll they're they've this those through to too " \
+            "under until up very was wasn't we we'd we'll we're we've were weren't what what's when when's where where's which while " \
+            "who who's whom why why's with won't would wouldn't you you'd you'll you're you've your yours yourself yourselves" \
+            .split()) | STOP1
+
+STOP3 = set("a about above above across after afterwards again against all almost alone along already also although always am among amongst amoungst amount an and another any anyhow anyone anything anyway anywhere are around as at " \
+           "back be became because become becomes becoming been before beforehand behind being below beside besides between beyond bill both bottom but by " \
+           "call can cannot cant co con could couldnt cry de describe detail do done down due during " \
+           "each eg eight either eleven else elsewhere empty enough etc even ever every everyone everything everywhere except " \
+           "few fifteen fifty fill find fire first five for former formerly forty found four from front full further " \
+           "get give go had has hasnt have he hence her here hereafter hereby herein hereupon hers herself him himself his how however hundred " \
+           "ie if in inc indeed interest into is it its itself keep last latter latterly least less ltd " \
+           "made many may me meanwhile might mill mine more moreover most mostly move much must my myself " \
+           "name namely neither never nevertheless next nine no nobody none noone nor not nothing now nowhere " \
+           "of off often on once one only onto or other others otherwise our ours ourselves out over own " \
+           "part per perhaps please put rather re same see seem seemed seeming seems serious several she should show side since sincere six sixty so some somehow someone something sometime sometimes somewhere still such system " \
+           "take ten than that the their them themselves then thence there thereafter thereby therefore therein thereupon these they thick thin third this those though three through throughout thru thus to together too top toward towards twelve twenty two " \
+           "un under until up upon us very via was we well were what whatever when whence whenever where whereafter whereas whereby wherein whereupon wherever whether which while whither who whoever whole whom whose why will with within without would " \
+           "yet you your yours yourself yourselves " \
+           .split()) | STOP2
+
+STOP = STOP2
+
+def stopwords(words, *stopLists, **params):
+    """From a given list of words or a string, filter out: stopwords, numbers (if 'numbers'=True, default; both integers and floats), 
+    single letters and characters (if 'singles'=True, default); using all the *stopLists lists/sets combined, or STOP if no list provided.
+    Comparison is done in lowercase, but original case is left in the result.
+    >>> stopwords("This is an example string.")
+    'example string'
+    """
+    numbers = params.get('numbers', True)
+    singles = params.get('singles', True)
+    asstring = params.get('asstring', None)
+    
+    if not stopLists:
+        stop = STOP
+    else:
+        stop = set()
+        for s in stopLists:
+            stop |= set(s.split()) if isstring(s) else set(s) if islist(s) else s
+    
+    if isstring(words):
+        if asstring is None: asstring = True
+        words = re.split(r'\W+', words)
+            
     res = []
     for w in words:
-        if (len(w) < 2) or w.isdigit() or (w in stop):
-            continue
+        if singles and len(w) < 2: continue
+        if numbers and w.isdigit(): continue                    # todo: replace isdigit() with a regex that handles all floats, too
+        if w.lower() in stop: continue
         res.append(w)
+    
+    if asstring: return ' '.join(res)                           # get back to a concatenated text 
     return res
 
 def keyPattern(keys):
@@ -444,7 +484,7 @@ def tokenize(text, stop = "group univ university college school education indust
     
     # tokenize text into words; filter out: stopwords, single letters, numbers
     words = re.split(r'\W+', text)
-    words = filter_words(words, stop)
+    words = stopwords(words, stop, STOP3)
     return ' '.join(words)      # get back to concatenated text 
 
 
@@ -576,6 +616,7 @@ Different languages commonly encountered in web applications:
 - safe-HTML - tags (all or only unsafe ones) were stripped out, but all entities are preserved; can be directly embedded in HTML without decoding/encoding
 - SQL value - any expression that can be safely used, without additional escaping, in SQL query in any place where a value is expected; SQL-escaped value 
 - SQL query
+- Solr query, Solr phrase
 - wiki text
 - URL
 - cookie plain - plaintext with limited set of characters: any printable ascii character (! through ~, unicode \u0021 through \u007E) excluding , and ; and excluding whitespace 
@@ -583,33 +624,40 @@ Different languages commonly encountered in web applications:
 """
 
 class Text(unicode):
-    """Behaves like a regular string (unicode, str), but additionally keeps information about language of the text (HTML, SQL, plain text, ...),
-    i.e., the primary language of interpretation that should be used by client code when analysing or using the text.  
-    Allows for easy (automatic) convertions - encoding/decoding - between different language representations.
+    """A string (unicode, str) that keeps information about language of the text (HTML, SQL, plain text, ...)
+    that should be used by the client when interpreting the text.  
+    Allows for easy (automatic) conversions - encoding/decoding - between different language representations.
+    Conversions can be lossy (!), for example, HTML converted to rawtext loses style information (tags).
     Language of a text is a subjective matter, there are no objective reasons why a given string should be interpreted in this or that language.  
     Can be used for implicit sanitization and output encoding of strings in web applications.
     This class is an (abstract) base class for a number of subclasses, one for each language."""
     
     language = None
     
-    def __init__(self, text):
-        """Argument 'text' is already in encoded form, in a given language dependent on the particular subclass used, NOT a plain text! 
-        Use encode() to create an instance from plain representation, with implicit convertion.""" 
-        #if isinstance(text, Text): text = text.plain()        # convert Text to plain text
-        unicode.__init__(self, text)
-        #self.text = text
+    def __init__(self, rich = None, raw = None):
+        """Exactly one of input texts: 'rich', 'raw' must be provided. 'rich' is already a richtext in encoded form of the target language.
+        'raw' will undergo encoding here. Use encode() method for explicit conversion.""" 
+        if rich is None: rich = self.encode(raw)
+        unicode.__init__(self, rich)
     
     @classmethod
-    def encode(cls, plaintext):
-        "Convert 'plaintext' into a given language and return as an instance of Text subclass."
+    def encode(cls, rawtext):
+        "Convert 'rawtext' into a given language and return as an instance of Text subclass."
         raise NotImplemented()
     
-    def plain(self):
-        "Return plain text representation of this Text subclass, as <unicode> or <str>."
+    def asRaw(self):
+        "This text converted to a rawtext."
         raise NotImplemented()
 
-class PlainText(Text):
-    language = 'plain'
+    # more custom conversions, to specific target languages, can be implemented in subclasses, for example:
+    def asHtml(self): return HTMLText(raw = self.asRaw())
+    def asUrl(self): return URLText(raw = self)
+
+
+class RawText(Text):
+    language = 'raw'
+    __init__ = unicode.__init__
+    # def html(self): encodes special symbols into named entities 
     
 class HTMLText(Text):
     language = 'HTML'
@@ -618,12 +666,18 @@ class SafeHTMLText(HTMLText):
     language = 'safe-HTML'
     
     def __init__(self, html, safetags = [], safeattrs = []):
-        ""
         pass
+
+    def html(self): return self
+    
 
 class URLText(Text): 
     # urllib.quote, urllib.unquote
     pass
+
+class MediaWikiText(Text):
+    pass
+    # def html(self): converts wiki styles into HTML tags
 
 class CookiePlainText(Text): pass
 class CookieEncodedText(Text): pass
