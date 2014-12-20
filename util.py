@@ -779,6 +779,46 @@ def utcnow():                             return datetime.datetime.utcnow()
 def formatDate(dt): return dt.strftime('%Y-%m-%d')               # the most typical format for date printout; 'dt' can be datetime or date
 def formatDatetime(dt): return dt.strftime('%Y-%m-%d %H:%M:%S')  # the most typical format for datetime printout, with NO milliseconds, unlike str(dt)
 
+def strftime(dt, fmt):
+    """Like datetime.strftime() and date.strftime(), but fixed for years before 1900 (standard strftime() raises exception for them).
+       After https://gist.github.com/mitchellrj/2000837
+    >>> strftime(datetime.datetime(1812, 10, 11, 15, 13, 42), "%b %Y, %H:%M")
+    'Oct 1812, 15:13'
+    >>> strftime(datetime.date(313, 1, 1), "%Y-%m-%d")
+    '313-01-01'
+    """
+    
+    if dt.year >= 1900: return dt.strftime(fmt)
+
+    #if re.search('(?<!%)((?:%%)*)(%y)', fmt):
+    #    raise Exception("Using %y time format with year prior to 1900 can produce incorrect results!")
+    
+    # create a copy of this datetime, then set the year to something acceptable, then replace that year in the resulting string
+    if isinstance(dt, datetime.datetime):
+        tmp_dt = datetime.datetime(datetime.MAXYEAR, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond, dt.tzinfo)
+    else:
+        tmp_dt = datetime.datetime(datetime.MAXYEAR, dt.month, dt.day)
+    
+    tmp_fmt = fmt
+    tmp_fmt = re.sub('(?<!%)((?:%%)*)(%y)', '\\1\x11\x11', tmp_fmt, re.U)
+    tmp_fmt = re.sub('(?<!%)((?:%%)*)(%Y)', '\\1\x12\x12\x12\x12', tmp_fmt, re.U)
+    tmp_fmt = tmp_fmt.replace(str(datetime.MAXYEAR), '\x13\x13\x13\x13')
+    tmp_fmt = tmp_fmt.replace(str(datetime.MAXYEAR)[-2:], '\x14\x14')
+    
+    result = tmp_dt.strftime(tmp_fmt)
+    
+    if '%c' in fmt:
+        # local datetime format - uses full year but hard for us to guess where
+        result = result.replace(str(datetime.MAXYEAR), str(dt.year))
+    
+    result = result.replace('\x11\x11', str(dt.year)[-2:])
+    result = result.replace('\x12\x12\x12\x12', str(dt.year))
+    result = result.replace('\x13\x13\x13\x13', str(datetime.MAXYEAR))
+    result = result.replace('\x14\x14', str(datetime.MAXYEAR)[-2:])
+        
+    return result
+        
+
 def timestamp(t, tZone = 'UTC'):
     """Converts datetime or struct_time object 't' into Unix timestamp (int, in seconds).
     tZone specifies in what timezone 't' is in and can be either 'UTC' or 'local'. Should hold:

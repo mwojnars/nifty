@@ -3,6 +3,8 @@
 Routines for web access, web scraping and HTML/XML processing.
 External dependencies: Scrapy 0.16.4 (for HTML/XML)
 
+TODO: possibly might replace urllib2 with Requests (http://docs.python-requests.org/en/latest/)
+
 ---
 This file is part of Nifty python package. Copyright (c) 2009-2014 by Marcin Wojnarski.
 
@@ -105,7 +107,11 @@ def noscript(html, pat1 = re.compile(r"<script", re.IGNORECASE), pat2 = re.compi
 
 
 def striptags(html, norm = True):
-    "Parses HTML snippet with libxml2 and extracts text contents using XPath. Decodes entities. If norm, strips and normalizes spaces. HTML comments ignored, <script> <style> contents included."
+    """Parses HTML snippet with libxml2 and extracts text contents using XPath. Decodes entities. 
+    If norm=True, strips and normalizes spaces. HTML comments ignored, <script> <style> contents included.
+    >>> striptags("<i>one</i><u>two</u>")
+    u'onetwo'
+    """
     return xdoc(html).text(norm = norm)
 
 

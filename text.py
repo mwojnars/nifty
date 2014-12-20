@@ -111,13 +111,16 @@ def decode_entities(s, h = HTMLParser.HTMLParser()):
     return h.unescape(s)
 
 def striptags(html, remove = [], allow = [], replace = '', ignorecase = True):
-    """Regex-based stripping of HTML tags. Optional 'remove' is a list of tag names to remove. Optional 'allow' is a list of tag names to preserve (remove all others). 
+    """Regex-based stripping of HTML tags. Optional 'remove' is a list of tag names to remove. 
+    Optional 'allow' is a list of tag names to preserve (remove all others). 
     At most one of remove/allow parameters can be non-empty. If both are empty, all tags are removed.
     
     >>> striptags("  <html><HTML><A><a><a/><a /><img></img><image> <form><script><style><!-- ala --><?xml ?><![CDATA[...]]></body>")        # spaces preserved
     '   '
     >>> striptags("< b></ body>")        # leading spaces inside tags are not allowed
     '< b></ body>'
+    >>> striptags("<i>one</i><u>two</u>")
+    'onetwo'
     >>> html = "<html><A> <a href='http://xyz.com/'>ala ma <i>kota</i></a><a /><img></img><image><form><!-- ala -->"
     >>> striptags(html, allow = 'a i u')
     "<A> <a href='http://xyz.com/'>ala ma <i>kota</i></a><a />"
