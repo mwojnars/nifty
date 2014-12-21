@@ -688,9 +688,12 @@ def printdast(obj, **kwargs):
 ### Hashing
 
 def hashmd5(s, n = 4):
-    """Stable cross-platform hash function for strings. Will always return the same output for a given input (e.g., suitable for DB storage),
-    in contrast to the standard hash() whose implementation varies between platforms and can change in the future. 
-    Calculates MD5 digest and returns the first 'n' bytes (2*n hex digits) converted to an unsigned n-byte long integer."""
+    """Stable cross-platform hash function for strings. Will always return the same output for a given input (suitable for DB storage),
+    in contrast to the standard hash() function whose implementation varies between platforms and can change in the future. 
+    Calculates MD5 digest and returns the first 'n' bytes (2*n hex digits) converted to an unsigned n-byte long integer, 1 <= n <= 16.
+    >>> hashmd5("Ala ma kota", 3), hashmd5("Ala ma kota", 16)
+    (9508390, 192853063964719202713279980030747913607L)
+    """
     return int(hashlib.md5(s).hexdigest()[:2*n], 16)
 
 
