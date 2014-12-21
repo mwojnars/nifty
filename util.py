@@ -14,7 +14,7 @@ You should have received a copy of the GNU General Public License along with Nif
 
 from __future__ import absolute_import
 import __builtin__, os, sys, glob, types as _types, re, numbers, json, time, datetime, calendar
-import logging, random, math, collections, unicodedata, heapq, threading, inspect
+import logging, random, math, collections, unicodedata, heapq, threading, inspect, hashlib
 from StringIO import StringIO
 
 
@@ -685,6 +685,15 @@ def printdast(obj, **kwargs):
     print dast.encode(obj, **kwargs)
 
 
+### Hashing
+
+def hashmd5(s, n = 4):
+    """Stable cross-platform hash function for strings. Will always return the same output for a given input (e.g., suitable for DB storage),
+    in contrast to the standard hash() whose implementation varies between platforms and can change in the future. 
+    Calculates MD5 digest and returns the first 'n' bytes (2*n hex digits) converted to an unsigned n-byte long integer."""
+    return int(hashlib.md5(s).hexdigest()[:2*n], 16)
+
+
 #####################################################################################################################################################
 ###
 ###   NUMBERS
@@ -780,8 +789,8 @@ def formatDate(dt): return dt.strftime('%Y-%m-%d')               # the most typi
 def formatDatetime(dt): return dt.strftime('%Y-%m-%d %H:%M:%S')  # the most typical format for datetime printout, with NO milliseconds, unlike str(dt)
 
 def strftime(dt, fmt):
-    """Like datetime.strftime() and date.strftime(), but fixed for years before 1900 (standard strftime() raises exception for them).
-       After https://gist.github.com/mitchellrj/2000837
+    """Like datetime.strftime() or date.strftime(), but fixed for years before 1900 (standard strftime() raises exception for them).
+       'dt': either a date or a datetime. After https://gist.github.com/mitchellrj/2000837
     >>> strftime(datetime.datetime(1812, 10, 11, 15, 13, 42), "%b %Y, %H:%M")
     'Oct 1812, 15:13'
     >>> strftime(datetime.date(313, 1, 1), "%Y-%m-%d")
@@ -793,7 +802,7 @@ def strftime(dt, fmt):
     #if re.search('(?<!%)((?:%%)*)(%y)', fmt):
     #    raise Exception("Using %y time format with year prior to 1900 can produce incorrect results!")
     
-    # create a copy of this datetime, then set the year to something acceptable, then replace that year in the resulting string
+    # create a copy of this datetime/date, then set the year to something acceptable, then replace that year in the resulting string
     if isinstance(dt, datetime.datetime):
         tmp_dt = datetime.datetime(datetime.MAXYEAR, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond, dt.tzinfo)
     else:
