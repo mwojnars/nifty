@@ -50,9 +50,12 @@ def isfunction(x):
     return isinstance(x, (_types.FunctionType, _types.BuiltinFunctionType, _types.MethodType, _types.BuiltinMethodType, _types.UnboundMethodType))
 def isgenerator(x):
     return isinstance(x, _types.GeneratorType)
+def ismethod(x):
+    "True if x is a method, bound or unbound."
+    return isinstance(x, (_types.MethodType, _types.BuiltinMethodType, _types.UnboundMethodType))
 def isbound(method):
     "True if a given method is bound, i.e., assigned to an instance (with 'self'), not a class method."
-    return method.im_self is not None
+    return getattr(method, 'im_self', None) is not None
 
 # Environment checks:
 def islinux():
@@ -72,7 +75,7 @@ def islinux():
 RAISE = object()            # a token used in as*() functions to indicate that exceptions should be re-raised
 
 def asbool(s, default = RAISE):
-    if s is None: return s
+    if s in (None, "None"): return s
     if isstring(s): s = s.lower()
     if s in [False, 0, 0.0, "0", "", "false", "no", "n"]: return False
     if s in [True, 1, 1.0, "1", "true", "yes", "y"]: return True

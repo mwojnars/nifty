@@ -676,6 +676,11 @@ class SafeHTMLText(HTMLText):
 
     def html(self): return self
     
+class InTagText(Text):
+    """String written inside an HTML tag, as a variable value, e.g., <meta name="author" content="Luck & Luke"> 
+    - inner quotes should be turned into HTML entities: &quot; (&#34;) and &apos; (&#39;)
+    """
+
 
 class URLText(Text): 
     # urllib.quote, urllib.unquote
