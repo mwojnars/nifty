@@ -109,8 +109,8 @@ def noscript(html, pat1 = re.compile(r"<script", re.IGNORECASE), pat2 = re.compi
 def striptags(html, norm = True):
     """Parses HTML snippet with libxml2 and extracts text contents using XPath. Decodes entities. 
     If norm=True, strips and normalizes spaces. HTML comments ignored, <script> <style> contents included.
-    >>> striptags("<i>one</i><u>two</u>")
-    u'onetwo'
+    >>> striptags("<i>one</i><u>two</u><p>three</p><div>four</div>")
+    u'onetwothreefour'
     """
     return xdoc(html).text(norm = norm)
 
@@ -864,7 +864,8 @@ class Crawler(object):
 
 try:                                                                            # newer versions of Scrapy
     from scrapy.selector.unified import SelectorList as XPathSelectorList
-    from scrapy import Selector
+    try: from scrapy.selector import Selector   # newer
+    except: from scrapy import Selector         # older
     HtmlXPathSelector = XmlXPathSelector = XPathSelector   =   Selector
     OLD_SCRAPY = False
 except ImportError:                                                             # older versions of Scrapy; TODO: drop entirely
