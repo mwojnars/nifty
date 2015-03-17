@@ -580,8 +580,17 @@ class Encoder(object):
                 state = state.copy()
                 for attr in trans: state.pop(attr, None)
         
-        fmt = getattr(x, '__dast_format__', {}) if mode == 2 else None
+        # parse __dast_format__
+        if mode == 2:
+            fmt = getattr(x, '__dast_format__', {})
+            fmt_self = fmt.get('__self__', None)                # what format to use for the object itself
+            if fmt_self is not None:
+                mode = fmt_self
+        else:
+            fmt = None
+        
         self._generic_object(mode, level, typename, args2 = newargs, kwargs2 = state, fmt = fmt)
+        
         
     def _array(self, x, mode, level):
         dtype = str(x.dtype)
@@ -898,9 +907,11 @@ class DAST(object):
     """Keeps global parameters of encoding, common to all records to be encoded.
     
     Special properties and methods that can be present in encoded/decoded classes:
-     __dast_format__ - dict of {attr: mode} pairs that defines what mode level should be used for encoding of specified attributes of this class'es objects.
-     __dast__ - custom encoding method; returns an object that will be subsequently DAST-encoded in usual (recursive) way. [TODO]
-     __dast_init__ - method to be called instead of __init__ during decoding and instantiating of the class.
+     __transient__   - list of attribute names to be excluded from __dict__ during encoding
+     __dast_format__ - dict of {attr: mode} pairs with mode level to be used for encoding of specified attributes of this class'es objects;
+                       __dast_format__['__self__'] is mode level for the instance itself.
+     __dast__        - custom encoding method; returns an object that will be subsequently DAST-encoded in usual (recursive) way. [TODO]
+     __dast_init__   - method to be called instead of __init__ during decoding and instantiating of the class.
      
     Usage:
     - Can't encode volatile objects, like: generators, files, ...
