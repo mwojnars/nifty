@@ -584,9 +584,9 @@ class handlers(object):
             filename = safeurl + " " + str(hash(url))
             return self.path + filename + "." + ext
         
-        def _url2file(self, url, ext = "html", pat = re.compile(r"""[/"'!?\\&=:]""")):
+        def _url2file(self, url, ext = "html", pat = re.compile(r"""[/"'!?\\&=:]"""), maxlen = 60):
             "Encode URL to obtain a correct file name, preceeded by cache path"
-            safeurl = pat.sub('_', url.replace('://', '_'))
+            safeurl = pat.sub('_', url.replace('://', '_'))[:maxlen]
             filename = safeurl + "_" + str(hash(url))
             return self.path + filename + "." + ext
         
