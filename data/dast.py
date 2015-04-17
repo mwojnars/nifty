@@ -29,7 +29,7 @@ Indented format:
   123  123.45  123.  True/False  None/null/-/~           -- float always with a dot . to discern from int
 
 - strings:
-  "longer text"  u"unicode text"  'text'
+  "longer text"  'text'  u"unicode text"  U'unicode text'
 
   multi-line, no \n encoding, newlines preserved during decoding:
   |this and
@@ -217,6 +217,7 @@ class Tokenizer(object):
         ('FLOAT',  _noalpha % (regex.float + r'|([+-]?[iI]nf)|NaN|nan')),       # any floating-point number, or Inf, or NaN
         ('INT'  ,  _noalpha % regex.int),
         ('STR'  ,  regex.escaped_string),
+        ('UNI'  ,  r'[uU]' + regex.escaped_string),                             # unicode string
         ('NONE' ,  _noalpha % r'None|null|~|-'),
         ('BOOL' ,  _noalpha % r'[tT]rue|[fF]alse'),
         #('INDENT',  r'[ \t]*'),                  # indentation at the beginning of a line; handled in a special way, thus not included in 'tokens', but can be returned from tokenize()
@@ -323,9 +324,11 @@ class Analyzer(object):
         n = name[0]
         
         # atomic value
-        if n in 'SIFKNB':
+        if n in 'SUIFKNB':
             if n == 'S' and name == 'STR':
                 return val[1:-1].decode("string-escape")
+            if n == 'U' and name == 'UNI':
+                return val[2:-1].decode("string-escape").decode("utf-8")
             if n == 'I' and name == 'INT':
                 return int(val, 0)
             if n == 'F' and name == 'FLOAT':
@@ -477,12 +480,18 @@ class Encoder(object):
         fmt = 'time "%s"' if m >= 1 else 'time("%s")'
         self._write(fmt % t)
 
-    def _str(self, s, mode, level):
+    def _str(self, s, mode, level, asunicode = False):
+        if asunicode:
+			self._write('u')														# prefix for unicode strings
+			s = s.encode("utf-8")
         if mode == 0: self._write('"' + encode_basestring(s) + '"')
         else:
             s = encode_basestring(s) #encode_basestring_multiline(s)
             s = s.replace('\n', '\n' + self.indent * level + ' ')
             self._write('"' + s + '"')
+    
+    def _unicode(self, *args):
+		self._str(*args, asunicode = True)
     
     def _type(self, t, m, l):
         name = t.__module__ + "." + t.__name__
@@ -711,7 +720,7 @@ class Encoder(object):
 
 
     # encoders for standard types
-    encoders = { int:_int, long:_int, float:_float, bool:_bool, str:_str, unicode:_str, type(None):_none, 
+    encoders = { int:_int, long:_int, float:_float, bool:_bool, str:_str, unicode:_unicode, type(None):_none, 
                  datetime:_datetime, date:_date, time:_time,
                  type:_type, list:_list, tuple:_tuple, set:_set, 
                  dict:_dict, OrderedDict:_dict, defaultdict:_defaultdict,
@@ -1146,6 +1155,8 @@ if __name__ == "__main__":
 
     ### testing...
     
+    test("ala ma kota")
+    test(u"żźąłćę “ĄŻÓĘŁ“ 'SuÁrez'")
     test([True, 8.23, "x y z \n abc"])
     test({3,5,7,'ala'})
     test({5: 643, "pies i kot": None, None: True})
