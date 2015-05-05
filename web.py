@@ -244,11 +244,10 @@ class Request(urllib2.Request):
     """ When setting headers (self.headers from base class), all keys are capitalized by urllib2 (!) to avoid duplicates.
     To assign individual items in the header, use add_header() instead of manual modification of self.headers!
     """
-    def __init__(self, url, headers = {}, timeout = None):
-        urllib2.Request.__init__(self, url, headers = headers)
+    def __init__(self, url, data = None, headers = {}, timeout = None):
+        urllib2.Request.__init__(self, url = url, data = data, headers = headers)
         self.url = url
         self.timeout = timeout
-        # self.headers = {}  -  available from urllib2.Request
 
 class Response():
 
@@ -702,6 +701,9 @@ class WebClient(object):
         
         self.url_now = None                 # URL being processed now (started but not finished); for debugging purposes, when exception occurs inside open()
 
+    def copy(self):
+        return self
+
     def setCache(self, path, refresh = None, retain = None):
         "Default retain period = 1 year. 'refresh' can hold a pair: (refresh, retain), than 'retain' is not used."
         if islist(refresh) and len(refresh) >= 2:
@@ -719,6 +721,11 @@ class WebClient(object):
         if not self.handlers: return
         for h in self.handlers.list():
             h.log = self.logger
+            
+    def setCustomHandlers(self, customHandlers):
+        if customHandlers:
+            self._customHandlers = customHandlers
+        self._rebuild()
         
     def _rebuild(self):
         "Rearrange handlers into a chain once again."
@@ -726,7 +733,7 @@ class WebClient(object):
                                           self._retryCustom, self._retryOnError, self._retryOnTimeout, self._delay, self._customHandlers, self._client])
         self.setLogger(self.logger)
     
-    def response(self, url = None):
+    def response(self, url = None, data = None, headers = {}):
         """Return current (last) response object if url=None, or make a new request like open() and return full response object. 
         The method is aware of movements along history: back(), forward(), ..."""
         if not url:
@@ -735,7 +742,7 @@ class WebClient(object):
         # new request...
         self.url_now = url
         url = fix_url(url)
-        req = Request(url)
+        req = Request(url = url, data = data, headers = headers)
         resp = self.handlers.handle(req)
         self.url_now = None
         return resp                         # implicitly, the 'resp' object is remembered in browsing history, too
