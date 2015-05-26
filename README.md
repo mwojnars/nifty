@@ -38,6 +38,8 @@ Web scraping tools in [nifty.redex.pattern](https://github.com/mwojnars/nifty/bl
 - **parsing** of basic data types from human-readable formats used in web pages: *pdate*, *pdatetime*, *pint*, *pfloat*, *pdecimal*, *percent*
 - **url** absolutization & unquoting: *url*, *url_unquote*
 
+**Data Pipes**. Architecture for scalable pipeline-oriented processing of Big Data: [nifty.data.pipes](https://github.com/mwojnars/nifty/blob/master/data/pipes.py).
+
 Data storage and object serialization with a new **DAST** format, in [nifty.data.dast](https://github.com/mwojnars/nifty/blob/master/data/dast.py).
 
 For more information, check pydocs and comments in the source code. Other modules to be documented in the near future.
