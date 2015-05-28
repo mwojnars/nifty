@@ -237,7 +237,7 @@ def checkMyIP(web = None, test = 1):
 
 ################################################################################################################################################
 ###
-###  Request, Response, Web Handlers
+###  REQUEST, RESPONSE, WEBHANDLER - base classes
 ###
 
 class Request(urllib2.Request):
@@ -343,313 +343,348 @@ class WebHandler(object):
         return self.next.handle(req)
 
 
-class handlers(object):
-    "A collection of basic web handlers for different atomic tasks during web access."
+################################################################################################################################################
+###
+###  WEB HANDLERS - concrete classes for different tasks
+###
+
+class StandardClient(WebHandler):
+    "Returns a web page using standard urllib2 access. Custom urllib2 handlers can be added upon initialization"
+    def __init__(self, addHandlers = []):
+        self.opener = urllib2.build_opener(*addHandlers)
+        self.added = [h.__class__.__name__ for h in addHandlers]
+    def handle(self, req):
+        assert isinstance(req, Request)
+        #self.log.info("StandardClient, downloading page. Request & handlers: " + jsondump([req, self.added]))
+        self.log.info("StandardClient, downloading", req.url)
+        try:
+            if req.timeout:
+                stream = self.opener.open(req, timeout = req.timeout)
+            else:
+                stream = self.opener.open(req)
+        except HTTPError, e:
+            e.msg += ", " + req.url
+            raise
+        return Response(stream, req.url)
     
-    class StandardClient(WebHandler):
-        "Returns a web page using standard urllib2 access. Custom urllib2 handlers can be added upon initialization"
-        def __init__(self, addHandlers = []):
-            self.opener = urllib2.build_opener(*addHandlers)
-            self.added = [h.__class__.__name__ for h in addHandlers]
-        def handle(self, req):
-            assert isinstance(req, Request)
-            #self.log.info("StandardClient, downloading page. Request & handlers: " + jsondump([req, self.added]))
-            self.log.info("StandardClient, downloading", req.url)
+class FixURL(WebHandler):
+    def handle(self, req):
+        req.url = fix_url(req.url)
+        return self.next.handle(req)
+
+class Delay(WebHandler):
+    "Delays web requests so that they are separated by at least 'delay' seconds (but possibly no more than this); 'delay' is slightly randomly disturbed each time"
+    def __init__(self, delay = 1.5):
+        self.last = now() - delay
+        self.delay = delay
+    def handle(self, req):
+        delay = self.delay * (random.random()/5 + 0.9)
+        t = delay - (now() - self.last)
+        if t > 0: time.sleep(t)
+        self.last = now()
+        return self.next.handle(req)
+
+class Timeout(WebHandler):
+    "Add timeout value to every request"
+    def __init__(self, timeout = 10):
+        self.timeout = timeout
+    def handle(self, req):
+        req.timeout = self.timeout
+        return self.next.handle(req)
+    
+class RetryOnError(WebHandler):
+    """In case of an exception of a given class retries the request a given number of times, only then forwards to the caller.
+    Default exception class: Exception. Default excludes: 'timeout', HTTPError 403 (Forbidden), HTTPError 404 (Not Found)"""
+    def __init__(self, attempts = 3, delay = 5, exception = Exception, exclude = [Timeout, 403, 404]):
+        self.attempts = attempts
+        self.delay = delay
+        self.exception = exception
+        self.exclude = [cls for cls in exclude if not isint(cls)]
+        self.excludeHTTP = [code for code in exclude if isint(code)]
+    def handle(self, req):
+        for i in range(self.attempts + 1):
             try:
-                if req.timeout:
-                    stream = self.opener.open(req, timeout = req.timeout)
-                else:
-                    stream = self.opener.open(req)
-            except HTTPError, e:
-                e.msg += ", " + req.url
-                raise
-            return Response(stream, req.url)
-        
-    class FixURL(WebHandler):
-        def handle(self, req):
-            req.url = fix_url(req.url)
-            return self.next.handle(req)
+                _req = deepcopy(req)                    # we may need original 'req' again in the future, thus copying
+                return self.next.handle(_req)
+            except self.exception, e:
+                for x in self.exclude:
+                    if isinstance(e,x): raise
+                if isinstance(e, HTTPError):
+                    if e.getcode() in self.excludeHTTP: raise
+                self.log.warning("%s, attempt #%d, %s trying again... Caught '%s'" % (classname(self,False), i+1, req.url, e))
+                time.sleep(self.delay * mnoise(1.1))
+        return self.next.handle(req)
 
-    class Delay(WebHandler):
-        "Delays web requests so that they are separated by at least 'delay' seconds (but possibly no more than this); 'delay' is slightly randomly disturbed each time"
-        def __init__(self, delay = 1.5):
-            self.last = now() - delay
-            self.delay = delay
-        def handle(self, req):
-            delay = self.delay * (random.random()/5 + 0.9)
-            t = delay - (now() - self.last)
-            if t > 0: time.sleep(t)
-            self.last = now()
-            return self.next.handle(req)
-    
-    class Timeout(WebHandler):
-        "Add timeout value to every request"
-        def __init__(self, timeout = 10):
-            self.timeout = timeout
-        def handle(self, req):
-            req.timeout = self.timeout
-            return self.next.handle(req)
+class RetryOnTimeout(RetryOnError):
+    """In case of timeout error, retry the request a given number of times, only then forward Timeout exception to the caller. 
+    Only for response timeout (!), NOT for connection opening timeout (that's a different class: URLError 'timed out' not Timeout)."""
+    def __init__(self, attempts = 3, delay = 5):
+        handlers.RetryOnError.__init__(self, attempts, delay, exception = Timeout, exclude = [])
+
+class RetryCustom(WebHandler):
+    "Uses client-provided function 'test' for analyzing errors (exceptions) and deciding whether to retry (return False if not), and with what delay (return >0)"
+    def __init__(self, test):
+        "'test' is a function of 2 arguments: exception and the no. of attempts done so far, returning new delay or None for stop. See exampleTest() below."
+        self.test = test
         
-    class RetryOnError(WebHandler):
-        """In case of an exception of a given class retries the request a given number of times, only then forwards to the caller.
-        Default exception class: Exception. Default excludes: 'timeout', HTTPError 403 (Forbidden), HTTPError 404 (Not Found)"""
-        def __init__(self, attempts = 3, delay = 5, exception = Exception, exclude = [Timeout, 403, 404]):
-            self.attempts = attempts
-            self.delay = delay
-            self.exception = exception
-            self.exclude = [cls for cls in exclude if not isint(cls)]
-            self.excludeHTTP = [code for code in exclude if isint(code)]
-        def handle(self, req):
-            for i in range(self.attempts + 1):
-                try:
-                    _req = deepcopy(req)                    # we may need original 'req' again in the future, thus copying
-                    return self.next.handle(_req)
-                except self.exception, e:
-                    for x in self.exclude:
-                        if isinstance(e,x): raise
-                    if isinstance(e, HTTPError):
-                        if e.getcode() in self.excludeHTTP: raise
-                    self.log.warning("%s, attempt #%d, %s trying again... Caught '%s'" % (classname(self,False), i+1, req.url, e))
-                    time.sleep(self.delay * mnoise(1.1))
-            return self.next.handle(req)
+        def exampleTest(ex, attempt):
+            "attempt: no. of attempts done so far, always >= 1"
+            if isinstance(ex, Timeout): return 5.0 if attempt < 3 else False
+            if isinstance(ex, HTTPError):
+                status = ex.getcode()
+                if status != 404: return 1.0
+            return False            # forward other exceptions
         
-    class RetryOnTimeout(RetryOnError):
-        """In case of timeout error, retry the request a given number of times, only then forward Timeout exception to the caller. 
-        Only for response timeout (!), NOT for connection opening timeout (that's a different class: URLError 'timed out' not Timeout)."""
-        def __init__(self, attempts = 3, delay = 5):
-            handlers.RetryOnError.__init__(self, attempts, delay, exception = Timeout, exclude = [])
-    
-    class RetryCustom(WebHandler):
-        "Uses client-provided function 'test' for analyzing errors (exceptions) and deciding whether to retry (return False if not), and with what delay (return >0)"
-        def __init__(self, test):
-            "'test' is a function of 2 arguments: exception and the no. of attempts done so far, returning new delay or None for stop. See exampleTest() below."
-            self.test = test
-            
-            def exampleTest(ex, attempt):
-                "attempt: no. of attempts done so far, always >= 1"
-                if isinstance(ex, Timeout): return 5.0 if attempt < 3 else False
-                if isinstance(ex, HTTPError):
-                    status = ex.getcode()
-                    if status != 404: return 1.0
-                return False            # forward other exceptions
-            
-        def handle(self, req):
-            attempt = 0
-            while True:
-                try:
-                    attempt += 1
-                    _req = deepcopy(req)                    # we may need original 'req' again in the future, thus copying
-                    return self.next.handle(_req)
-                except Exception, e:
-                    delay = self.test(e, attempt)
-                    if not delay: raise
-                    delay *= mnoise(1.1)
-                    self.log.warning("RetryCustom, attempt #%d, trying again after %d seconds... Caught %s" % (attempt, delay, e))
-                    time.sleep(delay)
-            return self.next.handle(req)
-    
-    class UserAgent(WebHandler):
-        def __init__(self, agent = None, change = None):
-            """agent: predefined User-Agent (string) to be used; or None to pick User-Agent randomly from a list of most common ones.
-               change: time (in minutes) how often UA should be randomly changed; or None if no changes should be done.
-            """
-            if agent:
-                self.agent = agent
-            else:
-                self.agent = random.choice(common_user_agents)
-            self.change = change * 60 if change else None                 # convert minutes to seconds               
-            self.lastChange = now()
-            
-        def handle(self, req):
-            req.add_header('User-Agent', self.agent)
-            if self.change and (now() - self.lastChange > self.change):
-                self.agent = random.choice(common_user_agents)            
-                self.lastChange = now()
-            return self.next.handle(req)
-    
-        
-    class History(WebHandler):
-        Event = namedtuple('Event', 'req resp')
-        def __init__(self, maxlen = None):
-            "maxlen: must be >= 1, or None (no limit)"
-            self.events = []            # a list of "back" and "forward" events, as (request,response) pairs
-            self.current = 0            # no. of "back" events in self.events (remaining events are "forward")
-            if maxlen and (not isnumber(maxlen) or maxlen < 1):
-                maxlen = 1
-            self.maxlen = maxlen
-        def handle(self, req):
-            _req = deepcopy(req)
-            resp = self.next.handle(req)
-            self.events = self.events[:self.current]                            # we're moving forward, so forget all "forward" events, if present
-            M = self.maxlen
-            if M and len(self.events) >= M:
-                self.events = self.events[-(M-1):] if M > 1 else []             # create space for new event
-            self.events.append(self.Event(_req, deepcopy(resp)))                # must perform deepcopies because req/resp objects are modified down and up the handlers chain
-            self.current = len(self.events)
-            return resp
-        def last(self):
-            "Return last (request,response) if present; otherwise None. Don't move history pointer"
-            if self.current > 0:
-                return self.events[self.current - 1]
-            return None
-        def back(self):
-            "If possible, move history pointer 1 step back and return that response object again; otherwise None"
-            if self.current > 1:
-                self.current -= 1
-                return self.last()
-            return None
-        def forward(self):
-            "If possible, move history pointer 1 step forward and return that response object again; otherwise None"
-            if self.current < len(self.events):
-                self.current += 1
-                return self.last()
-            return None
-        def reset(self):
-            "Clear history entirely"
-            self.events = []
-            self.current = 0
-        
-    class Referer(WebHandler):
-        def __init__(self, history):
-            "history: the History handler instance which will be used to get info about last webpage visited"
-            self.history = history
-        def handle(self, req):
-            last = self.history.last()
-            if last:
-                lasturl = last.resp.url or last.req.url       # better to take url from response, but if missing we must use url from request 
-                if lasturl:
-                    prefix = os.path.commonprefix([lasturl, req.url])
-                    suffix = req.url[len(prefix):-1]
-                    if suffix in last.resp.content:                      # suffix - simple heuristic to check if the new URL really occured in the previous page
-                        req.add_header('Referer', lasturl) 
-            return self.next.handle(req)
-    
-    class Cache(WebHandler):
-        """Web caching: enables repeated access to the same www page without its reloading.
-        Cache is located on disk, in a folder given as parameter; pages stored in separate files named after their URLs.
-        When redirection occurs, a special type of file (*.redirect) is created pointing to the new URL, so that the returned response
-        can have final URL set correctly.
-        
-        https://pypi.python.org/pypi/pyxattr/0.5.2 - module for Extended File Attributes (might be needed)
+    def handle(self, req):
+        attempt = 0
+        while True:
+            try:
+                attempt += 1
+                _req = deepcopy(req)                    # we may need original 'req' again in the future, thus copying
+                return self.next.handle(_req)
+            except Exception, e:
+                delay = self.test(e, attempt)
+                if not delay: raise
+                delay *= mnoise(1.1)
+                self.log.warning("RetryCustom, attempt #%d, trying again after %d seconds... Caught %s" % (attempt, delay, e))
+                time.sleep(delay)
+        return self.next.handle(req)
+
+class UserAgent(WebHandler):
+    def __init__(self, agent = None, change = None):
+        """agent: predefined User-Agent (string) to be used; or None to pick User-Agent randomly from a list of most common ones.
+           change: time (in minutes) how often UA should be randomly changed; or None if no changes should be done.
         """
-        DEFAULT_PATH = ".webcache/"            # default folder where cached pages are stored (will be created if doesn't exist)
-        STATE_FILE   = ".state.json"
+        if agent:
+            self.agent = agent
+        else:
+            self.agent = random.choice(common_user_agents)
+        self.change = change * 60 if change else None                 # convert minutes to seconds               
+        self.lastChange = now()
         
-        def __init__(self, path = DEFAULT_PATH, refresh = 1.0, retain = 30):
-            """refresh: how often pages in cache should be refreshed, in days; default: 1 day
-               retain: for how long pages should be kept in cache even after refresh period (for safety); default: 30 days; 
-                       not less than 'refresh' (increased up to 'refresh' if necessary)
-            """
-            if not isstring(path): path = self.DEFAULT_PATH
-            if path[-1] != '/': path += '/' 
-            if not os.path.exists(path):
-                os.makedirs(path)
-            self.path = path
-            
-            if not refresh: refresh = 1.0
-            self.refresh = refresh * 24*60*60                       # refresh copies after this time, in seconds
-            self.retain = max(retain, refresh) * 24*60*60           # keep copies in cache for this long, in seconds
-            self.clean = self.refresh / 10.0                        # how often to clean the cache: on every startup + 50 times over 'refresh' period
-            self.clean = max(self.clean, 60*60)                     # ...but not more often than every hour
-            
-            self.state = JsonDict(path + self.STATE_FILE, indent = 4)
-            self.state.setdefault('lastClean')
+    def handle(self, req):
+        req.add_header('User-Agent', self.agent)
+        if self.change and (now() - self.lastChange > self.change):
+            self.agent = random.choice(common_user_agents)            
+            self.lastChange = now()
+        return self.next.handle(req)
+
+    
+class History(WebHandler):
+    Event = namedtuple('Event', 'req resp')
+    def __init__(self, maxlen = None):
+        "maxlen: must be >= 1, or None (no limit)"
+        self.events = []            # a list of "back" and "forward" events, as (request,response) pairs
+        self.current = 0            # no. of "back" events in self.events (remaining events are "forward")
+        if maxlen and (not isnumber(maxlen) or maxlen < 1):
+            maxlen = 1
+        self.maxlen = maxlen
+    def handle(self, req):
+        _req = deepcopy(req)
+        resp = self.next.handle(req)
+        self.events = self.events[:self.current]                            # we're moving forward, so forget all "forward" events, if present
+        M = self.maxlen
+        if M and len(self.events) >= M:
+            self.events = self.events[-(M-1):] if M > 1 else []             # create space for new event
+        self.events.append(self.Event(_req, deepcopy(resp)))                # must perform deepcopies because req/resp objects are modified down and up the handlers chain
+        self.current = len(self.events)
+        return resp
+    def last(self):
+        "Return last (request,response) if present; otherwise None. Don't move history pointer"
+        if self.current > 0:
+            return self.events[self.current - 1]
+        return None
+    def back(self):
+        "If possible, move history pointer 1 step back and return that response object again; otherwise None"
+        if self.current > 1:
+            self.current -= 1
+            return self.last()
+        return None
+    def forward(self):
+        "If possible, move history pointer 1 step forward and return that response object again; otherwise None"
+        if self.current < len(self.events):
+            self.current += 1
+            return self.last()
+        return None
+    def reset(self):
+        "Clear history entirely"
+        self.events = []
+        self.current = 0
+    
+class Referer(WebHandler):
+    def __init__(self, history):
+        "history: the History handler instance which will be used to get info about last webpage visited"
+        self.history = history
+    def handle(self, req):
+        last = self.history.last()
+        if last:
+            lasturl = last.resp.url or last.req.url       # better to take url from response, but if missing we must use url from request 
+            if lasturl:
+                prefix = os.path.commonprefix([lasturl, req.url])
+                suffix = req.url[len(prefix):-1]
+                if suffix in last.resp.content:                      # suffix - simple heuristic to check if the new URL really occured in the previous page
+                    req.add_header('Referer', lasturl) 
+        return self.next.handle(req)
+
+class Cache(WebHandler):
+    """Web caching: enables repeated access to the same www page without its reloading.
+    Cache is located on disk, in a folder given as parameter; pages stored in separate files named after their URLs.
+    When redirection occurs, a special type of file (*.redirect) is created pointing to the new URL, so that the returned response
+    can have final URL set correctly.
+    
+    https://pypi.python.org/pypi/pyxattr/0.5.2 - module for Extended File Attributes (might be needed)
+    """
+    DEFAULT_PATH = ".webcache/"            # default folder where cached pages are stored (will be created if doesn't exist)
+    STATE_FILE   = ".state.json"
+    
+    def __init__(self, path = DEFAULT_PATH, refresh = 1.0, retain = 30):
+        """refresh: how often pages in cache should be refreshed, in days; default: 1 day
+           retain: for how long pages should be kept in cache even after refresh period (for safety); default: 30 days; 
+                   not less than 'refresh' (increased up to 'refresh' if necessary)
+        """
+        if not isstring(path): path = self.DEFAULT_PATH
+        if path[-1] != '/': path += '/' 
+        if not os.path.exists(path):
+            os.makedirs(path)
+        self.path = path
         
-        def _clean_cache(self):
-            if self.state['lastClean'] and (now() - self.state['lastClean']) < self.clean: return
-            self.state['lastClean'] = now()
-            self.state.sync()
-            self.log.warn("Cache, cleaning of the cache started in a separate thread...")
-            
-            if islinux():                                           # on Linux, use faster shell command (find) to find and remove old files, in one step
-                retain = self.retain / (24*60*60) + 1               # retension time in days, for 'find' command
-                subprocess.call("find '%s' -maxdepth 1 -type f -mtime +%d -exec rm '{}' \;" % (self.path, retain), shell=True)
-            else:
-                MAX_CLEAN = 10000                                   # for performance reasons, if there are many files in cache check only a random subset of MAX_CLEAN ones for removal
-                _now = now()
-                files = os.listdir(self.path)
-                self.log.info("Cache, cleaning, got file list...")
-                if len(files) > MAX_CLEAN: files = random.sample(files, MAX_CLEAN)
-                for f in files:
-                    f = self.path + f
-                    created = os.path.getmtime(f)
-                    if (_now - created) > self.retain:
-                        os.remove(f)
-            self.log.info("Cache, cleaning completed.")
+        if not refresh: refresh = 1.0
+        self.refresh = refresh * 24*60*60                       # refresh copies after this time, in seconds
+        self.retain = max(retain, refresh) * 24*60*60           # keep copies in cache for this long, in seconds
+        self.clean = self.refresh / 10.0                        # how often to clean the cache: on every startup + 50 times over 'refresh' period
+        self.clean = max(self.clean, 60*60)                     # ...but not more often than every hour
         
-        def _url2file_old(self, url, ext = "html"):  
-            # Deprecated
-            safeurl = url.replace('/', '\\')
-            filename = safeurl + " " + str(hash(url))
-            return self.path + filename + "." + ext
+        self.state = JsonDict(path + self.STATE_FILE, indent = 4)
+        self.state.setdefault('lastClean')
+    
+    def _clean_cache(self):
+        if self.state['lastClean'] and (now() - self.state['lastClean']) < self.clean: return
+        self.state['lastClean'] = now()
+        self.state.sync()
+        self.log.warn("Cache, cleaning of the cache started in a separate thread...")
         
-        def _url2file(self, url, ext = "html", pat = re.compile(r"""[/"'!?\\&=:]"""), maxlen = 60):
-            "Encode URL to obtain a correct file name, preceeded by cache path"
-            safeurl = pat.sub('_', url.replace('://', '_'))[:maxlen]
-            filename = safeurl + "_" + str(hash(url))
-            return self.path + filename + "." + ext
-        
-        def _cachedFile(self, url, ext = "html"):
-            "if possible, return cached copy and its file modification time, otherwise (None,None)"
-            filename = self._url2file(url, ext)
+        if islinux():                                           # on Linux, use faster shell command (find) to find and remove old files, in one step
+            retain = self.retain / (24*60*60) + 1               # retension time in days, for 'find' command
+            subprocess.call("find '%s' -maxdepth 1 -type f -mtime +%d -exec rm '{}' \;" % (self.path, retain), shell=True)
+        else:
+            MAX_CLEAN = 10000                                   # for performance reasons, if there are many files in cache check only a random subset of MAX_CLEAN ones for removal
+            _now = now()
+            files = os.listdir(self.path)
+            self.log.info("Cache, cleaning, got file list...")
+            if len(files) > MAX_CLEAN: files = random.sample(files, MAX_CLEAN)
+            for f in files:
+                f = self.path + f
+                created = os.path.getmtime(f)
+                if (_now - created) > self.retain:
+                    os.remove(f)
+        self.log.info("Cache, cleaning completed.")
+    
+    def _url2file_old(self, url, ext = "html"):  
+        # Deprecated
+        safeurl = url.replace('/', '\\')
+        filename = safeurl + " " + str(hash(url))
+        return self.path + filename + "." + ext
+    
+    def _url2file(self, url, ext = "html", pat = re.compile(r"""[/"'!?\\&=:]"""), maxlen = 60):
+        "Encode URL to obtain a correct file name, preceeded by cache path"
+        safeurl = pat.sub('_', url.replace('://', '_'))[:maxlen]
+        filename = safeurl + "_" + str(hash(url))
+        return self.path + filename + "." + ext
+    
+    def _cachedFile(self, url, ext = "html"):
+        "if possible, return cached copy and its file modification time, otherwise (None,None)"
+        filename = self._url2file(url, ext)
+        if not os.path.exists(filename):
+            filename = self._url2file_old(url, ext)
             if not os.path.exists(filename):
-                filename = self._url2file_old(url, ext)
-                if not os.path.exists(filename):
-                    return None, None
+                return None, None
 
-            created = os.path.getmtime(filename)
-            if now() - created > self.refresh: return None, None        # we have a copy, but time to refresh (don't delete instantly for safety, if web access fails)
-            with open(filename) as f:
-                time = util.filedatetime(filename)
-                return f.read(), time
-            
+        created = os.path.getmtime(filename)
+        if now() - created > self.refresh: return None, None        # we have a copy, but time to refresh (don't delete instantly for safety, if web access fails)
+        with open(filename) as f:
+            time = util.filedatetime(filename)
+            return f.read(), time
         
-        def _cachedResponse(self, req):
-            # is there a .redirect file?
-            url = req.url
-            content, time1 = self._cachedFile(url, 'redirect')
-            if content: url = content                                       # .redirect file contains just the target URL in plain text form
-            
-            # now check the actual .html file
-            content, time2 = self._cachedFile(url)
-            if content == None: return None
-            
-            # found in cache; return a Response() object
-            resp = Response()
-            resp.content = content
-            resp.fromCache = True
-            resp.url = url
-            resp.time = min(time1 or time2, time2 or time1)
-            self.log.info("Cache, loaded from cache: " + req.url + (" -> " + url if url != req.url else ""))
-            return resp
+    
+    def _cachedResponse(self, req):
+        # is there a .redirect file?
+        url = req.url
+        content, time1 = self._cachedFile(url, 'redirect')
+        if content: url = content                                       # .redirect file contains just the target URL in plain text form
         
-        def handle(self, req):
-            # page in cache?
-            resp = self._cachedResponse(req)
-            if resp != None: return resp
-            
-            # download page and save in cache under final URL 
-            resp = self.next.handle(req)
-            url = resp.url
-            filename = self._url2file(url)
+        # now check the actual .html file
+        content, time2 = self._cachedFile(url)
+        if content == None: return None
+        
+        # found in cache; return a Response() object
+        resp = Response()
+        resp.content = content
+        resp.fromCache = True
+        resp.url = url
+        resp.time = min(time1 or time2, time2 or time1)
+        self.log.info("Cache, loaded from cache: " + req.url + (" -> " + url if url != req.url else ""))
+        return resp
+    
+    def handle(self, req):
+        # page in cache?
+        resp = self._cachedResponse(req)
+        if resp != None: return resp
+        
+        # download page and save in cache under final URL 
+        resp = self.next.handle(req)
+        url = resp.url
+        filename = self._url2file(url)
+        with open(filename, 'wt') as f:
+            f.write(resp.content)
+        
+        # redirection occured? create a .redirect file under original URL to indicate this fact
+        if url != req.url:
+            filename = self._url2file(req.url, 'redirect')
             with open(filename, 'wt') as f:
-                f.write(resp.content)
+                f.write(url)                                                    # .redirect file contains only the target URL in plain text form
+        
+        self.log.info("Cache, downloaded from web: " + req.url + (" -> " + url if url != req.url else ""))
+        
+        lastClean = self.state['lastClean']
+        if not lastClean or (now() - lastClean) > self.clean:                   # remove old files from the cache before proceeding
+            threading.Thread(target = self._clean_cache).start()
+            # we'll not join this thread, but application will not terminate until this thread ends (!); set .deamon=True otherwise
             
-            # redirection occured? create a .redirect file under original URL to indicate this fact
-            if url != req.url:
-                filename = self._url2file(req.url, 'redirect')
-                with open(filename, 'wt') as f:
-                    f.write(url)                                                    # .redirect file contains only the target URL in plain text form
-            
-            self.log.info("Cache, downloaded from web: " + req.url + (" -> " + url if url != req.url else ""))
-            
-            lastClean = self.state['lastClean']
-            if not lastClean or (now() - lastClean) > self.clean:                   # remove old files from the cache before proceeding
-                threading.Thread(target = self._clean_cache).start()
-                # we'll not join this thread, but application will not terminate until this thread ends (!); set .deamon=True otherwise
-                
-            return resp
+        return resp
 
+class CustomTransform(WebHandler):
+    "Base class for any handler that performs simple 1-1 transformation of either the request or/and the response object."
+    
+    def handle(self, req):
+        req = self.preprocess(req)
+        resp = self.next.handle(req)
+        resp = self.postprocess(resp)
+        return resp
+    
+    def preprocess(self, req):
+        "Override in subclasses"
+        return req
+    
+    def postprocess(self, resp):
+        "Override in subclasses"
+        return resp
+        
+
+class handlers(object):
+    "Legacy."
+    # TODO: remove!
+    StandardClient = StandardClient
+    FixURL = FixURL
+    Delay = Delay
+    Timeout = Timeout
+    RetryOnError = RetryOnError
+    RetryOnTimeout = RetryOnTimeout
+    RetryCustom = RetryCustom
+    UserAgent = UserAgent
+    History = History
+    Referer = Referer
+    Cache = Cache
+    
 
 ##########################################################################################################################################
 ###
@@ -705,7 +740,7 @@ class WebClient(object):
         return deepcopy(self)
 
     def setCache(self, path, refresh = None, retain = None):
-        "Default retain period = 1 year. 'refresh' can hold a pair: (refresh, retain), than 'retain' is not used."
+        "Default retain period = 1 year. 'refresh' can hold a pair: (refresh, retain), then 'retain' is not used."
         if islist(refresh) and len(refresh) >= 2:
             refresh, retain = refresh[:2]
         if not retain: retain = refresh
@@ -726,9 +761,11 @@ class WebClient(object):
         "Add handler at the end of _customHandlers, as the inner-most handler that will directly connect to the actual client (StandardClient)."
         self._customHandlers.append(handler)
         self._rebuild()
+        return self                                         # chaining the calls is possible: return client.addHandler(...).addHandler(...)
     def setCustomHandlers(self, customHandlers):
         self._customHandlers = customHandlers
         self._rebuild()
+        return self
         
     def _rebuild(self):
         "Rearrange handlers into a chain once again."
