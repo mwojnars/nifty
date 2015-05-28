@@ -702,7 +702,7 @@ class WebClient(object):
         self.url_now = None                 # URL being processed now (started but not finished); for debugging purposes, when exception occurs inside open()
 
     def copy(self):
-        return self
+        return deepcopy(self)
 
     def setCache(self, path, refresh = None, retain = None):
         "Default retain period = 1 year. 'refresh' can hold a pair: (refresh, retain), than 'retain' is not used."
@@ -722,9 +722,12 @@ class WebClient(object):
         for h in self.handlers.list():
             h.log = self.logger
             
+    def addHandler(self, handler):
+        "Add handler at the end of _customHandlers, as the inner-most handler that will directly connect to the actual client (StandardClient)."
+        self._customHandlers.append(handler)
+        self._rebuild()
     def setCustomHandlers(self, customHandlers):
-        if customHandlers:
-            self._customHandlers = customHandlers
+        self._customHandlers = customHandlers
         self._rebuild()
         
     def _rebuild(self):
