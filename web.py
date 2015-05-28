@@ -28,11 +28,11 @@ from socket import timeout as Timeout
 #from lxml.html.clean import Cleaner        -- might be good for HTML sanitization (no scritps, styles, frames, ...), but not for general HTML tag filering 
 
 if __name__ != "__main__":
-    from .util import islinux, isint, islist, isnumber, isstring, JsonDict, mnoise, unique, classname, noLogger, defaultLogger
+    from .util import islinux, isint, islist, isnumber, isstring, JsonDict, mnoise, unique, classname, noLogger, defaultLogger, Object
     from .text import regex, xbasestring
     from . import util
 else:
-    from nifty.util import islinux, isint, islist, isnumber, isstring, JsonDict, mnoise, unique, classname, noLogger, defaultLogger
+    from nifty.util import islinux, isint, islist, isnumber, isstring, JsonDict, mnoise, unique, classname, noLogger, defaultLogger, Object
     from nifty.text import regex, xbasestring
     from nifty import util
     
@@ -282,7 +282,7 @@ class Response():
             self.content = readsocket(self.resp)        # the socket is closed afterwards, by readsocket()
         return self.content
             
-class WebHandler(object):
+class WebHandler(Object):
     """ Base class for handlers of web requests & responses, which handle different atomic aspects of web access.
         Handlers can be chained together to provide flexible and configurable behavior when accessing the web.
         The concept is similar to urllib2's BaseHandler and OpenerDirector, only done much better, 
