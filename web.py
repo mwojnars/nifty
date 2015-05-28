@@ -759,10 +759,13 @@ class WebClient(object):
             
     def addHandler(self, handler):
         "Add handler at the end of _customHandlers, as the inner-most handler that will directly connect to the actual client (StandardClient)."
-        self._customHandlers.append(handler)
+        if self._customHandlers:
+            self._customHandlers.append(handler)
+        else:
+            self._customHandlers = [handler]
         self._rebuild()
         return self                                         # chaining the calls is possible: return client.addHandler(...).addHandler(...)
-    def setCustomHandlers(self, customHandlers):
+    def setCustomHandlers(self, customHandlers = []):
         self._customHandlers = customHandlers
         self._rebuild()
         return self
