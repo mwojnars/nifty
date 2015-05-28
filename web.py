@@ -294,6 +294,8 @@ class WebHandler(object):
     enabled = True 
     log = noLogger                      # logger to be used by handlers for printing messages and errors
     
+    __shared__ = 'log'
+    
     def __init__(self, nextHandler = None):
         self.next = nextHandler
         self.enabled = True

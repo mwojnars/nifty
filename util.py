@@ -13,7 +13,7 @@ You should have received a copy of the GNU General Public License along with Nif
 '''
 
 from __future__ import absolute_import
-import __builtin__, os, sys, glob, types as _types, re, numbers, json, time, datetime, calendar
+import __builtin__, os, sys, glob, types as _types, copy, re, numbers, json, time, datetime, calendar
 import logging, random, math, collections, unicodedata, heapq, threading, inspect, hashlib
 from StringIO import StringIO
 
@@ -508,6 +508,7 @@ class __Object__(__Labelled__):
     def __init__(cls, *args): #@NoSelf
         super(__Object__, cls).__init__(cls, *args)
         cls.label('__transient__')                  # declare '__transient__' as a label and set up the list of labelled attributes, cls.__transient__
+        cls.label('__shared__')                     # declare '__shared__' as a label and set up the list of labelled attributes, cls.__shared__
 
 
 class Object(object):
@@ -538,7 +539,8 @@ class Object(object):
          conversions and inheritance, like __transient__ is.
     """
     __metaclass__ = __Object__
-    __transient__ = []                      # list of names of attributes to be excluded from serialization 
+    __transient__ = []                      # list of names of attributes to be excluded from serialization and (deep-)copying
+    __shared__    = []                      # list of names of attributes that should be shallow-copied (shared between copies) in deepcopy
     
     def __init__(self, __dict__ = {}, **kwargs):                                        #@ReservedAssignment
         self.__dict__.update(__dict__)
@@ -560,6 +562,20 @@ class Object(object):
         return self.__dict__
     def __setstate__(self, state):
         self.__dict__ = state
+
+    def __deepcopy__(self, memo):
+        "Custom implementation of deepcopy() that honours the __shared__ specifier."
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result                         # to avoid excess copying in case the object itself is referenced from its member
+        deepcopy = copy.deepcopy
+        if self.__shared__:
+            for k, v in self.__getstate__.iteritems():
+                setattr(result, k, v if k in self.__shared__ else deepcopy(v, memo))
+        else:
+            for k, v in self.__getstate__.iteritems():
+                setattr(result, k, deepcopy(v, memo))
+        return result
     
 
 class NoneObject(Object):
