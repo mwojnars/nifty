@@ -704,8 +704,9 @@ class WebClient(Object):
     """
     __shared__  = 'logger'
     
-    # atomic handlers that comprise the 'handlers' chain, in the same order 
-    _history = _cache = _useragent = _referer = _timeout = _retryCustom = _retryOnError = _retryOnTimeout = _delay = _customHandlers = _client = None
+    # atomic handlers that comprise the 'handlers' chain, in the same order;
+    # _head and _tail are lists of custom handlers that go at the beginning or at the end of all handlers list
+    _history = _head = _cache = _useragent = _referer = _timeout = _retryCustom = _retryOnError = _retryOnTimeout = _delay = _tail = _client = None
     _tor = False            # self._tor is a read-only attr., changing it does NOT influence whether Tor is used or not, this is decided in __init__ and can't be changed
 
     handlers = None         # head (only!) of the chain of handlers
@@ -713,7 +714,7 @@ class WebClient(Object):
     
     
     def __init__(self, timeout = None, identity = True, referer = True, cache = None, cacheRefresh = None, tor = False, history = 5, delay = None, 
-                 retryOnTimeout = None, retryOnError = None, retryCustom = None, customHandlers = [], logger = None):
+                 retryOnTimeout = None, retryOnError = None, retryCustom = None, head = [], tail = [], logger = None):
         """
         :param identity: how to set User-Agent. Can be either: 
             None/False (no custom identity); 
@@ -740,8 +741,9 @@ class WebClient(Object):
         if retryOnError:   self._retryOnError = H.RetryOnError(retryOnError)
         if retryOnTimeout: self._retryOnTimeout = H.RetryOnTimeout(retryOnTimeout)
         if retryCustom:    self.setRetryCustom(retryCustom)
-        if customHandlers: self._customHandlers = customHandlers if islist(customHandlers) else [customHandlers]
         if tor:         self._tor = True; urllib2hand.append(urllib2.ProxyHandler({'http': '127.0.0.1:8118'}))
+        self._head = head if islist(head) else [head]
+        self._tail = tail if islist(tail) else [tail]
         self._client = H.StandardClient(urllib2hand)
         self._rebuild()                                             # connect all the handlers into a chain
         
@@ -768,23 +770,24 @@ class WebClient(Object):
         for h in self.handlers.list():
             h.log = self.logger
             
-    def addHandler(self, handler):
-        "Add handler at the end of _customHandlers, as the inner-most handler that will directly connect to the actual client (StandardClient)."
-        if self._customHandlers:
-            self._customHandlers.append(handler)
+    def addHandler(self, handler, location = 'head'):
+        """Add custom handler, either at the beginning of _head if location='head' (default); or at the end of _tail, 
+        as the deepest handler that will directly connect to the actual client (StandardClient), if location='tail'."""
+        if location == 'head':
+            self._head = [handler] + self._head
         else:
-            self._customHandlers = [handler]
+            self._tail.append(handler)
         self._rebuild()
         return self                                         # chaining the calls is possible: return client.addHandler(...).addHandler(...)
-    def setCustomHandlers(self, customHandlers = []):
-        self._customHandlers = customHandlers
-        self._rebuild()
-        return self
+#     def setTail(self, tail = []):
+#         self._tail = tail
+#         self._rebuild()
+#         return self
         
     def _rebuild(self):
         "Rearrange handlers into a chain once again."
-        self.handlers = WebHandler.chain([self._history, self._cache, self._useragent, self._referer, self._timeout, 
-                                          self._retryCustom, self._retryOnError, self._retryOnTimeout, self._delay, self._customHandlers, self._client])
+        self.handlers = WebHandler.chain([self._history, self._head, self._cache, self._useragent, self._referer, self._timeout, 
+                                          self._retryCustom, self._retryOnError, self._retryOnTimeout, self._delay, self._tail, self._client])
         self.setLogger(self.logger)
     
     def response(self, url = None, data = None, headers = {}):
