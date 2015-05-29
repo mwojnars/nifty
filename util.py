@@ -520,7 +520,7 @@ class Object(object):
        
        Additionally, Object implements:
        - equality '==' operator __eq__ that performs deep comparison by comparing __dict__ dictionaries, not only object IDs.
-       - __str__ that prints the class name and its __dict__, with full recursion like for nested dict's (__repr__ == __str__).
+       - __str__ that prints the class name and its __dict__, with full recursion like for nested dict's (__repr__ == __str__) - if __verbose__=True.
        - __getstate__ that understands the __transient__ list of attributes and excludes them from serialization.
        - copy() and deepcopy() also honor __transient__, since they utilize __getstate__ unless custom __copy__/__deepcopy__ 
          is implemented in a subclass.
@@ -541,16 +541,18 @@ class Object(object):
     __metaclass__ = __Object__
     __transient__ = []                      # list of names of attributes to be excluded from serialization and (deep-)copying
     __shared__    = []                      # list of names of attributes that should be shallow-copied (shared between copies) in deepcopy
+#     __verbose__   = True                    # in __str__, shall we print recursively all properties of the object? if False, standard __str__ is used
     
     def __init__(self, __dict__ = {}, **kwargs):                                        #@ReservedAssignment
         self.__dict__.update(__dict__)
         self.__dict__.update(kwargs)
     def __eq__(self, other): 
         return self.__dict__ == other.__dict__
-    def __str__(self):
-        items = ["%s = %s" % (k,repr(v)) for k,v in self.__dict__.iteritems()]
-        return "%s(%s)" % (self.__class__.__name__, ', '.join(items))        #str(self.__dict__)
-    __repr__ = __str__
+#     def __str__(self):
+#         if not self.__verbose__: return object.__str__(self)
+#         items = ["%s = %s" % (k,repr(v)) for k,v in self.__dict__.iteritems()]
+#         return "%s(%s)" % (self.__class__.__name__, ', '.join(items))        #str(self.__dict__)
+#     __repr__ = __str__
     
     def __getstate__(self):
         """Representation of this object for serialization. Returns a copy of __dict__ with transient attributes removed, 

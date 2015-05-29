@@ -693,7 +693,16 @@ class handlers(object):
 ###  WEB CLIENT
 ###
 
-class WebClient(object):
+class WebClient(Object):
+    """
+    >>> w1 = WebClient()
+    >>> w2 = w1.copy()
+    >>> id(w1.logger) == id(w2.logger)
+    True
+    >>> id(w1.handlers) <> id(w2.handlers) and id(w1.handlers.log) == id(w2.handlers.log)
+    True
+    """
+    __shared__  = 'logger'
     
     # atomic handlers that comprise the 'handlers' chain, in the same order 
     _history = _cache = _useragent = _referer = _timeout = _retryCustom = _retryOnError = _retryOnTimeout = _delay = _customHandlers = _client = None
