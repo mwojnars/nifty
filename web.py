@@ -740,7 +740,7 @@ class WebClient(Object):
         if retryOnError:   self._retryOnError = H.RetryOnError(retryOnError)
         if retryOnTimeout: self._retryOnTimeout = H.RetryOnTimeout(retryOnTimeout)
         if retryCustom:    self.setRetryCustom(retryCustom)
-        if customHandlers: self._customHandlers = customHandlers
+        if customHandlers: self._customHandlers = customHandlers if islist(customHandlers) else [customHandlers]
         if tor:         self._tor = True; urllib2hand.append(urllib2.ProxyHandler({'http': '127.0.0.1:8118'}))
         self._client = H.StandardClient(urllib2hand)
         self._rebuild()                                             # connect all the handlers into a chain
