@@ -391,7 +391,7 @@ def levenshtein(a, b, casecost = 1, spacecost = 1, totals = False):
         n,m = m,n
         reorder = True
     
-    charcost = lambda c: spacecost if c == ' ' else 1
+    charcost = lambda c: spacecost if c.isspace() else 1
     isint = util.isint(casecost) and util.isint(spacecost)
     typecode = 'l' if isint else 'd'
     zero = array(typecode, [0])
@@ -415,12 +415,12 @@ def levenshtein(a, b, casecost = 1, spacecost = 1, totals = False):
             previous = current
             current = array(typecode, [previous[0] + cur_bcost]) + zeron
             for j in range(1,n+1):              # loop over characters of 'a'
-                add = previous[j] + cur_bcost
-                delete = current[j-1] + acost[j-1]
+                add = previous[j] + cur_bcost                           # cost of adding extra character in 'b'
+                delete = current[j-1] + acost[j-1]                      # cost of deleting extra character from 'a'
                 change = previous[j-1]
                 if a[j-1] != cur_b:
-                    if alow[j-1] == blow[i-1]: change += casecost
-                    else: change += max(cur_bcost, acost[j-1]) #1
+                    if alow[j-1] == blow[i-1]: change += casecost       # only the case is different?
+                    else: change += max(cur_bcost, acost[j-1])
                 current[j] = min(add, delete, change)
     
     except UnicodeWarning:    
@@ -441,7 +441,8 @@ def levendist(a, b, casecost = 0.5, spacecost = 0.5):
     if a == b: return 0.0
     if not a or not b: return 1.0
     dist, cost_a, cost_b = levenshtein(a, b, casecost, spacecost, totals = True)
-    maxcost = max(cost_a, cost_b)
+    maxcost = max(len(a), len(b)) #max(cost_a, cost_b)
+    #print dist, maxcost
     assert 0 <= dist <= maxcost or not (0 <= casecost <= 1) or not (0 <= spacecost <= 1)        # from properties of Levenshtein algorithm
     return dist / float(maxcost)
 
@@ -450,6 +451,8 @@ def levenscore(a, b, casecost = 0.5, spacecost = 0.5):
     Warning: score value can get out of [0,1] range if casecost or spacecost is outside this range!
     >>> levenscore("Alama", "ALA")
     0.4
+    >>> levenscore("Control of Insect Ve", "Osamu Kanamori: Phil")
+    0.025000000000000022
     """
     return 1.0 - levendist(a, b, casecost, spacecost)
 

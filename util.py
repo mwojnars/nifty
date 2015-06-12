@@ -213,7 +213,8 @@ def flatten(*seq):
     return result
 
 def list2str(l, sep = " ", f = str):
-    "Convert all items of list 'l' into strings of type 'f' (str) and concatenate into one string separated by 'sep'. 'f' can also be any mapping function."
+    "Convert all items of list 'l' into strings by mapping them through function 'f' and joining by separator 'sep'. 'f' can also be a format string."
+    if isstring(f): f = lambda x: f % x
     return sep.join(map(f, l))
 
 def str2list(s, sep = None):
