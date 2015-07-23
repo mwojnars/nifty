@@ -56,6 +56,29 @@ except:
 
 ########################################################################################################################################################
 ###
+###  UTILITIES
+###
+
+class ParserError(Exception):
+    
+    MAXLEN = 20
+    pos  = None           # (start,end) position where the error occured, or None
+    text = None           # initial MAXLEN characters of the input fragment that caused the error
+    node = None
+
+    def __init__(self, msg, node = None):
+        if node:
+            node, self.pos, self.text = node, node.pos, node.text(self.MAXLEN)
+            if self.pos:
+                prefix = node.fulltext[:self.pos[0]]
+                line = prefix.count('\n') + 1
+                column = len(prefix) - prefix.rfind('\n')
+                msg += " at line %s, column %s (%s)" % (line, column, self.text)
+        super(ParserError, self).__init__(msg)
+        
+
+########################################################################################################################################################
+###
 ###  TREE
 ###
 
@@ -90,6 +113,7 @@ class Tree(object):
         self.root = self.rewrite(self.ast)                          # rewrite AST to a tree of Tree.node's
 
     def __str__(self):
+        "For printing of the tree. Walks the tree via node.children, collects info() lines and concatenates them with proper indentation."
         def info(node, depth = 0):
             prefix = '  ' * depth
             if isstring(node): return prefix + node
@@ -146,9 +170,14 @@ class Tree(object):
         def init(self, tree, astnode):
             "Subclasses should override this method instead of __init__, so that standard initialization is still performed beforehand."
             
-        def text(self):
-            "The substring of source text matched by this node. None if this node was derived from other nodes during tree post-processing."
-            return self.fulltext[ self.pos[0] : self.pos[1] ] if self.pos else None
+        def text(self, maxlen = None):
+            """The substring of source text matched by this node, or its leading 'maxlen' characters if maxlen != None. 
+            None if this node was derived from other nodes during tree post-processing."""
+            if not self.pos: return None
+            end = self.pos[1] if maxlen is None else min(self.pos[1], self.pos[0] + maxlen)
+            ret = self.fulltext[ self.pos[0] : end ]
+            if end < self.pos[1]: return ret + "..."
+            return ret
     
         def info(self):
             #d = self.__dict__.copy(); del d['fulltext']
@@ -179,9 +208,16 @@ class Tree(object):
             "Top-down compilation of the tree. By default, returns concatenation of strings compiled by children nodes."
             return ''.join(c.compile() for c in self.children)
 
+    class virtual(node):
+        """A node that's artificially created after the tree is parsed, 
+        having no corresponding AST node nor a position in the source text."""
+        def __init__(self, tree):
+            "No 'astnode' argument, we only keep the tree reference."
+            self.tree = tree
+    
     class static(node):
-        """Static string (or value of another type) that can be inferred already during initialization and then returned in str() and compile(). 
-        By default, the value is made up in __init__ by merging strings from all children."""
+        """Static string (or value of another type) that can be inferred already during parsing (node initialization) and then returned 
+        in str() and compile(). By default, the value is made up in __init__ by merging strings from all children."""
         typecast = str              # type or method that will be applied to the parsed string to convert it to a value of appropriate type
         
         def __init__(self, tree, astnode, string = None):
@@ -202,14 +238,17 @@ class Tree(object):
         def compile(self): return self.value                                                        #@ReservedAssignment
     
     class string(node):
-        """Artificial node created at some intermediate stage of tree post-processing. Represents a static string 
-        without precise location in the source text, typically produced from partial compilation of some other nodes."""
+        """Artificial node created at some intermediate stage of tree post-processing that may or may not correspond
+        to a specific node of the initial AST. Typically produced from partial compilation of some other Tree nodes.
+        """
         value = None
         type  = "(string)"                                                                          #@ReservedAssignment
-        def __init__(self, tree, value):
+        
+        def __init__(self, tree, value, pos = None):
             self.tree = tree
             self.fulltext = tree.text
             self.value = value
+            self.pos = pos
         def info(self):
             return "<%s> %s" % (self.type, escape(self.value))
         
@@ -249,21 +288,39 @@ class WaxeyeTree(Tree):
 
 class ParsimoniousTree(Tree):
 
-    def rewrite(self, parnode):
-        def flat(): return self._rewriteNode(parnode)[-1]       # flattening: return children instead of the node
+    _reduce_anonym_ = False     # shall we reduce anonymous nodes? these are the nodes generated by unnamed expressions, typically groupings (...);
+                                # leaf nodes (static strings) will be removed entirely from the tree, i.e., ignored rather than reduced
+    _reduce_string_ = False     # if a node to be reduce has no children but matched a non-empty part of the text, shall it be replaced with a string node 
+                                # instead of raising an exception? 
+
+    class reduced(Tree.string):
+        "Like Tree.string, but adapted to reducing Parsimonious AST nodes."
+        type = "(reduced)"
+        
+        def __init__(self, tree, astnode):
+            Tree.string.__init__(self, tree, astnode.text, (astnode.start, astnode.end))
+        
+
+    def rewrite(self, astnode):
+        def flat(): return self._rewriteNode(astnode)[-1]       # flattening: return children instead of the node
             
-        name = parnode.expr_name
-        if not name: return flat()                              # flatten nodes without names; static strings (labels) removed entirely
+        name = astnode.expr_name
+        if not name and self._reduce_anonym_: return flat()     # flatten nodes without names; leaf nodes (static strings) removed entirely
         if name in self._ignore_: return []                     # remove nodes listed in _ignore_, together with their subtrees
-        if name in self._reduce_: return flat()                 # flatten nodes listed in _reduce_
+        if name in self._reduce_:                               # flatten nodes listed in _reduce_
+            if astnode.children: return flat()
+            if astnode.start == astnode.end != None: return []
+            if self._reduce_string_: return self.reduced(astnode)
+            raise ParserError("Trying to reduce a node that has no children but consumed a non-empty part of the input at position (%s,%s): %s" % 
+                              (astnode.start, astnode.end, astnode))
         
         # find corresponding inner class of the tree and instantiate (this will recursively rewrite nodes down the tree)
         nodeclass = getattr(self, 'x' + name)
-        return nodeclass(self, parnode)
+        return nodeclass(self, astnode)
     
-    def _rewriteNode(self, parnode):
-        children = flatten(self.rewrite(c) for c in parnode.children)
-        return (parnode.start, parnode.end), parnode.expr_name, children        # pos, type, children
+    def _rewriteNode(self, astnode):
+        children = flatten(self.rewrite(c) for c in astnode.children)
+        return (astnode.start, astnode.end), astnode.expr_name, children        # pos, type, children
     
 
 ########################################################################################################################################################

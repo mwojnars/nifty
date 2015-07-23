@@ -622,7 +622,8 @@ class WordsModelUnderTraining(WordsModel):
 Different languages commonly encountered in web applications:
 - plain: ASCII or Unicode text, with no internal structure, all characters allowed and interpreted as-is
 - HTML - any HTML snippet, with tags (omitted during plain text extraction) and entities (replaced with corresponding characters in plaintext()); must be sanitized before inclusion in HTML page
-- safe-HTML - tags (all or only unsafe ones) were stripped out, but all entities are preserved; can be directly embedded in HTML without decoding/encoding
+- HTML-safe - tags (all or only unsafe ones) were stripped out, but all entities are preserved; can be directly embedded in HTML without decoding/encoding
+- HTML-attr
 - SQL value - any expression that can be safely used, without additional escaping, in SQL query in any place where a value is expected; SQL-escaped value 
 - SQL query
 - Solr query, Solr phrase
@@ -632,14 +633,31 @@ Different languages commonly encountered in web applications:
 - cookie encoded - like "cookie plain", but a special character is introduced to encode other (disallowed) characters
 """
 
+def encode_HTMLattr(text):
+    from xml.sax.saxutils import quoteattr
+    return quoteattr(text)
+
+
 class Text(unicode):
-    """A string (unicode, str) that keeps information about language of the text (HTML, SQL, plain text, ...)
-    that should be used by the client when interpreting the text.  
+    """A string of text (unicode, str) that keeps information about the language (encoding) of the text: 
+    HTML, SQL, URL, plain text, ..., combined Wiki > HTML, URL > HTML, ...
+    Text class should hold only *values* encoded in a given language, not the code that surrounds this value.
+    For example, Text object of "SQL" encoding may store a string value that shall be inserted to DB
+    and thus must be encoded properly for embedding in SQL query, but not the query itself 
+    (this one might undergo, for example, "HTML" encoding if it's going to be displayed on a web page).
     Allows for easy (automatic) conversions - encoding/decoding - between different language representations.
     Conversions can be lossy (!), for example, HTML converted to rawtext loses style information (tags).
     Language of a text is a subjective matter, there are no objective reasons why a given string should be interpreted in this or that language.  
     Can be used for implicit sanitization and output encoding of strings in web applications.
-    This class is an (abstract) base class for a number of subclasses, one for each language."""
+    This class is an (abstract) base class for a number of subclasses, one for each language.
+    
+    >>> Text("$price < $cost").toHTML().toHypertags()
+    u"$$price &lt; $$cost"
+    >>> Text("$$price &lt; $$cost").fromHypertags().fromHTML()
+    "$price < $cost"
+    >>> Text("$price < $cost").encode("HTML > Hypertags")
+    >>> Text("$$price &lt; $$cost", "HTML > Hypertags").decode()
+    """
     
     language = None
     
@@ -671,8 +689,8 @@ class RawText(Text):
 class HTMLText(Text):
     language = 'HTML'
     
-class SafeHTMLText(HTMLText):
-    language = 'safe-HTML'
+class HTMLSafeText(HTMLText):
+    language = 'HTML-safe'
     
     def __init__(self, html, safetags = [], safeattrs = []):
         pass
@@ -683,7 +701,9 @@ class InTagText(Text):
     """String written inside an HTML tag, as a variable value, e.g., <meta name="author" content="Luck & Luke"> 
     - inner quotes should be turned into HTML entities: &quot; (&#34;) and &apos; (&#39;)
     """
-
+    from xml.sax.saxutils import quoteattr
+    
+    
 
 class URLText(Text): 
     # urllib.quote, urllib.unquote
