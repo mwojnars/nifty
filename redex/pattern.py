@@ -687,7 +687,7 @@ class MetaPattern(type):
         raise NotImplemented()
     
 
-class Pattern(object):
+class Redex(object):
     """
     Redex pattern.
     
@@ -1050,6 +1050,8 @@ class Pattern(object):
     def __and__(self, other): return PatternAnd(self, other)        # This overloads "&" operator, not "and" !!! (PAT1 & PAT2) is a more strict version of (PAT1 + PAT2)
     def __or__(self, other):  return PatternOr(self, other)         # This overloads "|" operator, not "or" !!!
     
+
+Pattern = Redex         # alias; TODO: remove (deprecated)
 
 ########################################################################################################################################################
 

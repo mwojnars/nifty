@@ -930,8 +930,8 @@ pathexists = os.path.exists
 normpath = os.path.normpath             # path normalization: convert to shortest string (no trailing slashes! no '.' etc.)
 
 def filesize(name): return os.stat(name).st_size            # file size in bytes
-def filetime(name): return os.stat(name).st_mtime           # file modification time (mtime); can use os.path.getmtime() instead
-def filectime(name): return os.stat(name).st_ctime          # file metadata modification (Unix) or creation (Win) time (ctime); can use os.path.getctime() instead
+def filetime(name): return os.stat(name).st_mtime           # file modification time (mtime); you can use os.path.getmtime() instead
+def filectime(name): return os.stat(name).st_ctime          # file metadata modification (Unix) or creation (Win) time (ctime); you can use os.path.getctime() instead
 
 def filedatetime(name, typ = "m"):
     "Return m-time (modification, default) or c-time (creation or inode change) of the file as a datetime object. 'typ' is either 'm' or 'c'"
@@ -1019,7 +1019,7 @@ def resource(reference, name):
     """Takes the directory part of 'reference' path (usually __file__ of the calling function) and appends 'name'
     (a *relative* file path) to obtain full path to a given resource file, located inside the directory tree 
     of the application source code. Doesn't work in python zip packages. See also pkgutil.get_data()."""
-    folder = os.path.split(reference)[0]
+    folder = os.path.dirname(reference)
     return folder + '/' + name
 
 
