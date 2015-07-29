@@ -3,7 +3,7 @@
 
 from waxeye import Edge, State, FA, WaxeyeParser
 
-class PatternParser (WaxeyeParser):
+class RedexParser (WaxeyeParser):
     start = 0
     eof_check = True
     automata = [FA("document", [State([Edge(12, 1, False)], False),
@@ -204,5 +204,5 @@ class PatternParser (WaxeyeParser):
             State([], True)], FA.NEG)]
 
     def __init__(self):
-        WaxeyeParser.__init__(self, PatternParser.start, PatternParser.eof_check, PatternParser.automata)
+        WaxeyeParser.__init__(self, RedexParser.start, RedexParser.eof_check, RedexParser.automata)
 

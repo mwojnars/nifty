@@ -3,7 +3,7 @@
 # Written in Waxeye language, see http://waxeye.org/manual.html
 # 
 # Compilation, in 'nifty' folder: 
-#   $ ./parsing/waxeye -g python redex/ -p pattern redex/pattern.wx
+#   $ ./parsing/waxeye -g python redex/ -p redex redex/redex.wx
 #
 # This generates a pattern_parser.py file with PatternParser class.
 #

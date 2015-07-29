@@ -483,7 +483,7 @@ else:
     from nifty.web import urljoin, xdoc
     import nifty.parsing.parsing as parsing
 
-import pattern_parser
+import redex_parser
 
 
 ########################################################################################################################################################
@@ -522,7 +522,7 @@ BaseTree = parsing.WaxeyeTree
 
 class Tree(BaseTree):
 
-    parser  = pattern_parser.PatternParser()
+    parser  = redex_parser.RedexParser()
     Context = Context
 
     class node(BaseTree.node):
