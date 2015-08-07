@@ -146,6 +146,19 @@ def html2text(html, sub = '', parser = HTMLParser.HTMLParser()):
     s = parser.unescape(s)                              # turn HTML entities (&amp; &#169; ...) into characters
     return merge_spaces(s)                              # merge multiple spaces, remove newlines and tabs
 
+def html_escape(text):
+    """Escape HTML/XML special characters (& < >) in a string that's to be embedded in a text part of an HTML/XML document.
+    For escaping attribute values use html_attr_escape() - attributes need a different set of special characters to be escaped.
+    """
+    return text.replace('&', '&amp;').replace('>', '&gt;').replace('<', '&lt;')
+
+def html_attr_escape(text):
+    """Escape special characters (& ' ") in a string that's to be used as a (quoted!) attribute value inside an HTML/XML tag.
+    Don't use for un-quoted values, where escaping should be much more extensive!
+    """
+    return text.replace('&', '&amp;').replace('>', '&gt;').replace('<', '&lt;').replace("'", '&#39;').replace('"', '&#34;')
+
+
 #########################################################################################################################################################
 ###
 ###  REGEX-es
@@ -612,6 +625,185 @@ class WordsModelUnderTraining(WordsModel):
         
         return bound(cosine(v1, v2) / scale * longEnough)
 
+
+#########################################################################################################################################################
+###
+###  TEXT class for language control
+###
+
+class Text(unicode):
+    """A string of text (unicode, str) that keeps information about the language (encoding) of the text: 
+    HTML, SQL, URL, plain text, ..., combined HTML/wikitext, HTML/URL, ...
+    Allows for safe, transparent and easy encoding/decoding/converting - to/from/between different languages.
+    With Text, automatic sanitization of strings can be easily implemented, especially in web applications.
+    Encoding/decoding (vertical transformations) is always loss-less. Only conversions (horizontal transformations) between languages can be lossy.
+    
+    Text instances can be manipulated with in a similar way as strings, using all common operators: + * % [].
+    All operations and methods that concatenate or combine Texts, or a Text and a string, check whether the language of both operands 
+    is either the same or None, and propagate the language value to the resulting Text instance.
+    WARNING: when using .join() method remember that you have to call it on a Text instance (!), otherwise the resulting
+    string will be a plain str/unicode object, not a Text, even when joining Text instances!
+    The right way to join a sequence of Text instances is the following:
+        Text(sep).join(...)
+    or, if you want to enforce a specific language and use it as default when the sequence is empty, use:
+        Text(sep, language).join(...)
+    To make a Text instance be treated as a regular string, cast it back to unicode or str, like unicode(text).    
+
+    Example languages:
+    - text - raw plain text, without any encoding nor any special meaning
+    - HTML - rich text expressed in HTML language, a full HTML document; it can't be "decoded", because any decoding would have to be lossy
+             (tags would be removed), however it might be converted to another rich-text language (wiki-text, YAML, ...),
+             possibly with a loss in style information
+    - HTML/text - raw text encoded for inclusion in HTML; contains entities which must be decoded to get 'text' again
+    - HyperML/text - raw text encoded for inclusion in HyperML; contains $* escape strings which must be decoded to get 'text' again
+    - HyperML/HTML/text - raw text encoded for HTML and later escaped for HyperML; you first have to decode HyperML, only then HTML, 
+             only then you will obtain the original string
+    - URL/text - URL-encoded raw text, for inclusion in a URL, typically as a GET parameter
+    - URL - full URL of any form
+    - SQL
+    - text/value - text representation of a value
+    - SQL/value - SQL representation of a value, as an escaped string that can be directly pasted into a query
+
+    The "directory path" notation: ".../.../..." in language naming expresses the concept that when a language is embedded in another language,
+    it's similar to including a file inside a folder: you first have to visit the parent folder (or decode the outer language)
+    in order to access the inner file (the original embedded text). Also, this naming convention expresses the fact that a language
+    embedded in another language forms, in fact, YET ANOTHER language (!) that should have its own name (X/Y), because it has different rules
+    for how a raw string needs to be encoded in order to form a correct representation in this language.
+    For example, JavaScript code embedded in HTML's <script> block is, stricly speaking, no longer a JavaScript code! 
+    That's because the "</script>" substring is no longer allowed to appear inside this code. Thus, the true language
+    of this piece of code is now "HTML/JavaScript", rather than just "JavaScript"! 
+    Such intricacies are very difficult to track when implementing web applications, 
+    where strings in many different languages (HTML/JavaScript/CSS/SQL/URL/...) are being passed from one place to another,
+    with all different types of conversions done along the way. Securing such an application and performing bullet-proof sanitization
+    is close to impossible without convenient tools to automatize the whole process. The Text class is exactly such a tool. 
+    
+    
+    >>> t = Text("<a>this is text</a>", "HTML")
+    >>> (t).language, (t+t).language
+    ('HTML', 'HTML')
+    >>> (t + "ala").language, (t + u"ala").language
+    ('HTML', 'HTML')
+    >>> ((t+" %s") % "ala").language, ((t+" %s") % u"ala").language
+    ('HTML', 'HTML')
+    >>> ("ala " + t).language, (u"ala " + t).language
+    ('HTML', 'HTML')
+    >>> (t + t).language, (t * 3).language, (5 * t).language
+    ('HTML', 'HTML', 'HTML')
+    >>> t + Text('ola', "text")
+    Traceback (most recent call last):
+        ...
+    Exception: Can't add Text instances containing different languages: 'HTML' and 'text'
+    >>> unicode(t).language
+    Traceback (most recent call last):
+        ...
+    AttributeError: 'unicode' object has no attribute 'language'
+    """
+    
+    language = None     # not-empty name of the formal language in which the string is expressed; can be a compound language, like "HTML/text";
+                        # for a raw string, we recommend the name of "text; None = unspecified language that can be combined with any other language 
+    config = None       # the TextConfig object that contains global configuration for this object: list of converters and conversion settings
+
+    def __new__(cls, text, language = None): 
+        """Wrap up a given string in Text object and mark what language it is. We override __new__ instead of __init__
+        because the base class is immutable and overriding __new__ is the only way to modify its initialization.
+        """
+        self = unicode.__new__(cls, text)
+        self.language = language
+        return self
+    
+    def __add__(self, other):
+        if getattr(other, 'language', None) not in (None, self.language):
+            raise Exception("Can't add Text instances containing different languages: '%s' and '%s'" % (self.language, other.language))
+        res = unicode.__add__(self, other)
+        return Text(res, self.language)
+    
+    def __radd__(self, other):
+        if getattr(other, 'language', None) not in (None, self.language):
+            raise Exception("Can't add Text instances containing different languages: '%s' and '%s'" % (other.language, self.language))
+        res = other.__add__(self)
+        return Text(res, self.language)
+    
+    def __mul__(self, count):
+        res = unicode.__mul__(self, count)
+        return Text(res, self.language)
+    __rmul__ = __mul__
+        
+    def __mod__(self, other):
+        res = unicode.__mod__(self, other)
+        return Text(res, self.language)
+    __rmod__ = __mod__
+
+    def __getitem__(self, idx):
+        res = unicode.__getitem__(self, idx)
+        return Text(res, self.language)
+    
+    def __getslice__(self, i, j):
+        res = unicode.__getslice__(self, i, j)
+        return Text(res, self.language)
+
+    def capitalize(self):
+        return Text(unicode.capitalize(self), self.language)
+    def center(self, *a, **kw):
+        return Text(unicode.center(self, *a, **kw), self.language)
+    #def decode(self, *a, **kw):
+    #    return Text(unicode.capitalize(self, *a, **kw), self.language)
+    #def encode(self, *a, **kw):
+    #    return Text(unicode.capitalize(self, *a, **kw), self.language)
+    def expandtabs(self, *a, **kw):
+        return Text(unicode.expandtabs(self, *a, **kw), self.language)
+    def format(self, *a, **kw):
+        return Text(unicode.format(self, *a, **kw), self.language)
+    
+    def join(self, iterable):
+        if islist(iterable): items = iterable
+        else: items = list(iterable)            # we have to materialize the iterable to check language of each item
+        
+        # check that all strings to be joined have the same language
+        language = self.language                # can be None, to allow the items set the language
+        for item in items:
+            lang = getattr(item, 'language', None)
+            if language is None: 
+                language = lang
+            elif lang not in (None, language):
+                raise Exception("Can't add Text instances containing different languages: '%s' and '%s'" % (language, lang))
+        
+        return Text(unicode.join(self, items), language)
+
+    def ljust(self, *a, **kw):
+        return Text(unicode.ljust(self, *a, **kw), self.language)
+    def lower(self, *a, **kw):
+        return Text(unicode.lower(self, *a, **kw), self.language)
+    def lstrip(self, *a, **kw):
+        return Text(unicode.lstrip(self, *a, **kw), self.language)
+    def partition(self, *a, **kw):
+        return tuple(Text(s, self.language) for s in unicode.partition(self, *a, **kw))
+    def replace(self, *a, **kw):
+        return Text(unicode.replace(self, *a, **kw), self.language)
+    def rjust(self, *a, **kw):
+        return Text(unicode.rjust(self, *a, **kw), self.language)
+    def rpartition(self, *a, **kw):
+        return tuple(Text(s, self.language) for s in unicode.rpartition(self, *a, **kw))
+    def rsplit(self, *a, **kw):
+        return [Text(s, self.language) for s in unicode.rsplit(self, *a, **kw)]
+    def rstrip(self, *a, **kw):
+        return Text(unicode.rstrip(self, *a, **kw), self.language)
+    def split(self, *a, **kw):
+        return [Text(s, self.language) for s in unicode.split(self, *a, **kw)]
+    def splitlines(self, *a, **kw):
+        return [Text(s, self.language) for s in unicode.splitlines(self, *a, **kw)]
+    def strip(self, *a, **kw):
+        return Text(unicode.strip(self, *a, **kw), self.language)
+    def swapcase(self, *a, **kw):
+        return Text(unicode.swapcase(self, *a, **kw), self.language)
+    def title(self, *a, **kw):
+        return Text(unicode.title(self, *a, **kw), self.language)
+    def translate(self, *a, **kw):
+        return Text(unicode.translate(self, *a, **kw), self.language)
+    def upper(self, *a, **kw):
+        return Text(unicode.upper(self, *a, **kw), self.language)
+    def zfill(self, *a, **kw):
+        return Text(unicode.zfill(self, *a, **kw), self.language)
+    
 
 #########################################################################################################################################################
 
