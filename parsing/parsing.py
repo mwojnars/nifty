@@ -122,12 +122,14 @@ class Tree(object):
 
     def __str__(self):
         "For printing of the tree. Walks the tree via node.children, collects info() lines and concatenates them with proper indentation."
-        def info(node, depth = 0):
-            prefix = '  ' * depth
-            if isstring(node): return prefix + node
-            return prefix + node.info(), [info(n, depth+1) for n in node.children]
-        lines = info(self.root)
+        lines = self.info(self.root)
         return '\n'.join(flatten(lines))
+
+    @staticmethod
+    def info(node, depth = 0):
+        prefix = '  ' * depth
+        if isstring(node): return prefix + node
+        return prefix + node.info(), [Tree.info(n, depth+1) for n in node.children]
 
     def parse(self, text):
         "Parses raw text (string) into a syntax tree built of custom node classes (self.Tree). Can be overridden in subclasses."
@@ -194,7 +196,7 @@ class Tree(object):
             return "%s%s at position %s matching: %s" % (self.infoName(), ds, self.pos, escape(str(self.text())))
         def infoName(self):
             # override in subclasses to customize info() printout
-            return "<%s>" % self.type
+            return "<%s>" % (self.type or self.__class__.__name__)
         
         def __str__(self): 
             return self.display or ''.join(str(c) for c in self.children)

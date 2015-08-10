@@ -701,9 +701,9 @@ class Text(unicode):
     
     language = None     # not-empty name of the formal language in which the string is expressed; can be a compound language, like "HTML/text";
                         # for a raw string, we recommend the name of "text; None = unspecified language that can be combined with any other language 
-    config = None       # the TextConfig object that contains global configuration for this object: list of converters and conversion settings
+    settings = None     # the TextSettings object that contains global configuration for this object: list of converters and conversion settings (UNUSED for now)
 
-    def __new__(cls, text, language = None): 
+    def __new__(cls, text, language = None, settings = None): 
         """Wrap up a given string in Text object and mark what language it is. We override __new__ instead of __init__
         because the base class is immutable and overriding __new__ is the only way to modify its initialization.
         """
@@ -803,7 +803,12 @@ class Text(unicode):
         return Text(unicode.upper(self, *a, **kw), self.language)
     def zfill(self, *a, **kw):
         return Text(unicode.zfill(self, *a, **kw), self.language)
-    
+
+
+# a shorthand for Text(..., "HTML"); in the future may be converted to a subclass with some additional 
+# HTML-specific functionality or configuration defaults (?)
+def TextHTML(text, settings = None): return Text(text, "HTML", settings)
+
 
 #########################################################################################################################################################
 
