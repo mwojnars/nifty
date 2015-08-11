@@ -192,6 +192,12 @@ def subclasses(cls, include_self=False):
 ###   COLLECTIONS & DATA STRUCTURES
 ###
 
+def printdict(d, sep = ' = ', indent = ' ', end = '\n'):
+    "Human-readable multi-line printout of dictionary key->value items."
+    line = indent + '%s' + sep + '%s' + end
+    text = ''.join(line % item for item in d.iteritems())
+    print text
+
 def unique(seq, order = False):
     "List of elements of 'seq' with duplicates removed. If order=True, preserves original order (from: http://stackoverflow.com/a/480227/1202674)."
     if not seq: return []
@@ -765,6 +771,7 @@ def parseint(s):
 ###
 
 class Timer(object):
+    "Create a Timer object once, than read many times the amount of time that elapsed so far."
     def __init__(self): self.start = time.time()
     def reset(self):     self.start = time.time()
     def elapsed(self): return time.time() - self.start          # time elapsed until now, in seconds, floating-point

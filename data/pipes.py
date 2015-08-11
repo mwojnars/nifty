@@ -4,6 +4,10 @@ Allow construction of complex networks (pipelines) of data processing units, tha
 and process large volumes of data (data streams) efficiently thanks to streamed processing
 (processing one item at a time, instead of a full dataset).
 
+Related topics:
+- Dataflow programming: https://en.wikipedia.org/wiki/Dataflow_programming
+- Flow-based programming: https://en.wikipedia.org/wiki/Flow-based_programming
+
 ---
 This file is part of Nifty python package. Copyright (c) 2009-2014 by Marcin Wojnarski.
 
