@@ -111,21 +111,25 @@ def decode_entities(s, h = HTMLParser.HTMLParser()):
     return h.unescape(s)
 
 def striptags(html, remove = [], allow = [], replace = '', ignorecase = True):
-    """Regex-based stripping of HTML tags. Optional 'remove' is a list of tag names to remove. 
+    r"""Regex-based stripping of HTML tags. Optional 'remove' is a list of tag names to remove. 
     Optional 'allow' is a list of tag names to preserve (remove all others). 
     At most one of remove/allow parameters can be non-empty. If both are empty, all tags are removed.
+    remove/allow are given either as a list of strings or a single string with space-separated tag names.
+    By default, tag names are matched case-insensitive.
+    Watch out: striptags() removes tags only, not elements - body of the tags being removed is preserved!
+    Use stripelem() for simple regex-based removal of arbitrary elements, including their body.
     
-    >>> striptags("  <html><HTML><A><a><a/><a /><img></img><image> <form><script><style><!-- ala --><?xml ?><![CDATA[...]]></body>")        # spaces preserved
+    >>> striptags("<i>one</i> <u>two</u>")
+    'one two'
+    >>> striptags("  <html><HTML><A><a><a/><a /><img></img><image> <form><script><style><!-- ala --><?xml ?><![CDATA[...]]></body>")    # spaces preserved
     '   '
-    >>> striptags("< b></ body>")        # leading spaces inside tags are not allowed
+    >>> striptags("< b></ body>")              # leading spaces inside tags not allowed
     '< b></ body>'
-    >>> striptags("<i>one</i><u>two</u>")
-    'onetwo'
-    >>> html = "<html><A> <a href='http://xyz.com/'>ala ma <i>kota</i></a><a /><img></img><image><form><!-- ala -->"
+    >>> html = r"<html><A> <a href=\n 'http://xyz.com/'>ala ma <i>kota</i></a><a /><img>\n</img><image><form><!-- \n ala -->"
     >>> striptags(html, allow = 'a i u')
-    "<A> <a href='http://xyz.com/'>ala ma <i>kota</i></a><a />"
+    "<A> <a href=\\n 'http://xyz.com/'>ala ma <i>kota</i></a><a />\\n"
     >>> striptags(html, remove = ['i', 'html', 'form', 'img'])
-    "<A> <a href='http://xyz.com/'>ala ma kota</a><a /><image><!-- ala -->"
+    "<A> <a href=\\n 'http://xyz.com/'>ala ma kota</a><a />\\n<image><!-- \\n ala -->"
     >>> striptags("<a href = 'http://xyz.com/?q=3' param=xyz boolean> ala </a>", remove = ['a'])
     ' ala '
     """
@@ -136,8 +140,30 @@ def striptags(html, remove = [], allow = [], replace = '', ignorecase = True):
     else:
         pat = regex.tag
     #print pat
-    text = re.sub(pat, replace, html, flags = re.IGNORECASE if ignorecase else 0)
-    return text
+    return re.sub(pat, replace, html, flags = re.IGNORECASE if ignorecase else 0)
+
+def stripelem(html, remove = [], replace = '', ignorecase = True):
+    r"""Like striptags(), but removes entire elements, including their body: <X>...</X>, not only tags <X> and </X>.
+    Elements are detected using simple regex matching, without actual markup parsing! 
+    This can behave incorrectly in more complex cases: with nested or unclosed elements, HTML comments, script/style elements etc.
+    Self-closing or unclosed elements are NOT removed. By default, tag names are matched case-insensitive.
+    
+    >>> stripelem("<i>one</i> <u>two</u>")
+    ' '
+    >>> stripelem(r"  <html></HTML> outside\n <A>inside\n</a> <a/><a /><img src=''></img><image> <form><!--\nala--><?xml ?><![CDATA[...]]></body>")
+    '   outside\\n  <a/><a /><image> <form><!--\\nala--><?xml ?><![CDATA[...]]></body>'
+    >>> stripelem("< b></ b>")                 # leading spaces inside tags not allowed
+    '< b></ b>'
+    >>> html = r"<A> <a href=\n 'http://xyz.com/'>ala ma <i>kota</i></a> <img src=''>\n</img> <I>iii</I>"
+    >>> stripelem(html, remove = 'a i u')
+    " <img src=''>\\n</img> "
+    >>> stripelem(html, remove = 'i img')
+    "<A> <a href=\\n 'http://xyz.com/'>ala ma </a>  "
+    """
+    pat = regex.tags_pair(remove)
+    flags = re.DOTALL
+    if ignorecase: flags |= re.IGNORECASE
+    return re.sub(pat, replace, html, flags = flags)
 
 def html2text(html, sub = '', parser = HTMLParser.HTMLParser()):
     "Simple regex-based converter. Strips out all HTML tags, decodes HTML entities, merges multiple spaces. No HTML parsing is performed, only regexes."
@@ -190,8 +216,8 @@ class regex(object):
     email_nospam = _B % r"[\w\-\._\+%]+(?:@|\(at\)|\{at\})(?:[\w-]+\.)+[\w]{2,6}"       # recognizes obfuscated emails
 
     # HTML/XML tag detector, from: http://gskinner.com/RegExr/?2rj44
-    # Supports: tags (name in group 1) with arguments (group 2); closing tags (name in group 4); self-closing tags ('/' in group 3); 
-    #           XML-like headers <?...?> (also check group 3); comments <!--...--> (group 5); CDATA sections <![CDATA[...
+    # Detects: all opening tags (name in group 1) with arguments (group 2); closing tags (name in group 4); self-closing tags ('/' in group 3); 
+    #          XML-like headers <?...?> (also check group 3); comments <!--...--> (group 5); CDATA sections <![CDATA[...
     # Does NOT allow for spaces after "<".
     # See HTML5 reference: http://www.w3.org/TR/html-markup/syntax.html#syntax-start-tags
     tag = r"""<(?:([a-zA-Z\?][\w:\-]*)(\s(?:\s*[a-zA-Z][\w:\-]*(?:\s*=(?:\s*"(?:\\"|[^"])*"|\s*'(?:\\'|[^'])*'|[^\s>]+))?)*)?(\s*[\/\?]?)|\/([a-zA-Z][\w:\-]*)\s*|!--((?:[^\-]|-(?!->))*)--|!\[CDATA\[((?:[^\]]|\](?!\]>))*)\]\])>"""
@@ -199,7 +225,9 @@ class regex(object):
 
     @staticmethod
     def tags(names):
-        "Returns a regex pattern matching only the tags with given names, both opening and closing ones; matched tag name is available in 1st (opening) or 4th (closing) group."
+        """Returns a regex pattern matching only the tags with given names, both opening and closing ones. 
+        The matched tag name is available in 1st (opening) or 4th (closing) group.
+        """
         pat = r"""<(?:(%s)(\s(?:\s*[a-zA-Z][\w:\-]*(?:\s*=(?:\s*"(?:\\"|[^"])*"|\s*'(?:\\'|[^'])*'|[^\s>]+))?)*)?(\s*[\/\?]?)|\/(%s)\s*)>"""
         if isstring(names) and ' ' in names: names = names.split()
         if islist(names): names = "|".join(names)
@@ -207,14 +235,34 @@ class regex(object):
 
     @staticmethod
     def tags_except(names, special = True):
-        "Returns a regex pattern matching all tags _except_ the given names. If special=True (default), special tags are included: <!-- --> <? ?> <![CDATA"
+        """Returns a regex pattern matching all tags _except_ the given names. 
+        If special=True (default), special tags are included: <!-- --> <? ?> <![CDATA
+        """
         pat = r"""<(?:(?!%s)([a-zA-Z\?][\w:\-]*)(\s(?:\s*[a-zA-Z][\w:\-]*(?:\s*=(?:\s*"(?:\\"|[^"])*"|\s*'(?:\\'|[^'])*'|[^\s>]+))?)*)?(\s*[\/\?]?)|\/(?!%s)([a-zA-Z][\w:\-]*)\s*"""
         if special: pat += r"|!--((?:[^\-]|-(?!->))*)--|!\[CDATA\[((?:[^\]]|\](?!\]>))*)\]\]"
         pat += r")>"
-        if isstring(names) and ' ' in names: names = names.split()
+        if isstring(names): names = names.split()
         if islist(names): names = "|".join(names)
         names = r"(?:%s)\b" % names              # must check for word boundary (\b) at the end of a tag name, to avoid prefix matching of other tags
         return pat % (names, names)
+
+    @staticmethod
+    def tags_pair(names = None):
+        """Returns a regex pattern matching: (1) an opening tag with a name from 'names', or any name if 'names' is empty/None;
+        followed by (2) any number of characters (the "body"), matched lazy (as few characters as possible); 
+        followed by (3) a closing tag with the same name as the opening tag.
+        The matched tag name is available in the 1st group. Self-closing tags <.../> are NOT matched.
+        """
+        opening = r"""<(%s)(\s(?:\s*[a-zA-Z][\w:\-]*(?:\s*=(?:\s*"(?:\\"|[^"])*"|\s*'(?:\\'|[^'])*'|[^\s>]+))?)*)?\s*>"""
+        closing = r"<\/(\1)\s*>"
+        body = r".*?"                                   # lazy "match all"
+        pat = opening + body + closing
+        
+        if not names: names = r"[a-zA-Z\?][\w:\-]*"     # "any tag name"; for XML matching this regex is too strict, as XML allows for other names, too 
+        else:
+            if isstring(names): names = names.split()
+            if islist(names): names = "|".join(names)
+        return pat % names
 
     @staticmethod
     def isISSN(s): return re.match(regex.issn + '$', s)
