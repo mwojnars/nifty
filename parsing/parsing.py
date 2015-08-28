@@ -317,6 +317,7 @@ class ParsimoniousTree(Tree):
     def rewrite(self, astnode):
         def flat(): return self._rewriteNode(astnode)[-1]       # flattening: return children instead of the node
             
+        if astnode is None: return None
         name = astnode.expr_name
         if not name and self._reduce_anonym_: return flat()     # flatten nodes without names; leaf nodes (static strings) removed entirely
         if name in self._ignore_: return []                     # remove nodes listed in _ignore_, together with their subtrees

@@ -693,7 +693,8 @@ class Text(unicode):
     string will be a plain str/unicode object, not a Text, even when joining Text instances!
     The right way to join a sequence of Text instances is the following:
         Text(sep).join(...)
-    or, if you want to enforce a specific language and use it as default when the sequence is empty, use:
+    - here, the language of resulting Text instance will be derived from the language of sequence items (or None if no item has a language specified); 
+    or, if you want to enforce a specific language and use it as default when the sequence is empty or the items have no language, use:
         Text(sep, language).join(...)
     To make a Text instance be treated as a regular string, cast it back to unicode or str, like unicode(text).    
 
@@ -723,7 +724,7 @@ class Text(unicode):
     Such intricacies are very difficult to track when implementing web applications, 
     where strings in many different languages (HTML/JavaScript/CSS/SQL/URL/...) are being passed from one place to another,
     with all different types of conversions done along the way. Securing such an application and performing bullet-proof sanitization
-    is close to impossible without convenient tools to automatize the whole process. The Text class is exactly such a tool. 
+    is close to impossible without convenient tools to automate the whole process. The Text class is exactly such a tool. 
     
     
     >>> t = Text("<a>this is text</a>", "HTML")
@@ -758,6 +759,9 @@ class Text(unicode):
         self = unicode.__new__(cls, text)
         self.language = language
         return self
+    
+    
+    ### Override all operators & methods to ensure that the 'language' setting is propagated to resulting strings
     
     def __add__(self, other):
         if getattr(other, 'language', None) not in (None, self.language):
