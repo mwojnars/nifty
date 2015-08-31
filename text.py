@@ -681,11 +681,15 @@ class WordsModelUnderTraining(WordsModel):
 ###
 
 class Text(unicode):
-    """A string of text (unicode, str) that keeps information about the language (encoding) of the text: 
-    HTML, SQL, URL, plain text, ..., combined HTML/wikitext, HTML/URL, ...
+    """
+    A string of text (unicode, str) that keeps information about the language (encoding) of the text:
+        HTML, SQL, URL, plain text, ..., 
+    and allows for wrapping of one language in another one: 
+        HTML/mediawiki, HTML/URL, SQL/HTML/raw, ...
     Allows for safe, transparent and easy encoding/decoding/converting - to/from/between different languages.
     With Text, automatic sanitization of strings can be easily implemented, especially in web applications.
-    Encoding/decoding (vertical transformations) is always loss-less. Only conversions (horizontal transformations) between languages can be lossy.
+    Wrapping/unwrapping (vertical transformations, e.g.: raw -> HTML/raw -> mediawiki/HTML/raw) is always loss-less. 
+    Only conversions (horizontal transformations, e.g.: HTML <-> mediawiki) between languages can be lossy.
     
     Text instances can be manipulated with in a similar way as strings, using all common operators: + * % [].
     All operations and methods that concatenate or combine Texts, or a Text and a string, check whether the language of both operands 
@@ -700,18 +704,18 @@ class Text(unicode):
     To make a Text instance be treated as a regular string, cast it back to unicode or str, like unicode(text).    
 
     Example languages:
-    - text - raw plain text, without any encoding nor any special meaning
+    - raw  - raw plain text, without any encoding nor any special meaning
     - HTML - rich text expressed in HTML language, a full HTML document; it can't be "decoded", because any decoding would have to be lossy
              (tags would be removed), however it might be converted to another rich-text language (wiki-text, YAML, ...),
              possibly with a loss in style information
-    - HTML/text - raw text encoded for inclusion in HTML; contains entities which must be decoded to get 'text' again
-    - HyperML/text - raw text encoded for inclusion in HyperML; contains $* escape strings which must be decoded to get 'text' again
-    - HyperML/HTML/text - raw text encoded for HTML and later escaped for HyperML; you first have to decode HyperML, only then HTML, 
+    - HTML/raw - raw text encoded for inclusion in HTML; contains entities which must be decoded to get 'raw' text again
+    - HyperML/raw - raw text encoded for inclusion in HyperML; contains $* escape strings which must be decoded to get 'raw' again
+    - HyperML/HTML/raw - raw text encoded for HTML and later escaped for HyperML; you first have to decode HyperML, only then HTML, 
              only then you will obtain the original string
-    - URL/text - URL-encoded raw text, for inclusion in a URL, typically as a GET parameter
+    - URL/raw - URL-encoded raw text, for inclusion in a URL, typically as a GET parameter
     - URL - full URL of any form
     - SQL
-    - text/value - text representation of a value
+    - value - text representation of a value
     - SQL/value - SQL representation of a value, as an escaped string that can be directly pasted into a query
 
     The "directory path" notation: ".../.../..." in language naming expresses the concept that when a language is embedded in another language,
@@ -727,7 +731,6 @@ class Text(unicode):
     with all different types of conversions done along the way. Securing such an application and performing bullet-proof sanitization
     is close to impossible without convenient tools to automate the whole process. The Text class is exactly such a tool. 
     
-    
     >>> t = Text("<a>this is text</a>", "HTML")
     >>> (t).language, (t+t).language
     ('HTML', 'HTML')
@@ -739,21 +742,27 @@ class Text(unicode):
     ('HTML', 'HTML')
     >>> (t + t).language, (t * 3).language, (5 * t).language
     ('HTML', 'HTML', 'HTML')
-    >>> t + Text('ola', "text")
+    >>> (Text('<h1>Title</h1>', 'HTML') + Text('ala &amp; ola', 'HTML/raw')).language
+    'HTML'
+    >>> Text().join([Text('<h1>Title</h1>', 'HTML'), Text('ala &amp; ola', 'HTML/raw')])
+    u'<h1>Title</h1>ala &amp; ola'
+    >>> Text(' ', 'HTML').join(['<h1>Title</h1>', Text('ala &amp; ola', 'HTML/raw')])
+    u'<h1>Title</h1> ala &amp; ola'
+    >>> t + Text('ola', "raw")
     Traceback (most recent call last):
         ...
-    Exception: Can't add Text instances containing different languages: 'HTML' and 'text'
+    Exception: Can't add Text/string instances containing incompatible languages: 'HTML' and 'raw'
     >>> unicode(t).language
     Traceback (most recent call last):
         ...
     AttributeError: 'unicode' object has no attribute 'language'
     """
     
-    language = None     # non-empty name of the formal language in which the string is expressed; can be a compound language, like "HTML/text";
-                        # for a raw string, we recommend "text" as a name; None = unspecified language that can be combined with any other language 
+    language = None     # non-empty name of the formal language in which the string is expressed; can be a compound language, like "HTML/raw";
+                        # for a raw string, we recommend "raw" as a name; None = unspecified language that can be combined with any other language 
     settings = None     # the TextSettings object that contains global configuration for this object: list of converters and conversion settings (UNUSED for now)
 
-    def __new__(cls, text, language = None, settings = None): 
+    def __new__(cls, text = u'', language = None, settings = None): 
         """Wrap up a given string in Text object and mark what language it is. We override __new__ instead of __init__
         because the base class is immutable and overriding __new__ is the only way to modify its initialization.
         """
@@ -764,17 +773,32 @@ class Text(unicode):
     
     ### Override all operators & methods to ensure that the 'language' setting is propagated to resulting strings
     
+    @staticmethod
+    def combine(lang, text, msg = "Can't add Text/string instances containing incompatible languages: '%s' and '%s'"):
+        lang2 = getattr(text, 'language', None)
+        if None in (lang, lang2): return lang or lang2          # when one of the languages is None, return the other one
+        if lang == lang2: return lang                           # if equal, that's fine
+        
+        # not None and not equal? one of the strings ("outer" language) must be a '/'-terminating prefix of the other ("inner" language)
+        s1 = lang + '/'
+        s2 = lang2 + '/'
+        if s1.startswith(s2): return lang2
+        if s2.startswith(s1): return lang
+        raise Exception(msg % (lang, lang2))
+    
     def __add__(self, other):
-        if getattr(other, 'language', None) not in (None, self.language):
-            raise Exception("Can't add Text instances containing different languages: '%s' and '%s'" % (self.language, other.language))
+        #if getattr(other, 'language', None) not in (None, self.language):
+        #    raise Exception("Can't add Text instances containing incompatible languages: '%s' and '%s'" % (self.language, other.language))
+        language = Text.combine(self.language, other)           # first check if languages are compatible
         res = unicode.__add__(self, other)
-        return Text(res, self.language)
+        return Text(res, language)
     
     def __radd__(self, other):
-        if getattr(other, 'language', None) not in (None, self.language):
-            raise Exception("Can't add Text instances containing different languages: '%s' and '%s'" % (other.language, self.language))
+        #if getattr(other, 'language', None) not in (None, self.language):
+        #    raise Exception("Can't add Text instances containing incompatible languages: '%s' and '%s'" % (other.language, self.language))
+        language = Text.combine(self.language, other)
         res = other.__add__(self)
-        return Text(res, self.language)
+        return Text(res, language)
     
     def __mul__(self, count):
         res = unicode.__mul__(self, count)
@@ -811,15 +835,9 @@ class Text(unicode):
         if islist(iterable): items = iterable
         else: items = list(iterable)            # we have to materialize the iterable to check language of each item
         
-        # check that all strings to be joined have the same language
-        language = self.language                # can be None, to allow the items set the language
-        for item in items:
-            lang = getattr(item, 'language', None)
-            if language is None: 
-                language = lang
-            elif lang not in (None, language):
-                raise Exception("Can't add Text instances containing different languages: '%s' and '%s'" % (language, lang))
-        
+        # check that all strings to be joined have compatible languages; calculate the resulting language;
+        # the initial self.language can be None - this allows the items set the language
+        language = reduce(Text.combine, items, self.language)
         return Text(unicode.join(self, items), language)
 
     def ljust(self, *a, **kw):
