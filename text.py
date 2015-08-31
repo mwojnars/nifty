@@ -684,11 +684,11 @@ class Text(unicode):
     """
     A string of text (unicode, str) that keeps information about the language (encoding) of the text:
         HTML, SQL, URL, plain text, ..., 
-    and allows for wrapping of one language in another one: 
+    and allows for nesting of one language in another (possibly multiple times), which creates a *compound* language: 
         HTML/mediawiki, HTML/URL, SQL/HTML/raw, ...
     Allows for safe, transparent and easy encoding/decoding/converting - to/from/between different languages.
     With Text, automatic sanitization of strings can be easily implemented, especially in web applications.
-    Wrapping/unwrapping (vertical transformations, e.g.: raw -> HTML/raw -> mediawiki/HTML/raw) is always loss-less. 
+    Nesting/unnesting (vertical transformations, e.g.: raw -> HTML/raw -> mediawiki/HTML/raw) is always loss-less. 
     Only conversions (horizontal transformations, e.g.: HTML <-> mediawiki) between languages can be lossy.
     
     Text instances can be manipulated with in a similar way as strings, using all common operators: + * % [].
@@ -708,8 +708,8 @@ class Text(unicode):
     - HTML - rich text expressed in HTML language, a full HTML document; it can't be "decoded", because any decoding would have to be lossy
              (tags would be removed), however it might be converted to another rich-text language (wiki-text, YAML, ...),
              possibly with a loss in style information
-    - HTML/raw - raw text encoded for inclusion in HTML; contains entities which must be decoded to get 'raw' text again
-    - HyperML/raw - raw text encoded for inclusion in HyperML; contains $* escape strings which must be decoded to get 'raw' again
+    - HTML/raw - raw text escaped for inclusion in HTML; contains entities which must be decoded to get 'raw' text again
+    - HyperML/raw - raw text escaped for inclusion in HyperML; contains $* escape strings which must be decoded to get 'raw' again
     - HyperML/HTML/raw - raw text encoded for HTML and later escaped for HyperML; you first have to decode HyperML, only then HTML, 
              only then you will obtain the original string
     - URL/raw - URL-encoded raw text, for inclusion in a URL, typically as a GET parameter
@@ -718,18 +718,19 @@ class Text(unicode):
     - value - text representation of a value
     - SQL/value - SQL representation of a value, as an escaped string that can be directly pasted into a query
 
-    The "directory path" notation: ".../.../..." in language naming expresses the concept that when a language is embedded in another language,
+    The "directory path" notation: ".../.../..." in language naming expresses the concept that when a language is nested in another language,
     it's similar to including a file inside a folder: you first have to visit the parent folder (or decode the outer language)
-    in order to access the inner file (the original embedded text). Also, this naming convention expresses the fact that a language
-    embedded in another language forms, in fact, YET ANOTHER language (!) that should have its own name (X/Y), because it has different rules
+    in order to access the inner file (the original nested text). Also, this naming convention expresses the fact that a language
+    nested in another language forms, in fact, YET ANOTHER language (!) that should have its own name (X/Y), because it has different rules
     for how a raw string needs to be encoded in order to form a correct representation in this language.
     For example, JavaScript code embedded in HTML's <script> block is, stricly speaking, no longer a JavaScript code! 
-    That's because the "</script>" substring is no longer allowed to appear inside this code. Thus, the true language
-    of this piece of code is now "HTML/JavaScript", rather than just "JavaScript"! 
+    That's because the "</script>" substring - which normally is a valid string in JavaScript - is no longer allowed to appear 
+    inside this code. Thus, the true language of this piece of code is "HTML/JavaScript", rather than just "JavaScript"! 
     Such intricacies are very difficult to track when implementing web applications, 
     where strings in many different languages (HTML/JavaScript/CSS/SQL/URL/...) are being passed from one place to another,
     with all different types of conversions done along the way. Securing such an application and performing bullet-proof sanitization
-    is close to impossible without convenient tools to automate the whole process. The Text class is exactly such a tool. 
+    is close to impossible without a tool like the Text class which automatically tracks the exact language of the text
+    and performs automatic conversions whenever necessary. 
     
     >>> t = Text("<a>this is text</a>", "HTML")
     >>> (t).language, (t+t).language
@@ -751,7 +752,7 @@ class Text(unicode):
     >>> t + Text('ola', "raw")
     Traceback (most recent call last):
         ...
-    Exception: Can't add Text/string instances containing incompatible languages: 'HTML' and 'raw'
+    Exception: Can't combine Text/string instances with incompatible languages: 'HTML' and 'raw'
     >>> unicode(t).language
     Traceback (most recent call last):
         ...
@@ -770,11 +771,13 @@ class Text(unicode):
         self.language = language
         return self
     
-    
-    ### Override all operators & methods to ensure that the 'language' setting is propagated to resulting strings
-    
     @staticmethod
-    def combine(lang, text, msg = "Can't add Text/string instances containing incompatible languages: '%s' and '%s'"):
+    def combine(lang, text, msg = "Can't combine Text/string instances with incompatible languages: '%s' and '%s'"):
+        """
+        Check that languages of two texts are compatible with each other and return the language of combined text,
+        or raise an exception. Languages are compatible if they're either equal, or one of them is undefined (None),
+        or one of them is a '/'-terminating prefix of the other (then the shorter language is the result).
+        """
         lang2 = getattr(text, 'language', None)
         if None in (lang, lang2): return lang or lang2          # when one of the languages is None, return the other one
         if lang == lang2: return lang                           # if equal, that's fine
@@ -785,6 +788,9 @@ class Text(unicode):
         if s1.startswith(s2): return lang2
         if s2.startswith(s1): return lang
         raise Exception(msg % (lang, lang2))
+    
+    
+    ### Override all operators & methods to ensure that the 'language' setting is propagated to resulting strings
     
     def __add__(self, other):
         #if getattr(other, 'language', None) not in (None, self.language):
