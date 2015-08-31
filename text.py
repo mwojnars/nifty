@@ -106,9 +106,29 @@ def trim_text(text, mlen, pat = re.compile(r"\W+")):
 ###  HTML processing
 ###
 
-def decode_entities(s, h = HTMLParser.HTMLParser()):
+def html_unescape(s, h = HTMLParser.HTMLParser()):
     "Turn HTML entities (&amp; &#169; ...) into characters. 's' string does NOT have to be a correct HTML, any piece of text can be decoded."
     return h.unescape(s)
+decode_entities = html_unescape
+
+def html_escape(text):
+    """Escape HTML/XML special characters (& < >) in a string that's to be embedded in a text part of an HTML/XML document.
+    For escaping attribute values use html_attr_escape() - attributes need a different set of special characters to be escaped.
+    """
+    return text.replace('&', '&amp;').replace('>', '&gt;').replace('<', '&lt;')
+
+def html_attr_escape(text):
+    """Escape special characters (& ' ") in a string that's to be used as a (quoted!) attribute value inside an HTML/XML tag.
+    Don't use for un-quoted values, where escaping should be much more extensive!
+    """
+    return text.replace('&', '&amp;').replace('>', '&gt;').replace('<', '&lt;').replace("'", '&#39;').replace('"', '&#34;')
+
+def html2text(html, sub = ''):
+    "Simple regex-based converter. Strips out all HTML tags, decodes HTML entities, merges multiple spaces. No HTML parsing is performed, only regexes."
+    if not html: return ''
+    s = regex.tag_re.sub(sub, html)         # strip html tags, replace with 'sub' (use sub=' ' to avoid concatenation of neighboring words)
+    s = html_unescape(s)                    # turn HTML entities (&amp; &#169; ...) into characters
+    return merge_spaces(s)                  # merge multiple spaces, remove newlines and tabs
 
 def striptags(html, remove = [], allow = [], replace = '', ignorecase = True):
     r"""Regex-based stripping of HTML tags. Optional 'remove' is a list of tag names to remove. 
@@ -164,25 +184,6 @@ def stripelem(html, remove = [], replace = '', ignorecase = True):
     flags = re.DOTALL
     if ignorecase: flags |= re.IGNORECASE
     return re.sub(pat, replace, html, flags = flags)
-
-def html2text(html, sub = '', parser = HTMLParser.HTMLParser()):
-    "Simple regex-based converter. Strips out all HTML tags, decodes HTML entities, merges multiple spaces. No HTML parsing is performed, only regexes."
-    if not html: return ''
-    s = regex.tag_re.sub(sub, html)                     # strip html tags, replace with 'sub' (use sub=' ' to avoid concatenation of neighboring words)
-    s = parser.unescape(s)                              # turn HTML entities (&amp; &#169; ...) into characters
-    return merge_spaces(s)                              # merge multiple spaces, remove newlines and tabs
-
-def html_escape(text):
-    """Escape HTML/XML special characters (& < >) in a string that's to be embedded in a text part of an HTML/XML document.
-    For escaping attribute values use html_attr_escape() - attributes need a different set of special characters to be escaped.
-    """
-    return text.replace('&', '&amp;').replace('>', '&gt;').replace('<', '&lt;')
-
-def html_attr_escape(text):
-    """Escape special characters (& ' ") in a string that's to be used as a (quoted!) attribute value inside an HTML/XML tag.
-    Don't use for un-quoted values, where escaping should be much more extensive!
-    """
-    return text.replace('&', '&amp;').replace('>', '&gt;').replace('<', '&lt;').replace("'", '&#39;').replace('"', '&#34;')
 
 
 #########################################################################################################################################################
@@ -748,8 +749,8 @@ class Text(unicode):
     AttributeError: 'unicode' object has no attribute 'language'
     """
     
-    language = None     # not-empty name of the formal language in which the string is expressed; can be a compound language, like "HTML/text";
-                        # for a raw string, we recommend the name of "text; None = unspecified language that can be combined with any other language 
+    language = None     # non-empty name of the formal language in which the string is expressed; can be a compound language, like "HTML/text";
+                        # for a raw string, we recommend "text" as a name; None = unspecified language that can be combined with any other language 
     settings = None     # the TextSettings object that contains global configuration for this object: list of converters and conversion settings (UNUSED for now)
 
     def __new__(cls, text, language = None, settings = None): 

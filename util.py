@@ -45,9 +45,9 @@ def isregex(x):
     return isinstance(x, re._pattern_type)
 # def isarray(x) - defined in 'math' module
 
-def isfunction(x):
+def isfunction(x, funtypes = (_types.FunctionType, _types.BuiltinFunctionType, _types.MethodType, _types.BuiltinMethodType, _types.UnboundMethodType)):
     "True if x is any kind of a 'syntactic' function: function, method, built-in; but NOT any other callable (object with __call__ method is not a function)."
-    return isinstance(x, (_types.FunctionType, _types.BuiltinFunctionType, _types.MethodType, _types.BuiltinMethodType, _types.UnboundMethodType))
+    return isinstance(x, funtypes)
 def isgenerator(x):
     return isinstance(x, _types.GeneratorType)
 def ismethod(x):
