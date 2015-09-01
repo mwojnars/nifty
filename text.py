@@ -683,7 +683,7 @@ class WordsModelUnderTraining(WordsModel):
 class Text(unicode):
     """
     A string of text (unicode, str) that keeps information about the language (encoding) of the text:
-        HTML, SQL, URL, plain text, ..., 
+        HTML, SQL, URL, plain text, ... 
     and allows for nesting of one language in another (possibly multiple times), which creates a *compound* language: 
         HTML/mediawiki, HTML/URL, SQL/HTML/raw, ...
     Allows for safe, transparent and easy encoding/decoding/converting - to/from/between different languages.
@@ -768,7 +768,7 @@ class Text(unicode):
         because the base class is immutable and overriding __new__ is the only way to modify its initialization.
         """
         self = unicode.__new__(cls, text)
-        self.language = language
+        self.language = language or (text.language if isinstance(text, Text) else None)
         return self
     
     @staticmethod
