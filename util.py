@@ -207,7 +207,8 @@ def unique(seq, order = False):
     return [x for x in seq if x not in seen and not seen_add(x)]
 
 def flatten(*seq):
-    """List of all atomic elements of 'seq' (strings treated as atomic) together with all elements of sub-iterables of 'seq', recursively.
+    """List of all atomic elements of 'seq' (strings treated as atomic) 
+    together with all elements of sub-iterables of 'seq', recursively.
     >>> flatten([[[1,2,3], (42,None)], [4,5], [6], 7, ('a','string')], (8, 9))
     [1, 2, 3, 42, None, 4, 5, 6, 7, 'a', 'string', 8, 9]
     """

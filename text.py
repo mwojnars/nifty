@@ -540,9 +540,10 @@ def ngrams(text, N = 4):
 
 # TODO: this function should be turned into more general-purpose one
 def tokenize(text, stop = "group univ university college school education industry employees area state"):
-    '''Turn the document to space-separated string of lowercase words. Remove all common words, punctuactions, numbers and other words 
+    """Turn the document to space-separated string of lowercase words. 
+       Remove all common words, punctuactions, numbers and other words 
        that might be meaningless or problematic in semantic analysis. 
-    '''
+    """
     # normalize (remove) special characters in common abbreviations and multi-part words,
     # so that they're preserved through tokenization and filtering
     abbr = [['ph.d.','phd'], ['r&d','rd'], ['v.p.','vp'], ['start-up','startup'],
