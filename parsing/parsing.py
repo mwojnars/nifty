@@ -68,7 +68,7 @@ class ParserError(Exception):
     text   = None       # initial MAXLEN characters of the input fragment that caused the error
     node   = None
 
-    def __init__(self, msg, node = None):
+    def __init__(self, msg, node = None, cause = None):
         if node:
             self.node, self.pos, self.text = node, node.pos, node.text(self.MAXLEN)
         if self.pos:                                            # calculate the line number and column of self.pos, if possible
@@ -76,6 +76,7 @@ class ParserError(Exception):
             self.line = prefix.count('\n') + 1
             self.column = len(prefix) - prefix.rfind('\n')
         msg = self.make_msg(msg) or msg
+        if cause: msg += " because of %s: %s" % (type(cause).__name__, cause)
         super(ParserError, self).__init__(msg)
         
     def make_msg(self, msg):
