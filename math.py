@@ -228,7 +228,11 @@ def softmax(scores, slope = None, eps = 1e-10):
 ###
 
 def zeroSum(X):
-    "Shift values of vector(s) to zero sum."
+    "Shift values of (each) vector by a constant to obtain zero sum. In 2D array, vectors are rows."
+    if X.ndim == 1:
+        return X - mean(X)
+    if X.ndim == 2:
+        return X - mean(X,1)[:,np.newaxis]
 
 def unitSum(X):
     "Scale 1D vector X, or all rows of 2D array X, to unit sum. All sums must be originally non-zero."

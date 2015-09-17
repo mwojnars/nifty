@@ -946,7 +946,7 @@ def xpath_escape(s):
     return "concat('%s')" % s.replace("'", "',\"'\",'")
 
 def xdoc(text, mode = "html"):
-    "Wrap up 'text' in XPathSelector of appropriate type. If 'text' is already an X, return unchanged."
+    "Wrap up the 'text' in a XPathSelector object of appropriate type (xml/html). If 'text' is already an X, return unchanged."
     if isinstance(text, XPathSelector): return text
     return XmlXPathSelector(text=text) if mode.lower() == 'xml' else HtmlXPathSelector(text=text)
 
@@ -1100,37 +1100,37 @@ monkeyPatch()
 #        return str(self.selector)
     
 
-if False:   # just a draft
-    class XDoc(object):
-        """XML or HTML document represented as a tree; or a part of it (subtree, node)."""
-        def __init__(self):
-            self.items = []         # XString's and XTag's that constitute content (children) of this XDoc
-        
-        def text(self):
-            "Raw text of this XDoc, with all tags stripped and entities decoded"
-            return ""
-            
-        def xml(self, compact = False):
-            "This XDoc in text form: XMl or HTML, with all tags preserved"
-    
-        def html(self):
-            "Alias for xml()" 
-            return self.xml()
-    
-    
-    class XTag(XDoc):
-        "XML/HTML element: a tag with XDoc inside"
-    
-        def __init__(self):
-            self.tag = None             # [str] name of the tag that encloses entire content of this XDoc
-            self.attr = []              # list of attributes: (attribute,value) pairs
-            self.orig_opening = ""      # opening tag in its original form, as occured in source text
-            self.orig_closing = ""      # closing --- "" ---
-        
-    class XString(XDoc):
-        "XML/HTML string node (raw text between or inside tags)"
-    class XComment(XDoc):
-        "XML/HTML comment node (<!-- ... -->)"
+# if False:   # just a draft
+#     class XDoc(object):
+#         """XML or HTML document represented as a tree; or a part of it (subtree, node)."""
+#         def __init__(self):
+#             self.items = []         # XString's and XTag's that constitute content (children) of this XDoc
+#         
+#         def text(self):
+#             "Raw text of this XDoc, with all tags stripped and entities decoded"
+#             return ""
+#             
+#         def xml(self, compact = False):
+#             "This XDoc in text form: XMl or HTML, with all tags preserved"
+#     
+#         def html(self):
+#             "Alias for xml()" 
+#             return self.xml()
+#     
+#     
+#     class XTag(XDoc):
+#         "XML/HTML element: a tag with XDoc inside"
+#     
+#         def __init__(self):
+#             self.tag = None             # [str] name of the tag that encloses entire content of this XDoc
+#             self.attr = []              # list of attributes: (attribute,value) pairs
+#             self.orig_opening = ""      # opening tag in its original form, as occured in source text
+#             self.orig_closing = ""      # closing --- "" ---
+#         
+#     class XString(XDoc):
+#         "XML/HTML string node (raw text between or inside tags)"
+#     class XComment(XDoc):
+#         "XML/HTML comment node (<!-- ... -->)"
         
 
 """
