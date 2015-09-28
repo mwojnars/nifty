@@ -724,7 +724,7 @@ class Encoder(object):
                  datetime:_datetime, date:_date, time:_time,
                  type:_type, list:_list, tuple:_tuple, set:_set, 
                  dict:_dict, OrderedDict:_dict, defaultdict:_defaultdict,
-                 np.float16:_float, np.float32:_float, np.float64:_float, np.float128:_float,
+                 np.float16:_float, np.float32:_float, np.float64:_float, getattr(np, 'float128', np.float):_float,
                  np.ndarray:_array,
                 }
 
