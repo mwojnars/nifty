@@ -462,7 +462,10 @@ Tips & tricks:
 
 ---
 Dependencies: waxeye 0.8.0, regex 2013-03-11.
+
 This file uses an improved and extended version of 're' module, the 'regex' - see http://pypi.python.org/pypi/regex
+This module is used primarily because it provides handling of repeated groups inside regular expressions
+- this is needed for extraction of lists of items, to be captured by a single redex variable. 
 
 ---
 This file is part of Nifty python package. Copyright (c) 2009-2014 by Marcin Wojnarski.
@@ -762,7 +765,7 @@ class Redex(object):
         self.convert = util.splitkeys(self.convert)
         self.variables = self.semantics.variables.keys()
         for name, conv in self.convert.items():
-            if issubclass(conv, Pattern): raise Exception("A Pattern class used as a converter: %s. Use an instance instead: %s()." % ((conv.__name__,)*2))
+            if issubclass(conv, Redex): raise Exception("A Redex class used as a converter: %s. Use an instance instead: %s()." % ((conv.__name__,)*2))
             if '*' not in name: continue
             pat = name.replace('*', '.*') + "$"
             for name2 in self.variables:
@@ -772,6 +775,12 @@ class Redex(object):
         if self.verbose: 
             print " variables:", self.variables
             print " regex:", self.regex.pattern
+        
+    def __call__(self, doc):
+        """A redex object can be called like a function, which is equivalent to calling .match(), but note that 
+        there's no way to pass extra parameters then, and for example the URL absolutization is no longer possible.
+        """
+        return self.match(doc)
         
     def _compile(self):                                                                                      #@ReservedAssignment
         "Translate the original reDex self.pattern into a regex pattern and compile to regex object."
@@ -899,10 +908,9 @@ class Redex(object):
             if match is None: return None, None
             #print "matched by regex:", match.groupdict()
             
-            # extract variables (groups), possibly repeated - each value is a list, singleton in case of non-repeated groups
-            items = self.dicttype()
-            for key in match.groupdict().keys():        # TODO: use capturesdict() instead
-                items[key] = match.captures(key)
+            # extract variables (groups), possibly repeated, and wrap up in our custom dictionary class;
+            # each value is a list for repeated groups, or a singleton in case of non-repeated groups
+            items = self.dicttype(match.capturesdict())
             
             # flatten singleton lists of non-repeated variables AND of groups defined inside raw regexes {~regex} rather than via {VAR ...}
             var = self.semantics.variables
@@ -928,7 +936,7 @@ class Redex(object):
         def convert1(val, fun):
             if val is None: return None
             if fun == url: return url(val, baseurl)                                 # 'url' is the convertion function url() defined below
-            if isinstance(fun, Pattern): return fun.match(val, baseurl = baseurl)   # 'fun' can be a Pattern instance
+            if isinstance(fun, Redex): return fun.match(val, baseurl = baseurl)     # 'fun' can be a Redex instance, we have to pass extra params then
             return fun(val)
         def convertAll(vals, fun):
             return [convert1(v,fun) for v in vals]
