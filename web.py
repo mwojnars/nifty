@@ -973,6 +973,7 @@ class XPathSelectorPatch(object):
     "All the methods and properties below will be copied subsequently to XPathSelector (monkey patching). @staticmethod is necessary for this."
     
     nodes = xpath = XPathSelector.select if OLD_SCRAPY else Selector.xpath          # nodes() and xpath() will be aliases for select/xpath()
+    html = __unicode__ = XPathSelector.extract
     
     @staticmethod
     def node(self, xpath, none = False):
@@ -1042,14 +1043,14 @@ class XPathSelectorPatch(object):
         if '@' in path: return self.text(path)
         return self.node(path)
     
-    @staticmethod
-    def html(self):
-        "'print xnode' will print FULL original html/xml code of the node"
-        return self.extract()
-    @staticmethod
-    def __unicode__(self):
-        "'print xnode' will print FULL original html/xml code of the node"
-        return self.extract()
+#     @staticmethod
+#     def html(self):
+#         "'print xnode' will print FULL original html/xml code of the node"
+#         return self.extract()
+#     @staticmethod
+#     def __unicode__(self):
+#         "'print xnode' will print FULL original html/xml code of the node"
+#         return self.extract()
     @staticmethod
     def __str__(self):
         return self.extract().encode('utf-8')
