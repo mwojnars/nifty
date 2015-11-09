@@ -214,7 +214,7 @@ class regex(object):
     IP   = ip   = _B % r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'                            # IP number
     
     email        = _B % r"[\w\-\._\+%]+@(?:[\w-]+\.)+[\w]{2,6}"                         # supports International Domains with Country codes
-    email_nospam = _B % r"[\w\-\._\+%]+(?:@|\(at\)|\{at\})(?:[\w-]+\.)+[\w]{2,6}"       # recognizes obfuscated emails
+    email_nospam = _B % r"[\w\-\._\+%]+(?:@|\(at\)|\{at\})(?:[\w-]+\.)+[\w]{2,6}"       # recognizes obfuscated emails: with (at) or {at} instead of @
 
     # HTML/XML tag detector, from: http://gskinner.com/RegExr/?2rj44
     # Detects: all opening tags (name in group 1) with arguments (group 2); closing tags (name in group 4); self-closing tags ('/' in group 3); 

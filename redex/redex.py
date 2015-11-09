@@ -93,16 +93,27 @@ Apples and ~       -- Tilde (~) matches any word: a sequence of 1+ alphanumeric 
 
 Version .          -- Dot (.) matches any continuous sequence of 0+ non-space characters except tags (no '>' or '<'),
                       but as few characters as possible (lazy match); can also be used inside tags.
+                      If Regex.html parameter is true (default), HTML entities in the extracted text, 
+                      like &amp; &quot; - are decoded automatically.
                       Put "{.}" in the pattern to match literal dot (exactly one) instead of a sequence.
+                      
                       >>> match1('Python {VER .} on .', 'Python 2.7 on Linux')
                       '2.7'
-                      >>> match1('<a href="./{USER ~}">', '<a href="http://twitter.com/wojnarski">')
-                      'wojnarski'
+                      >>> match1('<a href="./{USER ~}">', '<a href="http://twitter.com/google">')
+                      'google'
+                      >>> match1('"{NAME .}"', '"Johns&amp;Co."')
+                      u'Johns&Co.'
 
 Address: ..        -- Two dots (..) match any sequence of 0+ characters except tags (no '<' or '>'), lazy match; 
                       can be used inside tags, although usually a single dot '.' suffices.
+                      If Regex.html parameter is true (default), the extracted text is HTML-decoded automatically,
+                      that is, HTML entities get decoded (&amp; &quot; ...) and space get normalized
+                      (all withspace replaced with ' ', multiple spaced merged to single space).
+                      
                       >>> match1('Address: {ADDR ..} {.}', 'Address: 12-345 Warsaw, Poland.')
                       '12-345 Warsaw, Poland'
+                      >>> match1('"{NAME ..}"', '"Name:   \\n   Johns&amp;Co."')
+                      u'Name: Johns&Co.'
 
 <p>...</p>         -- Three or more dots (...) match any sequence of 0+ characters, including tags 
                       ('<' and '>' allowed). Cannot be used inside tags: between < and >.
