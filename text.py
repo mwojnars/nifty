@@ -196,7 +196,11 @@ class regex(object):
         - http://gskinner.com/RegExr/  -- "Community" tab, thousands of regexes
         - http://www.regular-expressions.info/examples.html
         - http://regexlib.com/
+    
+    >>> re.compile(regex.email_nospam, re.IGNORECASE).findall("ala(AT)kot.ac.uk")
+    ['ala(AT)kot.ac.uk']
     """
+    
     _B = r'\b%s\b'              # for patterns bounded by word boundaries (alphanumeric or underscore character preceded/followed by a character from outside this class)
     
     int   = r'[+-]?\d+'         # can include 0 as the first char (!), sometimes this is recognized as octal; don't include hexadecimal integers   @ReservedAssignment
@@ -213,8 +217,8 @@ class regex(object):
     ISSN = issn = _B % r'\d{4}-\d{3}[\dXx]'
     IP   = ip   = _B % r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'                            # IP number
     
-    email        = _B % r"[\w\-\._\+%]+@(?:[\w-]+\.)+[\w]{2,6}"                         # supports International Domains with Country codes
-    email_nospam = _B % r"[\w\-\._\+%]+(?:@|\(at\)|\{at\})(?:[\w-]+\.)+[\w]{2,6}"       # recognizes obfuscated emails: with (at) or {at} instead of @
+    email        = _B % r"[\w\-\._\+%]+@(?:[\w-]+\.)+[a-zA-Z]{2,3}"                     # only standard 2-3-letter top-level domains, NO generic domains: .academic .audio. .church ...
+    email_nospam = _B % r"[\w\-\._\+%]+(?:@|\(at\)|\{at\})(?:[\w-]+\.)+[a-zA-Z]{2,3}"   # recognizes obfuscated emails: with (at) or {at} instead of @
 
     # HTML/XML tag detector, from: http://gskinner.com/RegExr/?2rj44
     # Detects: all opening tags (name in group 1) with arguments (group 2); closing tags (name in group 4); self-closing tags ('/' in group 3); 
