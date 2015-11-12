@@ -227,8 +227,8 @@ class regex(object):
     # a decent URL with a leading protocol and withOUT trailing dot/comma; after http://regexlib.com/REDetails.aspx?regexp_id=146
     url_protocol = r"http|https|ftp"
     url_domain = r"[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,3}"
-    url_path = r"/([a-zA-Z0-9\-\._\?\,\'/\\\+&%\$#\=~;])*(?<![\.\,])"
-    url = r"\b(%s)\://%s(:[a-zA-Z0-9]*)?(%s)?" % (url_protocol, url_domain, url_path)
+    url_path = r"([a-zA-Z0-9\-\._\?\,\'/\\\+&%\$#\=~:;])*(?<![\.\,])"
+    url = r"\b(%s)\://%s(:[a-zA-Z0-9]*)?(/%s)?" % (url_protocol, url_domain, url_path)
     
     # HTML/XML tag detector, from: http://gskinner.com/RegExr/?2rj44
     # Detects: all opening tags (name in group 1) with arguments (group 2); closing tags (name in group 4); self-closing tags ('/' in group 3); 
