@@ -192,13 +192,17 @@ def stripelem(html, remove = [], replace = '', ignorecase = True):
 ###
 
 class regex(object):
-    """Common regex patterns. See also:
-        - http://gskinner.com/RegExr/  -- "Community" tab, thousands of regexes
-        - http://www.regular-expressions.info/examples.html
-        - http://regexlib.com/
+    """
+    Common regex patterns. See also:
+    - http://gskinner.com/RegExr/  -- "Community" tab, thousands of regexes
+    - http://www.regular-expressions.info/examples.html
+    - http://regexlib.com/
     
     >>> re.compile(regex.email_nospam, re.IGNORECASE).findall("ala(AT)kot.ac.uk")
     ['ala(AT)kot.ac.uk']
+    >>> text = "urls: http://regexlib.com/REDetails.aspx?regexp_id=146, http://regexlib.com/(yes!), https://www.google.com. "
+    >>> [m.group() for m in re.compile(regex.url).finditer(text)]
+    ['http://regexlib.com/REDetails.aspx?regexp_id=146', 'http://regexlib.com/', 'https://www.google.com']
     """
     
     _B = r'\b%s\b'              # for patterns bounded by word boundaries (alphanumeric or underscore character preceded/followed by a character from outside this class)
@@ -220,6 +224,12 @@ class regex(object):
     email        = _B % r"[\w\-\._\+%]+@(?:[\w-]+\.)+[a-zA-Z]{2,3}"                     # only standard 2-3-letter top-level domains, NO generic domains: .academic .audio. .church ...
     email_nospam = _B % r"[\w\-\._\+%]+(?:@|\(at\)|\{at\})(?:[\w-]+\.)+[a-zA-Z]{2,3}"   # recognizes obfuscated emails: with (at) or {at} instead of @
 
+    # a decent URL with a leading protocol and withOUT trailing dot/comma; after http://regexlib.com/REDetails.aspx?regexp_id=146
+    url_protocol = r"http|https|ftp"
+    url_domain = r"[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,3}"
+    url_path = r"/([a-zA-Z0-9\-\._\?\,\'/\\\+&%\$#\=~;])*(?<![\.\,])"
+    url = r"\b(%s)\://%s(:[a-zA-Z0-9]*)?(%s)?" % (url_protocol, url_domain, url_path)
+    
     # HTML/XML tag detector, from: http://gskinner.com/RegExr/?2rj44
     # Detects: all opening tags (name in group 1) with arguments (group 2); closing tags (name in group 4); self-closing tags ('/' in group 3); 
     #          XML-like headers <?...?> (also check group 3); comments <!--...--> (group 5); CDATA sections <![CDATA[...
