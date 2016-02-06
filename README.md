@@ -1,10 +1,11 @@
 Nifty
 =====
 
-*Nifty* is a library of utility functions and classes that simplify various common tasks in Python programming. A handy add-on to standard libraries that makes Python even easier to use. 
-Contains also a number of advanced tools for specific tasks of *web scraping*, *data processing* and *data mining*.
+*Nifty* is a library of utility functions and classes that simplify various common tasks in Python programming - a handy add-on to standard libraries that makes Python even easier to use. 
+Contains also a number of advanced tools for *web scraping*, *data processing* and *data mining*.
+Proudly used by [Paperity](http://paperity.org/), an aggregator of scholarly literature.
 
-Brought to you by **Marcin Wojnarski** (see my [blog](http://wojnarski.wordpress.com/marcin-wojnarski), [Twitter](http://twitter.com/mwojnarski), [LinkedIn](http://www.linkedin.com/in/marcinwojnarski)). Licensed on GPL.
+Brought to you by **Marcin Wojnarski** ([blog](http://wojnarski.wordpress.com/marcin-wojnarski), [Twitter](http://twitter.com/mwojnarski), [LinkedIn](http://www.linkedin.com/in/marcinwojnarski)). Licensed on GPL.
 
 Contents
 --------
