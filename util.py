@@ -116,8 +116,9 @@ def asobject(name, context = {}, default = RAISE):
     return default
     
 
-def runCommand(context = {}, params = None):
-    """Takes from 'sys' all command-line arguments passed to the script and interprets them as a name 
+def runCommand(context = {}, params = None, fun = None):
+    """
+    Takes from 'sys' all command-line arguments passed to the script and interprets them as a name
     of a callable (function) from 'context' (module or dict, typically globals() of the caller), 
     and possibly its parameters; finds the function, executes with given parameters (passed as unnamed strings) 
     and returns its result. If the command is not present in 'context' and there are no parameters,
@@ -126,23 +127,31 @@ def runCommand(context = {}, params = None):
     Note: the called function should convert internally the parameters from a string to a proper type and 
     this conversion is done in a local context of the function, so it may be hard to pass variables as parameters.
     """
-    if params is None: params = sys.argv[1:]                        # argv[0] is the script name, omit
-    if not params: return None                                      # no command? do nothing 
     if not isdict(context): context = context.__dict__
-    cmd = params[0]; params = params[1:]
-    if cmd in context:
-        args = []; kwargs = {}
-        for arg in params:
-            if '=' in arg:
-                k, v = arg.split('=',1)
-                if not k: raise Exception("There can be no spaces around '=' on the argument list: %s" % arg)
-                kwargs[k] = v
-            else:
-                if kwargs: raise Exception("Unnamed argument cannot follow a keyword argument: %s" % arg)
-                args.append(arg)
-        fun = context[cmd]
+    if params is None: params = sys.argv[1:]                        # argv[0] is the script name, omit
+    
+    # set function 'fun' if possible; retrieve command string 'cmd' from 'params' if needed
+    cmd = None
+    if fun is None:
+        if not params: raise Exception("Please give a command to execute.")
+        cmd, params = params[0], params[1:]
+        if cmd in context:
+            fun = context[cmd]
+
+    # convert textual 'params' to a list/dict of 'args'/'kwargs'
+    args = []; kwargs = {}
+    for arg in params:
+        if '=' in arg:
+            k, v = arg.split('=', 1)
+            if not k: raise Exception("There can be no spaces around '=' on the argument list: %s" % arg)
+            kwargs[k] = v
+        else:
+            if kwargs: raise Exception("Unnamed argument cannot follow a keyword argument: %s" % arg)
+            args.append(arg)
+
+    if fun:
         return fun(*tuple(args), **kwargs)
-    elif params:
+    if params:
         raise Exception("Object can't be found: '%s'" % cmd)        # when parameters present, we can't call eval() - don't know what to do with params?
     return eval(cmd, context)
 
