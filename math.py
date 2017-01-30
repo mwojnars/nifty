@@ -27,7 +27,7 @@ from .util import isnumber
 
 ipi = 1./pi         # inverted PI
 
-def isarray(x):    return isinstance(x, numpy.ndarray)
+def isarray(x):    return isinstance(x, np.ndarray)
 
 
 def np_find(condition):
