@@ -8,8 +8,22 @@ Related topics:
 - Dataflow programming: https://en.wikipedia.org/wiki/Dataflow_programming
 - Flow-based programming: https://en.wikipedia.org/wiki/Flow-based_programming
 
+DEPENDENCIES: jsonpickle
+
 ---
-This file is part of Nifty python package. Copyright (c) 2009-2014 by Marcin Wojnarski.
+Typical Pipe's life cycle:
+
+init
+| setup
+| | open / _prolog
+| |  | ...
+| |  | iter (process / monitor / accept) OR run
+| |  | ...
+| | close / report / _epilog
+| reset
+
+---
+This file is part of Nifty python package. Copyright (c) by Marcin Wojnarski.
 
 Nifty is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License 
 as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
@@ -19,7 +33,7 @@ You should have received a copy of the GNU General Public License along with Nif
 '''
 
 from __future__ import absolute_import
-import sys, heapq, math, numpy as np, jsonpickle, csv, itertools, threading
+import sys, heapq, math, random, numpy as np, jsonpickle, csv, itertools, threading
 from copy import copy, deepcopy
 from time import time, sleep
 from Queue import Queue
@@ -30,12 +44,12 @@ from collections import OrderedDict
 # only when executed as a standalone file, for unit tests, do an absolute import
 if __name__ != "__main__":
     from .. import util
-    from ..util import isint, islist, isstring, issubclass, isfunction, iscontainer, istype, \
+    from ..util import isint, islist, isstring, issubclass, isfunction, isgenerator, iscontainer, istype, \
                        classname, getattrs, setattrs, Tee, openfile, Object, __Object__
     from ..files import GenericFile, File as files_File, SafeRewriteFile, ObjectFile, JsonFile, DastFile
 else:
     from nifty import util
-    from nifty.util import isint, islist, isstring, issubclass, isfunction, iscontainer, istype, \
+    from nifty.util import isint, islist, isstring, issubclass, isfunction, isgenerator, iscontainer, istype, \
                        classname, getattrs, setattrs, Tee, openfile, Object, __Object__
     from nifty.files import GenericFile, File as files_File, SafeRewriteFile, ObjectFile, JsonFile, DastFile
 
@@ -466,8 +480,11 @@ class Pipe(Cell):
         self._epilog()
 
     def iter(self):
-        """If you subclass Pipe directly, not via specialized base classes (Transform, Monitor, Filter, ...),
-        better override iter() not __iter__()."""
+        """Generator that yields subsequent items of the stream, just like __iter__() would do.
+        If you subclass Pipe directly rather than via specialized base classes (Transform, Monitor, Filter, ...),
+        it's typically better to override iter() not __iter__(), to allow for implicit calls to _prolog/_epilog
+        at the start/end of iteration.
+        """
         raise NotImplemented()
 
     def _prolog(self):
@@ -534,10 +551,18 @@ class Pipe(Cell):
 #         "1-line string with technical specification of this pipe: its name and possibly values of its knobs etc."
 
 
-# TOKENS
+### TOKENS
 
-class _PIPE(Pipe):      # class of PIPE
+class _PIPE(Pipe):                                                          # class of PIPE
     def __rshift__(self, other): return Pipeline(other)
+
+class _OFF(Pipe):                                                           # class of OFF
+    def __div__(self, other): return repr(other)
+    __truediv__ = __rdiv__ = __div__
+
+class _ON(Pipe):                                                            # class of ON
+    def __div__(self, other): return other
+    __truediv__ = __rdiv__ = __div__
 
 # Starts a pipeline. For easy appending of other pipes with automatic type casting: PIPE >> a >> b >> ...
 # Doesn't do any processing itself (is excluded from the pipeline). 
@@ -545,6 +570,14 @@ PIPE = _PIPE()
 
 # Invokes execution of a pipeline. When put at the end of a pipeline (a >> b >> ... >> RUN) indicates that it should be executed now. 
 RUN = Pipe()
+
+# When used in division: OFF/pipelike_object or pipelike_object/OFF - turns off a given element of a pipeline by converting it to a string.
+# To be used for easy commenting out of individual pipes in a pipeline.
+OFF = _OFF()
+
+# Complementar to OFF. When used in division: ON/pipelike_object or pipelike_object/ON - does nothing (that is, turns an element ON again).
+# Convenient when you need to turn an element off and on many times: you will first put /OFF, than change it to /ON, and so on.
+ON = _ON()
 
 
 #####################################################################################################################################################
@@ -578,22 +611,27 @@ class _Functional(Pipe):
     
 class Transform(_Functional):
     """Plain item-wise processing & filtering function, implemented in the subclass by overloading process() 
-    and possibly also open/close(). Method process(item) returns a new (modified) item to be yielded, 
-    or None to indicate that the same item should be yielded (perhaps with some inner attributes modified),
-    or False to indicate that the item should be dropped entirely (filtered out).
-    For operators that only perform filtering, with no modification of items, use Filter class instead."""
-    
+    and possibly also open/close(). Method process(item) should return an item to be yielded,
+    or None to indicate that the item should be dropped entirely (filtered out).
+    For operators that only perform filtering, with no modification of items, use Filter class instead.
+    """
     def __iter__(self):
         header = self._prolog()
         if header is not None: yield header
+        if not self.source:
+            raise Exception("No source pipe connected (self.source=%s) in a transformative pipe: <%s>" % (self.source, self))
+        
         try:
             self.count = 0
             for item in self.source: 
                 self.count += 1
                 res = self.process(item)
-                if res is not False: #None: 
+                if res is not None:
                     self.yielded += 1
-                    yield item if res is None else res
+                    yield res
+                # if res is not False:
+                #     self.yielded += 1
+                #     yield item if res is None else res
         except GeneratorExit, ex:
             self._epilog()
             raise
@@ -652,6 +690,8 @@ class Monitor(_Functional):
     def __iter__(self):
         header = self._prolog()
         if header is not None: yield header
+        if not self.source:
+            raise Exception("No source pipe connected (self.source=%s) in a monitoring pipe: <%s>" % (self.source, self))
         try:
             self.count = 0
             for item in self.source: 
@@ -701,6 +741,8 @@ class Filter(_Functional):
     def __iter__(self):
         header = self._prolog()
         if header is not None: yield header
+        if not self.source:
+            raise Exception("No source pipe connected (self.source=%s) in a filtering pipe: <%s>" % (self.source, self))
         try:
             self.count = 0
             for item in self.source: 
@@ -764,8 +806,12 @@ class File(Pipe):
         return iter(self.file)
     
 class Function(Transform):
-    """A transform OR a filter constructed from a plain python function. A wrapper.
-    Explicit use of Transform or Filter classes instead of this one is recommended."""
+    """Transform OR filter constructed from a plain python function. A wrapper.
+    The inner (wrapped) function should return an item to be yielded,
+    or True/None to indicate that the same (input) item should be yielded (perhaps with some internals modified),
+    or False to indicate that the item should be dropped entirely (filtered out).
+    Explicit use of Transform or Filter classes instead of this one is recommended.
+    """
     def __init__(self, oper = None):
         "oper=None handles the case when processing function is implemented through overloading of process()."
         self.oper = oper
@@ -901,15 +947,32 @@ class Subset(Pipe):
                 batch = 0
 
 class Sample(Pipe):
-    "Random sample of input items. Every input item is decided independently with a given probability, unconditional on what items were chosen earlier."
+    """Random sample of input items. Every input item is decided independently with a given probability,
+    unconditional on what items were chosen earlier."""
     
 
 ###  Buffers
 
-#class Cache(Pipe):
 class Buffer(Pipe):
-    """Upon setup(), buffers all input data in memory. Then, when data is buffered, 
-    can iterate (multiple times) over it and yield from memory."""
+    "Buffers all input data in memory, then iterates over it and yields from memory, possibly multiple times."
+    def setup(self):
+        self.data = list(self.source)
+
+class Random(Buffer):
+    """
+    Buffers all data in memory, then picks and yields items randomly on each subsequent request.
+    Iterates infinitely over the buffered data.
+    """
+    class __knobs__:
+        seed = None
+        
+    def setup(self):
+        super(Random, self).setup()
+        self.rand = random.Random(self.seed)
+    def iter(self):
+        while True:
+            yield self.rand.choice(self.data)
+
 
 class Sort(Pipe):
     """Total or partial in-memory heap sort of the input stream. Buffers items in a heap and when the heap is full, 
@@ -1419,7 +1482,7 @@ class Pipeline(MetaPipe):
             
         # pull data
         head, tail = self.pipeline[-1], self.pipeline[0]
-        for item in head: 
+        for item in head:
             self.count = tail.count                         # update indirectly how many items were read from source
             yield item
         self.count = tail.count        
@@ -1896,13 +1959,15 @@ class Thread(threading.Thread, Wrapper):
 
 def _normalize(pipes):
     """Normalize a given list of pipes. Remove None's and strings (used for commenting out), 
-    instantiate Pipe classes if passed instead of an instance, wrap up functions, collections and files."""
+    instantiate Pipe classes if passed instead of an instance, wrap up functions, collections and files.
+    """
     def convert(h):
         if issubclass(h, Pipe): return h()
         if isfunction(h): return Function(h)
         if iscontainer(h): return Collection(h)
+        if isgenerator(h): return Collection(h)
         if isinstance(h, (file, GenericFile, Tee)): return File(h)
-        if isstring(h): return None
+        if isstring(h): return None                             # strings can be inserted in a pipeline; treated as comments (ignored)
         return h
     return filter(None, map(convert, pipes))
 
