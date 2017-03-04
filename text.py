@@ -448,8 +448,12 @@ def keyPattern(keys):
 ###
 
 def levenshtein(a, b, casecost = 1, spacecost = 1, totals = False):
-    """Calculates the Levenshtein edit distance between strings a and b. 'casecost' is the cost of replacement when only the case is changed, not the actual character.
-    If totals=True, returns total character costs of both strings, in addition to the distance value, as a triple (dist, cost_a, cost_b).
+    """
+    Calculates the Levenshtein edit distance between strings a and b. 
+    'casecost' is the cost of replacement when only the case is changed, not the actual character.
+    If totals=True, returns total character costs of both strings, in addition to the distance value, 
+    as a triple (dist, cost_a, cost_b).
+    
     >>> levenshtein("Ala", "OLa")
     2
     >>> levenshtein("Ala", "OLa", 0.5)
