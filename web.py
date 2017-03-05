@@ -524,7 +524,9 @@ class Referer(WebHandler):
             if lasturl:
                 prefix = os.path.commonprefix([lasturl, req.url])
                 suffix = req.url[len(prefix):-1]
-                if suffix in last.resp.content:                      # suffix - simple heuristic to check if the new URL really occured in the previous page
+                #print repr(suffix)
+                #print repr(last.resp.content)
+                if str(suffix) in last.resp.content:        # suffix - simple heuristic to check if the new URL really occured in the previous page; str() to handle URL being unicode object
                     req.add_header('Referer', lasturl) 
         return self.next.handle(req)
 
@@ -671,6 +673,23 @@ class CustomTransform(WebHandler):
         "Override in subclasses"
         return resp
         
+class Callback(WebHandler):
+    """Call predefined external functions on forward and backward passes, with Request or Request+Response objects as arguments.
+       Typically, the functions should only perform monitoring and reporting,
+       but it's also technically possible that they modify the internals of Request/Response objects.
+    """
+    def __init__(self, onRequest = None, onResponse = None):
+        self.onRequest = onRequest
+        self.onResponse = onResponse
+        
+    def handle(self, req):
+        if self.onRequest is not None:
+            self.onRequest(req)
+        resp = self.next.handle(req)
+        if self.onResponse is not None:
+            self.onResponse(req, resp)
+        return resp
+    
 
 class handlers(object):
     "Legacy."
@@ -779,10 +798,20 @@ class WebClient(Object):
             self._tail.append(handler)
         self._rebuild()
         return self                                         # chaining the calls is possible: return client.addHandler(...).addHandler(...)
-#     def setTail(self, tail = []):
-#         self._tail = tail
-#         self._rebuild()
-#         return self
+        
+    def removeHandler(self, handler):
+        """Remove a handler that was added with addHandler(), either to the head or tail of the handlers list.
+           If the same handler has been added multiple times, its first occurence is removed.
+           ValueError is raised if the handler is not present in the list.
+        """
+        if handler in self._head:
+            self._head.remove(handler)
+        elif handler in self._tail:
+            self._tail.remove(handler)
+        else:
+            raise ValueError("WebClient.removeHandler: handler (%s) not in list" % handler)
+        self._rebuild()
+        return self                                         # chaining the calls is possible: return client.removeHandler(...).removeHandler(...)
         
     def _rebuild(self):
         "Rearrange handlers into a chain once again."
