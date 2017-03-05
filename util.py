@@ -379,7 +379,9 @@ class ObjDict(dict):
     def __delattr__(self, name): 
         if name.startswith('__'): raise AttributeError(name)
         del self[name]
-
+    def __getstate__(self):
+        return dict(self)
+        
 class ComparableMixin:
     "Base class (mixin) that implements all comparison operators in terms of __lt__()."
     def __eq__(self, other):
