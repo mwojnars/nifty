@@ -6,7 +6,7 @@ External dependencies: Scrapy 0.16.4 (for HTML/XML)
 TODO: possibly might replace urllib2 with Requests (http://docs.python-requests.org/en/latest/)
 
 ---
-This file is part of Nifty python package. Copyright (c) 2009-2014 by Marcin Wojnarski.
+This file is part of Nifty python package. Copyright (c) by Marcin Wojnarski.
 
 Nifty is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License 
 as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
@@ -954,6 +954,16 @@ class Crawler(object):
 ###  but should be replaced in the future with reference to underlying basic implementation to remove dependency on Scrapy.
 ###  Scrapy home: http://scrapy.org/ 
 ###
+###  Example use:
+###      page = xdoc(URL)
+###      node = page['xpath...']
+###      print node.text()
+###
+###  Methods (some of them from Scrapy):
+###      css, css1, xpath, node, nodes, html, text, texts, anchor
+###      nodeWithID, nodeOfClass, nodesOfClass, nodeAfter, textAfter
+###      [], ... in
+###
 
 try:                                                                            # newer versions of Scrapy
     from scrapy.selector.unified import SelectorList as XPathSelectorList
@@ -1005,9 +1015,15 @@ class XPathSelectorPatch(object):
     html = __unicode__ = XPathSelector.extract
     
     @staticmethod
-    def node(self, xpath, none = False):
+    def css1(self, css, none = False):
+        "Similar to css() but returns always 1 node rather than a list of nodes. None or XNone if no node has been found"
+        l = self.css(css)
+        if l: return l[0]
+        return None if none else XNone
+    @staticmethod
+    def node(self, xpath = None, css = None, none = False):
         "Similar to nodes() but returns always 1 node rather than a list of nodes. None or XNone if no node has been found"
-        l = self.nodes(xpath)
+        l = self.css(css) if css != None else self.xpath(xpath)
         if l: return l[0]
         return None if none else XNone
     @staticmethod
@@ -1015,15 +1031,18 @@ class XPathSelectorPatch(object):
         """ Returns all text contained in the 1st node selected by 'xpath', as a list of x-strings (xbasestring) 
         with tags stripped out and entities decoded. Empty string if 'xpath' doesn't select any node.
         If norm=True, whitespaces are normalized: multiple spaces merged, leading/trailing spaces stripped out.
+        WARNING: doesn't work for a text node. Use extract() instead.
         """
         xpath = "string(" + xpath + ")"
         if norm: xpath = "normalize-space(" + xpath + ")"
-        return xbasestring(self.nodes(xpath)[0].extract())
+        l = self.nodes(xpath)
+        return xbasestring(l[0].extract() if l else '')
     @staticmethod
     def texts(self, xpath, norm = True):
         """ Returns all texts selected by given 'xpath', as a list of x-strings (xbasestring),
         with tags stripped out and entities decoded. Empty list if 'xpath' doesn't select any node.
         If norm=True, whitespaces are normalized: multiple spaces merged, leading/trailing spaces stripped out.
+        WARNING: doesn't work for text nodes. Use extract() instead.
         """
         nodes = self.nodes(xpath)
         return [n.text(".", norm) for n in nodes]
