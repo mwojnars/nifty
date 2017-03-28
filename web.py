@@ -1005,6 +1005,10 @@ class XNoneType(HtmlXPathSelector):
     def __init__(self): HtmlXPathSelector.__init__(self, text = "<_XNone_></_XNone_>")
     def __bool__(self): return False
     __nonzero__ = __bool__
+
+    @staticmethod
+    def text(*a, **kw): return ''
+        
 XNone = XNoneType()
 
 
@@ -1031,7 +1035,7 @@ class XPathSelectorPatch(object):
         """ Returns all text contained in the 1st node selected by 'xpath', as a list of x-strings (xbasestring) 
         with tags stripped out and entities decoded. Empty string if 'xpath' doesn't select any node.
         If norm=True, whitespaces are normalized: multiple spaces merged, leading/trailing spaces stripped out.
-        WARNING: doesn't work for a text node. Use extract() instead.
+        WARNING: doesn't work for an HTML text (untagged) node, use extract() instead.
         """
         xpath = "string(" + xpath + ")"
         if norm: xpath = "normalize-space(" + xpath + ")"
@@ -1042,7 +1046,7 @@ class XPathSelectorPatch(object):
         """ Returns all texts selected by given 'xpath', as a list of x-strings (xbasestring),
         with tags stripped out and entities decoded. Empty list if 'xpath' doesn't select any node.
         If norm=True, whitespaces are normalized: multiple spaces merged, leading/trailing spaces stripped out.
-        WARNING: doesn't work for text nodes. Use extract() instead.
+        WARNING: doesn't work for HTML text (untagged) nodes, use extract() instead.
         """
         nodes = self.nodes(xpath)
         return [n.text(".", norm) for n in nodes]
@@ -1084,6 +1088,15 @@ class XPathSelectorPatch(object):
             return self.text(self._path_after % xpath_escape(title), norm)
         return self.text(self._path_after_exact % xpath_escape(exact), norm)
     
+    @staticmethod
+    def reText(self, regex, multi = False, norm = True):
+        "Call text() followed by xbasestring.re(regex, multi). Space normalization performed by default."
+        return self.text(norm = norm).re(regex, multi = multi)
+    @staticmethod
+    def reHtml(self, regex, multi = False):
+        "Call html() followed by xbasestring.re(regex, multi)."
+        return self.html().re(regex, multi = multi)
+
     @staticmethod
     def __getitem__(self, path):
         """For convenient [...] selection of subnodes and attributes: node['subnode'] or node['@attr'] or node['any_XPath']. 
