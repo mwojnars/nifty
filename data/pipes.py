@@ -427,7 +427,7 @@ class Pipe(Cell):
     
     source    = None            # source Pipe or iteratable from which input data for 'self' will be pulled
     sources   = None            # list of source pipes; used only in pipes with multiple inputs, instead of 'source'
-    count     = None            # no. of input items read so far in this iteration, or 1-based index of the item currently processed; tracked in most standard pipes (not all)
+    count     = None            # no. of input items read so far in this iteration, or 1-based index of the item currently processed; calculated in most standard pipes, but not all
     yielded   = None            # no. of output items yielded so far in this iteration, EXcluding header item
 
     created   = False           # has the object been initialized already, in setup()? most pipes have empty setup(), only more complex ones use it for creation of internal structures
@@ -464,7 +464,9 @@ class Pipe(Cell):
     
     def __iter__(self):
         """Main method of every data pipe. Pulls data from the source(s), processes and yields results of processing 
-        one by one. Subclasses should override either iter() or __iter__(), in the latter case the subclass 
+        one by one. Implicitly calls self._prolog() before pulling/yielding the 1st item, and self._epilog()
+        at the end of iteration (but only when at least one attempt to pull an item is performed!).
+        Subclasses should override either iter() or __iter__(), in the latter case the subclass
         is responsible for calling _prolog and _epilog. Generic subclasses also allow to override open() and close() 
         to perform custom initialization and clean-up on every cycle of iteration.
         """
@@ -512,6 +514,17 @@ class Pipe(Cell):
         Typically used for Pipelines which end with a sink and only produce side effects."""
         for item in self: pass
 
+    def fetch(self, limit = None):
+        """
+        Pull all data (or up to 'limit' items if limit != None) through the pipe and return as a list.
+        If limit=0, an empty list is returned immediately, otherwise open/close and _prolog/_epilog
+        are called and an actual attempt to pull an item through the pipe is made.
+        """
+        if limit is None:
+            return list(self)
+        else:
+            return list(islice(self, limit))
+
     def __rshift__(self, other):
         """'>>' operator overloaded, enables pipeline creation via 'a >> b >> c' syntax. Returned object is a Pipeline.
         Put RUN token at the end: a >> b >> RUN - to execute the pipeline immediately after creation."""
@@ -551,32 +564,66 @@ class Pipe(Cell):
 #         "1-line string with technical specification of this pipe: its name and possibly values of its knobs etc."
 
 
-### TOKENS
+#####################################################################################################################################################
+###
+###   TOKENS
+###
 
-class _PIPE(Pipe):                                                          # class of PIPE
+class Token(Pipe):
+    """
+    Base class for special predefined pipe objects that can be used in pipelines
+    to control pipeline creation and execution.
+    """
+
+class _PIPE(Token):                                                         # class of PIPE
     def __rshift__(self, other): return Pipeline(other)
 
-class _OFF(Pipe):                                                           # class of OFF
+class _RUN(Token): pass
+
+class _FETCH(Token):
+    def __init__(self, limit = None): self.limit = limit
+    def __call__(self, limit = None): return _FETCH(limit)
+
+class _OFF(Token):                                                          # class of OFF
     def __div__(self, other): return repr(other)
     __truediv__ = __rdiv__ = __div__
 
-class _ON(Pipe):                                                            # class of ON
+class _ON(Token):                                                           # class of ON
     def __div__(self, other): return other
     __truediv__ = __rdiv__ = __div__
 
+
 # Starts a pipeline. For easy appending of other pipes with automatic type casting: PIPE >> a >> b >> ...
-# Doesn't do any processing itself (is excluded from the pipeline). 
+# Doesn't do any processing itself (is excluded from the pipeline).
+#
 PIPE = _PIPE()
 
-# Invokes execution of a pipeline. When put at the end of a pipeline (a >> b >> ... >> RUN) indicates that it should be executed now. 
-RUN = Pipe()
+# When put at the end of a pipeline (a >> b >> ... >> RUN) indicates that it should be executed now.
+#
+RUN = _RUN()
+
+# When used at the end of a pipeline (a >> b >> ... >> FETCH) indicates that it should be
+# executed now and all output items should be returned as a list. This is convenient
+# for materializing a pipeline into a regular data set:
+#    data = (a >> b >> ... >> FETCH)
+# which is equivalent to:
+#    data = list(a >> b >> ... )
+# In some case the former is more readable than the latter.
+# FETCH can also be called with a parameter 'limit', like in:
+#    a >> b >> ... >> FETCH(100)
+# This creates another token object with self.limit defined indicating the maximum no. of values
+# that should be fetched from the pipe and returned in a list.
+#
+FETCH = _FETCH()
 
 # When used in division: OFF/pipelike_object or pipelike_object/OFF - turns off a given element of a pipeline by converting it to a string.
 # To be used for easy commenting out of individual pipes in a pipeline.
+#
 OFF = _OFF()
 
 # Complementar to OFF. When used in division: ON/pipelike_object or pipelike_object/ON - does nothing (that is, turns an element ON again).
 # Convenient when you need to turn an element off and on many times: you will first put /OFF, than change it to /ON, and so on.
+#
 ON = _ON()
 
 
@@ -1360,53 +1407,15 @@ class List(Pipe):
         
 #####################################################################################################################################################
 ###
-###   STRUCTURAL PIPES
+###   PIPELINE
 ###
 
 class MetaPipe(Pipe):
-    "Wraps up a number of pipes to provide meta-operations on them."
+    "A pipe that internally contains other pipes to provide meta-operations on them."
 
-class Container(MetaPipe):
-    "Base class for classes that contain multiple pipes inside: self.pipes."
-    pipes = []          # any collection of internal pipes
-    
-#     def copy(self, deep = True):
-#         "Smart shallow copy (in addition to deep copy). In shallow mode, copies the collection of pipes, too, so it can be modified afterwards without affecting the original."
-#         res = super(Container, self).copy(deep)
-#         if not deep: res.pipes = copy(self.pipes)
-#         return res
-#         
-#     def setKnobs(self, knobs, strict = False, pipes = None):
-#         super(Container, self).setKnobs(knobs, strict)          # Container itself has no knobs, but a subclass can define some
-#         if pipes is None: pipes = self.pipes
-#         for pipe in pipes:
-#             try:
-#                 if hasattr(pipe, 'setKnobs'): pipe.setKnobs(knobs, strict)
-#             except:
-#                 print pipe
-#                 raise
-
-class Wrapper(MetaPipe):
-    "Like Container, but always has only 1 internal pipe: self.pipe."
-    
-    pipe = None
-    
-    def setKnobs(self, knobs = {}, strict = False, **kwargs):
-        if kwargs:
-            knobs = knobs.copy()
-            knobs.update(kwargs)
-        super(Wrapper, self).setKnobs(knobs, strict)            # Wrapper itself has no knobs, but a subclass can define some
-        if self.pipe: self.pipe.setKnobs(knobs, strict)
-        
-    def _prolog(self):
-        "Call inner pipe's setup before starting iteration."
-        if self.pipe: self.pipe.setup()
-        return super(Wrapper, self)._prolog()
-
-#####################################################################################################################################################
-
-class Pipeline(MetaPipe):
-    """Sequence of data pipes connected sequentially, one after another. Pipeline is a MetaPipe and a Pipe itself.
+class Pipeline(Pipe):
+    """
+    Sequence of data pipes connected sequentially, one after another. Pipeline is a Pipe itself.
     Inner pipes can be accessed by indexing operator: pipeline[3]
     """
     
@@ -1425,6 +1434,8 @@ class Pipeline(MetaPipe):
         to avoid in-place modifications but preserve '>>' protocol."""
         if other is RUN:
             self.run()
+        elif isinstance(other, _FETCH):         # pull all data and return as a list, possibly with a limit on the no. of items to be fetched
+            return self.fetch(other.limit)
         else:
             res = self.copy1()
             res.pipes.append(other)
@@ -1591,6 +1602,51 @@ class Parallel(MetaPipe):   # DRAFT
 
 class Serial(MetaPipe): pass
 class Sequential(MetaPipe): pass
+
+
+#####################################################################################################################################################
+###
+###   STRUCTURAL PIPES
+###
+
+class Wrapper(MetaPipe):
+    "Provides meta-operations for exactly 1 internal pipe: self.pipe."
+    
+    pipe = None
+    
+    def setKnobs(self, knobs={}, strict=False, **kwargs):
+        if kwargs:
+            knobs = knobs.copy()
+            knobs.update(kwargs)
+        super(Wrapper, self).setKnobs(knobs, strict)  # Wrapper itself has no knobs, but a subclass can define some
+        if self.pipe: self.pipe.setKnobs(knobs, strict)
+    
+    def _prolog(self):
+        "Call inner pipe's setup before starting iteration."
+        if self.pipe: self.pipe.setup()
+        return super(Wrapper, self)._prolog()
+
+
+# class Container(MetaPipe):
+#     "Base class for classes that contain multiple pipes inside: self.pipes."
+#     pipes = []          # any collection of internal pipes
+#
+#     def copy(self, deep = True):
+#         "Smart shallow copy (in addition to deep copy). In shallow mode, copies the collection of pipes, too, so it can be modified afterwards without affecting the original."
+#         res = super(Container, self).copy(deep)
+#         if not deep: res.pipes = copy(self.pipes)
+#         return res
+#
+#     def setKnobs(self, knobs, strict = False, pipes = None):
+#         super(Container, self).setKnobs(knobs, strict)          # Container itself has no knobs, but a subclass can define some
+#         if pipes is None: pipes = self.pipes
+#         for pipe in pipes:
+#             try:
+#                 if hasattr(pipe, 'setKnobs'): pipe.setKnobs(knobs, strict)
+#             except:
+#                 print pipe
+#                 raise
+
 
 #####################################################################################################################################################
 
