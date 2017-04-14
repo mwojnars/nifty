@@ -527,7 +527,7 @@ class Pipe(Cell):
 
     def __rshift__(self, other):
         """'>>' operator overloaded, enables pipeline creation via 'a >> b >> c' syntax. Returned object is a Pipeline.
-        Put RUN token at the end: a >> b >> RUN - to execute the pipeline immediately after creation."""
+        Put RUN of FETCH token at the end: a >> b >> RUN to execute the pipeline immediately after creation."""
         # 'self' is a regular Pipe; specialized implementation for Pipeline defined in the subclass
         if other is RUN:
             Pipeline(self).run()
