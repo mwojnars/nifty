@@ -54,18 +54,19 @@ class xbasestring(basestring):
         return self.__class__(self.partition(sep)[0])
 
     def sub(self, pat = re.compile(r'\s\s+'), repl = '', count = 0):
-        "Replaces all (or up to 'count') occurences of pattern 'pat' with replacement string 'repl'. 'pat' is a regex (compiled or raw string)"
+        "Replaces all (or up to 'count') occurences of pattern 'pat' with replacement string 'repl'. 'pat' is a regex pattern (compiled or not)"
         if isinstance(pat, basestring):
             pat = re.compile(pat)
         return self.__class__(pat.sub(repl, self, count))
 
-    def re(self, regex, asList = False):
-        """If asList = False, returns the first substring that matches a given regex/group, or empty string.
-        If asList = True, returns a list of all matches (can be empty).
+    def re(self, regex, multi = False):
+        """If multi = False, returns the first substring that matches a given regex/group, or empty string.
+        If multi = True, returns a list of all matches (can be empty).
+        'regex' is either a compiled regular expression or a string pattern.
         See extract_regex() for more details on what is extracted.
         """
         matches = extract_regex(regex, self)
-        if asList:          return map(self.__class__, matches)
+        if multi:           return map(self.__class__, matches)
         elif len(matches):  return self.__class__(matches[0])
         else:               return self._empty
 
@@ -448,8 +449,12 @@ def keyPattern(keys):
 ###
 
 def levenshtein(a, b, casecost = 1, spacecost = 1, totals = False):
-    """Calculates the Levenshtein edit distance between strings a and b. 'casecost' is the cost of replacement when only the case is changed, not the actual character.
-    If totals=True, returns total character costs of both strings, in addition to the distance value, as a triple (dist, cost_a, cost_b).
+    """
+    Calculates the Levenshtein edit distance between strings a and b. 
+    'casecost' is the cost of replacement when only the case is changed, not the actual character.
+    If totals=True, returns total character costs of both strings, in addition to the distance value, 
+    as a triple (dist, cost_a, cost_b).
+    
     >>> levenshtein("Ala", "OLa")
     2
     >>> levenshtein("Ala", "OLa", 0.5)
@@ -697,13 +702,19 @@ class WordsModelUnderTraining(WordsModel):
 
 class Text(unicode):
     """
-    A string of text (unicode, str) that keeps information about the language (encoding) of the text:
+    A string of text (unicode, str) with associated information about the language (encoding) 
+    that should be used for its interpretation:
+    
         HTML, SQL, URL, plain text, ... 
-    and allows for nesting of one language in another (possibly multiple times), which creates a *compound* language: 
-        HTML/mediawiki, HTML/URL, SQL/HTML/raw, ...
-    Allows for safe, transparent and easy encoding/decoding/converting - to/from/between different languages.
+    
+    Allows languages to be nested in one another, possibly multiple times, which yields *compound* languages: 
+    
+        HTML/mediawiki, HTML/URL, SQL/HTML/text, ...
+    
+    The Text class keeps track of language embeddings and thus enables safe, transparent and easy 
+    encoding/decoding/converting - to/from/between different (possibly nested) languages.
     With Text, automatic sanitization of strings can be easily implemented, especially in web applications.
-    Nesting/unnesting (vertical transformations, e.g.: raw -> HTML/raw -> mediawiki/HTML/raw) is always loss-less. 
+    Nesting/unnesting (vertical transformations, e.g.: text -> HTML/text -> mediawiki/HTML/text) is always lossless. 
     Only conversions (horizontal transformations, e.g.: HTML <-> mediawiki) between languages can be lossy.
     
     Text instances can be manipulated with in a similar way as strings, using all common operators: + * % [].
@@ -719,15 +730,15 @@ class Text(unicode):
     To make a Text instance be treated as a regular string, cast it back to unicode or str, like unicode(text).    
 
     Example languages:
-    - raw  - raw plain text, without any encoding nor any special meaning
+    - text - plain text, without any encoding nor special meaning
     - HTML - rich text expressed in HTML language, a full HTML document; it can't be "decoded", because any decoding would have to be lossy
              (tags would be removed), however it might be converted to another rich-text language (wiki-text, YAML, ...),
              possibly with a loss in style information
-    - HTML/raw - raw text escaped for inclusion in HTML; contains entities which must be decoded to get 'raw' text again
-    - HyperML/raw - raw text escaped for inclusion in HyperML; contains $* escape strings which must be decoded to get 'raw' again
-    - HyperML/HTML/raw - raw text encoded for HTML and later escaped for HyperML; you first have to decode HyperML, only then HTML, 
+    - HTML/text - plain text escaped for inclusion in HTML; contains entities which must be decoded to get plain 'text' again
+    - HyperML/text - plain text escaped for inclusion in HyperML; contains $* escape strings which must be decoded to get plain 'text' again
+    - HyperML/HTML/text - plain text encoded for HTML and later escaped for HyperML; you first have to decode HyperML, only then HTML, 
              only then you will obtain the original string
-    - URL/raw - URL-encoded raw text, for inclusion in a URL, typically as a GET parameter
+    - URL/text - URL-encoded plain text, for inclusion in a URL, typically as a GET parameter
     - URL - full URL of any form
     - SQL
     - value - text representation of a value
@@ -737,7 +748,7 @@ class Text(unicode):
     it's similar to including a file inside a folder: you first have to visit the parent folder (or decode the outer language)
     in order to access the inner file (the original nested text). Also, this naming convention expresses the fact that a language
     nested in another language forms, in fact, YET ANOTHER language (!) that should have its own name (X/Y), because it has different rules
-    for how a raw string needs to be encoded in order to form a correct representation in this language.
+    for how a plain-text string needs to be encoded in order to form a correct representation in this language.
     For example, JavaScript code embedded in HTML's <script> block is, stricly speaking, no longer a JavaScript code! 
     That's because the "</script>" substring - which normally is a valid string in JavaScript - is no longer allowed to appear 
     inside this code. Thus, the true language of this piece of code is "HTML/JavaScript", rather than just "JavaScript"! 
@@ -758,24 +769,24 @@ class Text(unicode):
     ('HTML', 'HTML')
     >>> (t + t).language, (t * 3).language, (5 * t).language
     ('HTML', 'HTML', 'HTML')
-    >>> (Text('<h1>Title</h1>', 'HTML') + Text('ala &amp; ola', 'HTML/raw')).language
+    >>> (Text('<h1>Title</h1>', 'HTML') + Text('ala &amp; ola', 'HTML/text')).language
     'HTML'
-    >>> Text().join([Text('<h1>Title</h1>', 'HTML'), Text('ala &amp; ola', 'HTML/raw')])
+    >>> Text().join([Text('<h1>Title</h1>', 'HTML'), Text('ala &amp; ola', 'HTML/text')])
     u'<h1>Title</h1>ala &amp; ola'
-    >>> Text(' ', 'HTML').join(['<h1>Title</h1>', Text('ala &amp; ola', 'HTML/raw')])
+    >>> Text(' ', 'HTML').join(['<h1>Title</h1>', Text('ala &amp; ola', 'HTML/text')])
     u'<h1>Title</h1> ala &amp; ola'
-    >>> t + Text('ola', "raw")
+    >>> t + Text('ola', "text")
     Traceback (most recent call last):
         ...
-    Exception: Can't combine Text/string instances with incompatible languages: 'HTML' and 'raw'
+    Exception: Can't combine Text/string instances with incompatible languages: 'HTML' and 'text'
     >>> unicode(t).language
     Traceback (most recent call last):
         ...
     AttributeError: 'unicode' object has no attribute 'language'
     """
     
-    language = None     # non-empty name of the formal language in which the string is expressed; can be a compound language, like "HTML/raw";
-                        # for a raw string, we recommend "raw" as a name; None = unspecified language that can be combined with any other language 
+    language = None     # non-empty name of the formal language in which the string is expressed; can be a compound language, like "HTML/text";
+                        # for plain text, we recommend "text" as a name; None = unspecified language that can be combined with any other language 
     settings = None     # the TextSettings object that contains global configuration for this object: list of converters and conversion settings (UNUSED for now)
 
     def __new__(cls, text = u'', language = None, settings = None): 
@@ -897,9 +908,12 @@ class Text(unicode):
         return Text(unicode.zfill(self, *a, **kw), self.language)
 
 
-# a shorthand for Text(..., "HTML"); in the future may be converted to a subclass with some additional 
+# shorthand for Text(..., "text")
+def Plain(text, settings = None): return Text(text, "text", settings)
+
+# shorthand for Text(..., "HTML"); in the future may be converted to a subclass with some additional 
 # HTML-specific functionality or configuration defaults (?)
-def TextHTML(text, settings = None): return Text(text, "HTML", settings)
+def HTML(text, settings = None): return Text(text, "HTML", settings)
 
 
 #########################################################################################################################################################

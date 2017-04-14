@@ -6,7 +6,7 @@ External dependencies: Scrapy 0.16.4 (for HTML/XML)
 TODO: possibly might replace urllib2 with Requests (http://docs.python-requests.org/en/latest/)
 
 ---
-This file is part of Nifty python package. Copyright (c) 2009-2014 by Marcin Wojnarski.
+This file is part of Nifty python package. Copyright (c) by Marcin Wojnarski.
 
 Nifty is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License 
 as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
@@ -524,7 +524,9 @@ class Referer(WebHandler):
             if lasturl:
                 prefix = os.path.commonprefix([lasturl, req.url])
                 suffix = req.url[len(prefix):-1]
-                if suffix in last.resp.content:                      # suffix - simple heuristic to check if the new URL really occured in the previous page
+                #print repr(suffix)
+                #print repr(last.resp.content)
+                if str(suffix) in last.resp.content:        # suffix - simple heuristic to check if the new URL really occured in the previous page; str() to handle URL being unicode object
                     req.add_header('Referer', lasturl) 
         return self.next.handle(req)
 
@@ -671,6 +673,23 @@ class CustomTransform(WebHandler):
         "Override in subclasses"
         return resp
         
+class Callback(WebHandler):
+    """Call predefined external functions on forward and backward passes, with Request or Request+Response objects as arguments.
+       Typically, the functions should only perform monitoring and reporting,
+       but it's also technically possible that they modify the internals of Request/Response objects.
+    """
+    def __init__(self, onRequest = None, onResponse = None):
+        self.onRequest = onRequest
+        self.onResponse = onResponse
+        
+    def handle(self, req):
+        if self.onRequest is not None:
+            self.onRequest(req)
+        resp = self.next.handle(req)
+        if self.onResponse is not None:
+            self.onResponse(req, resp)
+        return resp
+    
 
 class handlers(object):
     "Legacy."
@@ -779,10 +798,20 @@ class WebClient(Object):
             self._tail.append(handler)
         self._rebuild()
         return self                                         # chaining the calls is possible: return client.addHandler(...).addHandler(...)
-#     def setTail(self, tail = []):
-#         self._tail = tail
-#         self._rebuild()
-#         return self
+        
+    def removeHandler(self, handler):
+        """Remove a handler that was added with addHandler(), either to the head or tail of the handlers list.
+           If the same handler has been added multiple times, its first occurence is removed.
+           ValueError is raised if the handler is not present in the list.
+        """
+        if handler in self._head:
+            self._head.remove(handler)
+        elif handler in self._tail:
+            self._tail.remove(handler)
+        else:
+            raise ValueError("WebClient.removeHandler: handler (%s) not in list" % handler)
+        self._rebuild()
+        return self                                         # chaining the calls is possible: return client.removeHandler(...).removeHandler(...)
         
     def _rebuild(self):
         "Rearrange handlers into a chain once again."
@@ -925,6 +954,16 @@ class Crawler(object):
 ###  but should be replaced in the future with reference to underlying basic implementation to remove dependency on Scrapy.
 ###  Scrapy home: http://scrapy.org/ 
 ###
+###  Example use:
+###      page = xdoc(URL)
+###      node = page['xpath...']
+###      print node.text()
+###
+###  Methods (some of them from Scrapy):
+###      css, css1, xpath, node, nodes, html, text, texts, anchor
+###      nodeWithID, nodeOfClass, nodesOfClass, nodeAfter, textAfter
+###      [], ... in
+###
 
 try:                                                                            # newer versions of Scrapy
     from scrapy.selector.unified import SelectorList as XPathSelectorList
@@ -966,6 +1005,10 @@ class XNoneType(HtmlXPathSelector):
     def __init__(self): HtmlXPathSelector.__init__(self, text = "<_XNone_></_XNone_>")
     def __bool__(self): return False
     __nonzero__ = __bool__
+
+    @staticmethod
+    def text(*a, **kw): return ''
+        
 XNone = XNoneType()
 
 
@@ -976,9 +1019,15 @@ class XPathSelectorPatch(object):
     html = __unicode__ = XPathSelector.extract
     
     @staticmethod
-    def node(self, xpath, none = False):
+    def css1(self, css, none = False):
+        "Similar to css() but returns always 1 node rather than a list of nodes. None or XNone if no node has been found"
+        l = self.css(css)
+        if l: return l[0]
+        return None if none else XNone
+    @staticmethod
+    def node(self, xpath = None, css = None, none = False):
         "Similar to nodes() but returns always 1 node rather than a list of nodes. None or XNone if no node has been found"
-        l = self.nodes(xpath)
+        l = self.css(css) if css != None else self.xpath(xpath)
         if l: return l[0]
         return None if none else XNone
     @staticmethod
@@ -986,15 +1035,18 @@ class XPathSelectorPatch(object):
         """ Returns all text contained in the 1st node selected by 'xpath', as a list of x-strings (xbasestring) 
         with tags stripped out and entities decoded. Empty string if 'xpath' doesn't select any node.
         If norm=True, whitespaces are normalized: multiple spaces merged, leading/trailing spaces stripped out.
+        WARNING: doesn't work for an HTML text (untagged) node, use extract() instead.
         """
         xpath = "string(" + xpath + ")"
         if norm: xpath = "normalize-space(" + xpath + ")"
-        return xbasestring(self.nodes(xpath)[0].extract())
+        l = self.nodes(xpath)
+        return xbasestring(l[0].extract() if l else '')
     @staticmethod
     def texts(self, xpath, norm = True):
         """ Returns all texts selected by given 'xpath', as a list of x-strings (xbasestring),
         with tags stripped out and entities decoded. Empty list if 'xpath' doesn't select any node.
         If norm=True, whitespaces are normalized: multiple spaces merged, leading/trailing spaces stripped out.
+        WARNING: doesn't work for HTML text (untagged) nodes, use extract() instead.
         """
         nodes = self.nodes(xpath)
         return [n.text(".", norm) for n in nodes]
@@ -1036,6 +1088,15 @@ class XPathSelectorPatch(object):
             return self.text(self._path_after % xpath_escape(title), norm)
         return self.text(self._path_after_exact % xpath_escape(exact), norm)
     
+    @staticmethod
+    def reText(self, regex, multi = False, norm = True):
+        "Call text() followed by xbasestring.re(regex, multi). Space normalization performed by default."
+        return self.text(norm = norm).re(regex, multi = multi)
+    @staticmethod
+    def reHtml(self, regex, multi = False):
+        "Call html() followed by xbasestring.re(regex, multi)."
+        return self.html().re(regex, multi = multi)
+
     @staticmethod
     def __getitem__(self, path):
         """For convenient [...] selection of subnodes and attributes: node['subnode'] or node['@attr'] or node['any_XPath']. 
