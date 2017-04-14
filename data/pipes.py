@@ -1017,6 +1017,7 @@ class Random(Buffer):
         super(Random, self).setup()
         self.rand = random.Random(self.seed)
     def iter(self):
+        if not self.data: return
         while True:
             yield self.rand.choice(self.data)
 
