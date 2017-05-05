@@ -53,6 +53,85 @@ else:
                        classname, getattrs, setattrs, Tee, openfile, Object, __Object__
     from nifty.files import GenericFile, File as files_File, SafeRewriteFile, ObjectFile, JsonFile, DastFile
 
+
+#####################################################################################################################################################
+###
+###   DATA objects
+###
+
+class __Data__(type):
+    def __init__(cls, *args):
+        type.__init__(cls, *args)
+        
+        # initialize special attribute __metadata__;
+        # set default None values for metadata fields
+        if hasattr(cls, '__metadata__') and cls.__metadata__ is not None:
+            if isstring(cls.__metadata__):
+                cls.__metadata__ = cls.__metadata__.split()
+            for attr in cls.__metadata__:
+                if not hasattr(cls, attr):
+                    setattr(cls, attr, None)
+
+
+class Data(object):
+    """A data item. Keeps the core data value (self.value) + any metadata that is produced
+       or needs to be consumed at different stages of a data processing pipeline.
+       Typically, metadata attributes record the origin or evolution of a data item,
+       or contain ground truth information for training/testing of learning models.
+       
+       Cells, pipes and pipelines can in general operate on data objects of ANY type, not necessarily Data,
+       but in many cases it is more convenient to wrap up original objects in Data class
+       so as to annotate them with various additional information.
+    """
+    __metaclass__ = __Data__
+    
+    # The core data value; an object of any type
+    value = None
+    
+    # An optional list of metadata attributes.
+    # Inside a subclass definition, it can be initialized with a string of names, which will be automatically
+    # converted to a list of names upon creation of the class.
+    # Corresponding class-level attributes are created automatically with default None values if missing.
+    __metadata__ = None
+
+    # If __metadata__ is undefined (None), all other attributes are treated as metadata...
+
+
+    def __init__(self, value, *meta, **kwmeta):
+        
+        self.value = value
+        if meta:
+            for k, v in izip(self.__metadata__, meta):
+                setattr(self, k, v)
+        if kwmeta:
+            for k, v in kwmeta.iteritems():
+                setattr(self, k, v)
+    
+    def get(self):
+        """Return 'value' and all metadata as a tuple, in the same order as in __metadata__,
+           or sorted alphabetically by name if __metadata__ is None.
+        """
+        keys = self.__metadata__
+        if keys is None:
+            keys = [k for k in self.__dict__.iterkeys() if k != 'value'].sort()
+        return (self.value,) + tuple(getattr(self, k) for k in keys)
+    
+    def meta(self):
+        "Return all metadata as a newly created dict object."
+        d = self.__dict__.copy()  # fast but sometimes incorrect: when a getter is defined for an attribute
+        if 'value' in d: del d['value']
+        return d
+    
+    @staticmethod
+    def derived(origin, value):
+        "Create a Data item with a new 'value'and all metadata copied from a previous Data item, 'origin'."
+        data = Data(value)
+        for meta in origin.__dict__.iterkeys():
+            v = getattr(origin, meta)
+            setattr(data, meta, v)
+        return data
+
+
 #####################################################################################################################################################
 ###
 ###   SPACES and KNOBS
@@ -188,7 +267,7 @@ class KGrid(KnobSpace):
 class __Cell__(__Object__):
     "Metaclass for generating Cell subclasses. Sets up the lists of knobs and inner cells."
     def __init__(cls, *args):
-        super(__Cell__, cls).__init__(*args)
+        super(__Cell__, cls).__init__(cls, *args)
         cls.label('__knobs__')
         cls.label('__inner__')
         #print cls, 'knobs:', cls.__knobs__
