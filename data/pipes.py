@@ -37,7 +37,7 @@ import sys, heapq, math, random, numpy as np, jsonpickle, csv, itertools, thread
 from copy import copy, deepcopy
 from time import time, sleep
 from Queue import Queue
-from itertools import islice
+from itertools import islice, izip
 from collections import OrderedDict
 
 # nifty; whenever possible, use relative imports to allow embedding of the library inside higher-level packages;
@@ -87,19 +87,21 @@ class Data(object):
     
     # The core data value; an object of any type
     value = None
-    
+
+    # Name of the attribute holding core data
+    __value__ = 'value'
+
     # An optional list of metadata attributes.
     # Inside a subclass definition, it can be initialized with a string of names, which will be automatically
     # converted to a list of names upon creation of the class.
     # Corresponding class-level attributes are created automatically with default None values if missing.
+    # If __metadata__ is undefined (None), all other attributes are treated as metadata...
     __metadata__ = None
 
-    # If __metadata__ is undefined (None), all other attributes are treated as metadata...
 
-
-    def __init__(self, value, *meta, **kwmeta):
+    def __init__(self, value = None, *meta, **kwmeta):
         
-        self.value = value
+        if value is not None: self.value = value
         if meta:
             for k, v in izip(self.__metadata__, meta):
                 setattr(self, k, v)
@@ -131,6 +133,56 @@ class Data(object):
             setattr(data, meta, v)
         return data
 
+
+class __DataTuple__(type):
+    def __init__(cls, *args):
+        type.__init__(cls, *args)
+        
+        # initialize a list of attributes, __attrs__;
+        # set default None value for an attribute if a default is missing
+        if hasattr(cls, '__attrs__') and cls.__attrs__ is not None:
+            if isstring(cls.__attrs__):
+                cls.__attrs__ = cls.__attrs__.split()
+            for attr in cls.__attrs__:
+                if not hasattr(cls, attr):
+                    setattr(cls, attr, None)
+
+class DataTuple(object):
+    """
+    An object that can be used like a tuple, with the object's predefined attributes
+    being mapped to fixed positions in a tuple.
+    Similar to namedtuple(), but namedtuple is a function not a (base) class,
+    so it's impossible to check isinstance(obj, namedtuple).
+    """
+    __metaclass__ = __DataTuple__
+    __attrs__ = []
+    
+    def get(self):
+        "Return all __attrs__ values as a tuple."
+        return tuple(getattr(self, k) for k in self.__attrs__)
+
+    def set(self, *args, **kwargs):
+        if args:
+            for k, v in izip(self.__attrs__, args):
+                setattr(self, k, v)
+        if kwargs:
+            for k, v in kwargs.iteritems():
+                setattr(self, k, v)
+
+    def __getitem__(self, pos):
+        attrs = self.__attrs__[pos]
+        if isinstance(attrs, list):
+            return [getattr(self, a) for a in attrs]
+        return getattr(self, attrs)
+
+    def __setitem__(self, pos, item):
+        return getattr(self, self.__attrs__[pos])
+
+    def __iter__(self):
+        for a in self.__attrs__: yield getattr(self, a)
+
+    __init__ = set
+    
 
 #####################################################################################################################################################
 ###
