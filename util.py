@@ -566,7 +566,7 @@ class Object(object):
         self.__dict__.update(__dict__)
         self.__dict__.update(kwargs)
     def __eq__(self, other): 
-        return self.__dict__ == other.__dict__
+        return self.__dict__ == getattr(other, '__dict__', None)
 #     def __str__(self):
 #         if not self.__verbose__: return object.__str__(self)
 #         items = ["%s = %s" % (k,repr(v)) for k,v in self.__dict__.iteritems()]
