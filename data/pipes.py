@@ -4,6 +4,15 @@ Allow construction of complex networks (pipelines) of data processing units, tha
 and process large volumes of data (data streams) efficiently thanks to streamed processing
 (processing one item at a time, instead of a full dataset).
 
+Features:
+- Building pipelines:  pipe1 >> pipe2 >> pipe3 >> ....
+- Generating and processing multi-element samples in the pipeline:
+   ... >> TUPLE(fun1, fun2, fun3) >> ...
+  or
+   ... >> (fun1, fun2, fun3) >> ...
+  applies all the functions to every input item and generates a tuple of atomic results on output.
+  If an input item is a tuple itself, functions are applied selectively to corresponding elements of the tuple.
+
 Related topics:
 - Dataflow programming: https://en.wikipedia.org/wiki/Dataflow_programming
 - Flow-based programming: https://en.wikipedia.org/wiki/Flow-based_programming
@@ -44,12 +53,12 @@ from collections import OrderedDict
 # only when executed as a standalone file, for unit tests, do an absolute import
 if __name__ != "__main__":
     from .. import util
-    from ..util import isint, islist, isstring, issubclass, isfunction, isgenerator, iscontainer, istype, \
+    from ..util import isint, islist, istuple, isstring, issubclass, isfunction, isgenerator, iscontainer, istype, \
                        classname, getattrs, setattrs, Tee, openfile, Object, __Object__
     from ..files import GenericFile, File as files_File, SafeRewriteFile, ObjectFile, JsonFile, DastFile
 else:
     from nifty import util
-    from nifty.util import isint, islist, isstring, issubclass, isfunction, isgenerator, iscontainer, istype, \
+    from nifty.util import isint, islist, istuple, isstring, issubclass, isfunction, isgenerator, iscontainer, istype, \
                        classname, getattrs, setattrs, Tee, openfile, Object, __Object__
     from nifty.files import GenericFile, File as files_File, SafeRewriteFile, ObjectFile, JsonFile, DastFile
 
@@ -182,6 +191,21 @@ class DataTuple(object):
         for a in self.__attrs__: yield getattr(self, a)
 
     __init__ = set
+
+    # def apply(self, *fun):
+    #     """Returns a function g(x) that applies given functions, fun[0], fun[1], ... to a data item 'x'
+    #        and returns the results combined into a DataTuple of the same class as self.
+    #        If any fun[i] is None, an identity function is used on a given position.
+    #     """
+    #     def ident(x): return x
+    #
+    #     fun = tuple(f or ident for f in fun)            # replace Nones with identity function
+    #     cls = self.__class__
+    #
+    #     def g(x):
+    #         return cls(*(f(x) for f in fun))
+    #
+    #     return g
     
 
 #####################################################################################################################################################
@@ -625,7 +649,7 @@ class Pipe(Cell):
             self.reset()
             self.setup()
             self.created = True
-        if self.iterating: raise Exception("Data pipe %s opened for iteration twice, before previous iteration has been closed" % self)
+        if self.iterating: raise Exception("Data pipe (%s) opened for iteration twice, before previous iteration has been closed" % self)
         self.iterating = True
         self.yielded = 0
         header = self.open()
@@ -758,6 +782,11 @@ OFF = _OFF()
 ON = _ON()
 
 
+# A token used inside Tuple(...) to indicate that a corresponding input element should be passed unchanged
+# to the output tuple, without any transformation (empty transform).
+FORWARD = object()
+
+
 #####################################################################################################################################################
 ###
 ###   FAMILIES
@@ -821,6 +850,9 @@ class Transform(_Functional):
     def process(self, item):
         "Return modified item; or None, interpreted as no result (drop item). Subclasses can read self.count to get 1-based index of the current item."
         return self.fun(item)
+    
+    __call__ = process
+    
     
 class Monitor(_Functional):
     """A pipe that (by assumption) doesn't modify input items, only observes the data and possibly produces 
@@ -1006,6 +1038,54 @@ class Function(Transform):
         return classname(self)
 
 
+class Tuple(Function):
+    """Creates a function-pipe g(x) that applies predefined functions, fun[0], fun[1], ...
+       to a data item 'x' and returns atomic results all combined into a tuple.
+       If fun[i] is FORWARD or [], an identity function is used on a given position.
+       If fun[i] is a list (of functions): fun[i] == [f1,f2,f3...], all the functions will be combined
+       into a composite function: fun[i](x) ::= f3(f2(f1(x))) - note the order (!).
+       If 'x' is a tuple, 'fun' functions are applied to corresponding subitems of 'x'
+       ('x' must be of the same length as 'fun' in such case).
+       
+       Tuple can be used for easy creation of data tuples of any size/structure during pipeline processing:
+       ... >> Tuple(fun1, fun2, fun3) >> ...
+       The above can also be written as:
+       ... >> (fun1, fun2, fun3) >> ...
+       which is automatically converted to a basic form with an explicit Tuple as above.
+    """
+    def __init__(self, *fun):
+        
+        def ident(x): return x
+        def convert(f):
+            if f in (FORWARD, []): return ident
+            if isinstance(f, Pipe): return operator(f)
+            return f
+        
+        def composite(fl):
+            if not islist(fl): return convert(fl)
+            if len(fl) == 1: return convert(fl[0])
+            if len(fl) == 0: return ident
+            def F(x):
+                # 'fl' is a list of functions
+                res = x
+                for f in fl: res = convert(f)(res)
+                return res
+            return F
+    
+        # replace FORWARD tokens with identity functions; convert lists of functions to a composite function
+        self.fun = fun = tuple(composite(f) for f in fun)
+        self.n   = n   = len(fun)
+        self.rng = rng = range(n)
+        
+    def process(self, x):
+        if isinstance(x, tuple):
+            assert len(x) == self.n, 'Tuple.process(): expected an input tuple of length %s, ' \
+                                     'a tuple of length %s received instead: %s' % (self.n, len(x), x)
+            return tuple(self.fun[i](x[i]) for i in self.rng)
+        else:
+            return tuple(f(x) for f in self.fun)
+        
+
 ###  Generators
 
 class Empty(Pipe):
@@ -1127,7 +1207,31 @@ class Subset(Pipe):
 class Sample(Pipe):
     """Random sample of input items. Every input item is decided independently with a given probability,
     unconditional on what items were chosen earlier."""
+
     
+###  Transforms
+
+class Batch(Pipe):
+    """Combine every consecutive group of 'batch' items into a single list and yield as an output item (a batch).
+       The last batch can have less than 'batch' items.
+       If 'batch' is None, all input items are combined together into one batch.
+       If no input items were pulled from the source, no output batch is yielded.
+    >>> PIPE >> [1,2,3,4,5,6] >> Batch(4) >> List >> Print >> RUN
+    [[1, 2, 3, 4], [5, 6]]
+    """
+    class __knobs__:
+        batch = None
+    def iter(self):
+        items = []
+        self.count = 0
+        for item in self.source:
+            self.count += 1
+            items.append(item)
+            if None != self.batch <= len(items):
+                yield items
+                items = []
+        if items: yield items
+
 
 ###  Buffers
 
@@ -2043,12 +2147,12 @@ class Controller(Wrapper):
 #         self.iterator = self.pipeline.__iter__()
 
 
-class operator(Controller):
+def operator(pipe):
     """
-    A wrapper that turns a pipe (pipeline) back to a regular input-output function 
-    (a callable, to be precise) that can be fed with data manually, one item at a time.
+    A wrapper that turns a pipe (pipeline) back to a regular input-output function
+    that can be fed with data manually, one item at a time.
     During processing, the original pipe can still be accessed via 'pipe' property of the wrapper.
-    
+
     >>> pipeline = Function(lambda x: 2*x) >> Function(lambda x: str(x).upper())
     >>> fun = operator(pipeline)
     >>> print fun(3)
@@ -2057,19 +2161,27 @@ class operator(Controller):
     ['ALA', 'ALA']
     >>> print fun.pipe[0]
     Function <lambda>
-    
+
     Typically the pipe is an instance of Transform. Even if not, it still must pull exactly 1 item at a time
     from the source, otherwise an exception will be raised.
     Can be used in the same caller's thread, no need to spawn a new thread.
     """
+    controller = Controller(pipe)
+    controller._prolog()
+    def f(x): return controller.process(x)
+    f.pipe = pipe
+    return f
 
+
+class operator_pipe(Controller):
+    "Same as operator(), but implemented as a callable pipe, a subclass of Controller, rather than a function."
     def __init__(self, pipe):
         super(operator, self).__init__(pipe)
         self._prolog()
-
+    
     # processing can be invoked with op(item), like a function, in addition to op.process(item) defined in base class
     __call__ = Controller.process
-    
+
 
 #####################################################################################################################################################
 
@@ -2149,15 +2261,17 @@ def _normalize(pipes):
     """Normalize a given list of pipes. Remove None's and strings (used for commenting out), 
     instantiate Pipe classes if passed instead of an instance, wrap up functions, collections and files.
     """
-    def convert(h):
+    def convert(pos_h):
+        pos, h = pos_h
         if issubclass(h, Pipe): return h()
         if isfunction(h): return Function(h)
-        if iscontainer(h): return Collection(h)
-        if isgenerator(h): return Collection(h)
+        if istuple(h): return Tuple(*h)
+        if (iscontainer(h) or isgenerator(h)): return Collection(h)
         if isinstance(h, (file, GenericFile, Tee)): return File(h)
         if isstring(h): return None                             # strings can be inserted in a pipeline; treated as comments (ignored)
         return h
-    return filter(None, map(convert, pipes))
+    
+    return filter(None, map(convert, enumerate(pipes)))
 
 
 #####################################################################################################################################################
