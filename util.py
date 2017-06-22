@@ -742,6 +742,19 @@ def hashmd5(s, n = 4):
 ###   NUMBERS
 ###
 
+class Counter(object):
+    """Accumulator that adds up a weighted stream of numbers or numpy arrays and returns their mean
+       at the end (or at any point during accumulation)."""
+    def __init__(self):
+        self.total = 0          # sum total of input values; will be changed to float/numpy during accumulation if necessary
+        self.count = 0          # sum total of weights; will be changed to float during accumulation if necessary
+    def add(self, x, weight = 1):
+        self.total += x * weight
+        self.count += weight
+    def mean(self):
+        return self.total / float(self.count)
+
+
 def minmax(*args):
     if len(args) == 1: args = args[0]                   # you can pass a single argument containing a sequence, or each value separately as multiple arguments
     if len(args) == 2: return args if args[0] <= args[1] else (args[1],args[0])
