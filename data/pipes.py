@@ -572,7 +572,7 @@ class Pipe(Cell):
     - operator '>>'; can use classes, not only instances, with >>; can use collections, functions, ... with >>
       See also PIPE and RUN tokens and Pipeline class.
     - attributes managed by base classes during execution, can be accessed by subclasses:
-        count, yielded, iterating
+        count, yielded, _iterating
     
     See Cell base class for information about knobs and serialization.
     """
@@ -585,8 +585,8 @@ class Pipe(Cell):
     count     = None            # no. of input items read so far in this iteration, or 1-based index of the item currently processed; calculated in most standard pipes, but not all
     yielded   = None            # no. of output items yielded so far in this iteration, EXcluding header item
 
-    created   = False           # has the object been initialized already, in setup()? most pipes have empty setup(), only more complex ones use it for creation of internal structures
-    iterating = False           # flag that protects against multiple iteration of the same pipe, at the same time
+    _created   = False          # has the object been initialized already, in setup()? most pipes have empty setup(), only more complex ones use it for creation of internal structures
+    _iterating = False          # flag that protects against multiple iteration of the same pipe, at the same time
     
 
     def setup(self):
@@ -599,7 +599,7 @@ class Pipe(Cell):
     def reset(self):
         """Reverse of setup(). Clears internal structures and brings the pipe back to an uninitialized state, 
         like if setup() were never executed. Knobs and other static settings should be preserved!
-        If overriding in subclasses, remember to set self.created=False at the end.
+        If overriding in subclasses, remember to set self._created=False at the end.
         """
 
     def open(self):
@@ -645,12 +645,11 @@ class Pipe(Cell):
         raise NotImplemented()
 
     def _prolog(self):
-        if not self.created:            # call reset/setup() if needed
-            self.reset()
+        if not self._created:               # call reset/setup() if needed
             self.setup()
-            self.created = True
-        if self.iterating: raise Exception("Data pipe (%s) opened for iteration twice, before previous iteration has been closed" % self)
-        self.iterating = True
+            self._created = True
+        if self._iterating: raise Exception("Data pipe (%s) opened for iteration twice, before previous iteration has been closed" % self)
+        self._iterating = True
         self.yielded = 0
         header = self.open()
         self._pushTrace(self)
@@ -662,7 +661,7 @@ class Pipe(Cell):
         """
         self._popTrace(self)
         self.close()
-        del self.iterating                  # could set self.iterating=False instead, but deleting is more convenient for serialization
+        del self._iterating                 # could set self._iterating=False instead, but deleting is more convenient for serialization
 
     def run(self):
         """Pull all data through the pipe, but don't yield nor return anything. 
@@ -946,8 +945,9 @@ class Monitor(_Functional):
 
 class Filter(_Functional):
     """Doesn't change input items, but filters out undesired ones. 
-    Method process() must return True (pass the item through) or False (drop the item), not the actual object."""
-    
+    Method process() must return True (pass the item through) or False (drop the item), not the actual object.
+    By default, if no 'fun' is given, filters out false values from the stream.
+    """
     def __iter__(self):
         header = self._prolog()
         if header is not None: yield header
@@ -969,6 +969,7 @@ class Filter(_Functional):
     def accept(self, item):
         return self.process(item)
     def process(self, item):                            # deprecated in Filter; override accept() instead
+        if self.fun is None: return bool(item)
         return self.fun(item)
 
 
@@ -1243,18 +1244,42 @@ class Buffer(Pipe):
 class Random(Buffer):
     """
     Buffers all data in memory, then picks and yields items randomly on each subsequent request.
-    Iterates infinitely over the buffered data.
+    Iterates infinitely over the buffered data. If a weighing function is given, 'weigh',
+    items will be selected with probability proportional to their weights
+    (weights can be any non-negative numbers, they will be normalized to unit sum during buffer setup).
     """
+    NONE = object()
+    
     class __knobs__:
-        seed = None
+        seed  = None        # optional random seed
+        weigh = None        # optional weighing function for items: weigh(item) >= 0
         
     def setup(self):
         super(Random, self).setup()
-        self.rand = random.Random(self.seed)
+        if self.weigh is None:
+            self.rand = random.Random(self.seed)
+            self.probs = None
+        else:
+            self.rand = np.random.RandomState(self.seed)        # use numpy's random to be able to choose items with non-uniform distribution
+            weights = [self.weigh(item) for item in self.data]
+            weights = np.array(weights + [0])                   # append zero weight for NONE below
+            self.probs = weights / float(weights.sum())         # normalize weights to unit sum (probabilities)
+
+            # convert self.data from list to array;
+            # append NONE with zero weight beforehand to avoid merging individual numpy arrays if present in self.data
+            self.data += [Random.NONE]
+            self.data = np.array(self.data, dtype = object)
+
     def iter(self):
-        if not self.data: return
-        while True:
-            yield self.rand.choice(self.data)
+        if not len(self.data): return
+        choice = self.rand.choice
+        
+        if self.probs is None:
+            while True:
+                yield choice(self.data)
+        else:
+            while True:
+                yield choice(self.data, p = self.probs)         # numpy's RandomState accepts probability distribution
 
 
 class Sort(Pipe):
@@ -1686,7 +1711,7 @@ class Pipeline(Pipe):
     def __getitem__(self, pos):
         """Returns either an operating pipe from self.pipeline, or a static pipe from self.pipes, 
         depending whether called during iteration or not."""
-        return self.pipeline[pos] if self.iterating else self.pipes[pos]
+        return self.pipeline[pos] if self.pipeline else self.pipes[pos]
     
     def setKnobs(self, knobs = {}, strict = False, **kwargs):
         if kwargs:
@@ -1712,16 +1737,18 @@ class Pipeline(Pipe):
 #                 raise
 
     def setup(self):
-        #self.pipes = _normalize(self.pipes)
+        # normalize pipes and connect into a list
         self.pipeline = _normalize(self.pipes)
         self.setInnerKnobs(self.knobs)
         self.knobs = None
 #         for pipe in self.pipeline:
 #             pipe.setup()
 
+    def reset(self):
+        del self.pipeline
+        self._created = False
+
     def iter(self):
-        # normalize pipes; connect into a list; connect entire pipeline with the source
-        #self.pipeline = _normalize(self.pipes)
         prev = self.source
         for next in self.pipeline:
             if prev is not None: next.source = prev         # 1st pipe can be a generator or collection, not necessarily a Pipe (no .source attribute)
@@ -1755,9 +1782,9 @@ class Pipeline(Pipe):
         return '\n'.join(lines)
     
     def __str__(self):
-        if self.iterating:
-            return "open Pipeline [" + '] >> ['.join(map(str, self.pipeline)) + ']'
-        return "Pipeline [" + '] >> ['.join(map(str, self.pipes)) + ']'
+        if self.pipeline:
+            return "connected Pipeline [" + '] >> ['.join(map(str, self.pipeline)) + ']'
+        return "abstract Pipeline [" + '] >> ['.join(map(str, self.pipes)) + ']'
     
 
 #####################################################################################################################################################
