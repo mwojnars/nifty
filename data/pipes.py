@@ -642,7 +642,7 @@ class Pipe(Cell):
         it's typically better to override iter() not __iter__(), to allow for implicit calls to _prolog/_epilog
         at the start/end of iteration.
         """
-        raise NotImplemented()
+        raise NotImplementedError
 
     def _prolog(self):
         if not self._created:               # call reset/setup() if needed
@@ -678,6 +678,11 @@ class Pipe(Cell):
             return list(self)
         else:
             return list(islice(self, limit))
+
+    def fetch1(self):
+        "Return 1 item from the pipe, or None if the pipe is empty."
+        items = self.fetch(1)
+        return items[0] if items else None
 
     def __rshift__(self, other):
         """'>>' operator overloaded, enables pipeline creation via 'a >> b >> c' syntax. Returned object is a Pipeline.
@@ -850,7 +855,8 @@ class Transform(_Functional):
         "Return modified item; or None, interpreted as no result (drop item). Subclasses can read self.count to get 1-based index of the current item."
         return self.fun(item)
     
-    __call__ = process
+    def __call__(self, item):
+        return self.process(item)
     
     
 class Monitor(_Functional):
@@ -984,6 +990,47 @@ class Filter(_Functional):
 #     def append(self): pass
 #     def load(self): pass
 #     def __getitem__(self, key): pass
+
+
+class Generator(_Functional):
+    """
+    Generator of a sequence of data items produced by an external function passed as self.fun, or by an overriden method
+    (one of: produce, produceMany or generate) implemented in a subclass.
+    """
+    
+    def __iter__(self):
+        header = self._prolog()
+        if header is not None: yield header
+
+        try:
+            self.count = 0
+            for item in self.generate():
+                self.count += 1
+                self.yielded += 1
+                yield item
+        
+        except GeneratorExit, ex:
+            self._epilog()
+            raise
+        self._epilog()
+
+    def produce(self):
+        "Override to produce 1 data item at a time. Return None to indicate no more items."
+        if self.fun is None: raise NotImplementedError
+        return self.fun()
+
+    def produceMany(self):
+        "Override to produce a batch of data items. Each batch should be returned as a list, None if no more items."
+        while True:
+            item = self.produce()
+            if item is None: break
+            return [item]
+
+    def generate(self):
+        "Override to yield a sequence of data items."
+        for batch in self.produceMany():
+            if batch is None: break
+            for item in batch: yield item
 
 
 #####################################################################################################################################################

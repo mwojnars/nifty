@@ -1001,8 +1001,21 @@ def listdir(root, onlyfiles = False, onlydirs = False, recursive = False, fullpa
     """Generic routine for listing directory contents: files or subfolders or both. More versatile than standard os.listdir(), 
     can be used as a replacement. For large folders, with many files/dirs, listing all items is much faster 
     than 'onlyfiles' or 'onlydirs' (file/dir check for each item is very time consuming).
+    'recursive': only partially implemented currently (!).
     """
     root = normdir(root)
+
+    if recursive:
+        items = []
+        for folder, dirnames, filenames in os.walk(root):
+            if not onlydirs:
+                for filename in filenames:
+                    items.append(os.path.join(folder, filename))
+            if not onlyfiles:
+                for dirname in dirnames:
+                    items.append(os.path.join(folder, dirname))
+        return items
+
     if not onlyfiles and not onlydirs:  items = os.listdir(root)
     elif onlyfiles:                     items = os.walk(root).next()[2]
     elif onlydirs:                      items = os.walk(root).next()[1]
