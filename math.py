@@ -290,10 +290,6 @@ class Accumulator2D(object):
         self.count[y : y + h, x : x + w, ...] += weight
     
     def get(self):
-        # print 'Accumulator2D.get(): self.total, self.count...'
-        # k = 300
-        # print self.total[k:k+10, k:k+10]
-        # print self.count[k:k+10, k:k+10]
         return self.total / self.count
     
     def __getitem__(self, key):
