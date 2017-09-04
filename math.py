@@ -48,6 +48,11 @@ def np_loads(s):
 norm = linalg.norm
 
 
+def ceildiv(a, b):
+    "Ceil division that uses pure integer arithmetics. Always correct, unlike floating-point ceil() + conversion to int."
+    return -(-a // b)
+
+
 ########################################################################################################################
 ###
 ###   RANDOM NUMBERS
@@ -159,8 +164,8 @@ def sigmoid_sqrt(x, center = None, slope = None):
 def sigmoid_lin(x, p0, p1):
     "Piece-wise linear sigmoidal function, with values in [0,1], 0/1 glue points in p0/p1 respectively"
     if x is None: return 0.5
-    y = float(x - p0) / (p1 - p0)
-    return y.clip(0, 1) 
+    y = (x - p0) / (p1 - p0)
+    return y.clip(0, 1)
     
 
 def binarize(x, x01 = 0.1, x09 = 0.9, funsigm = sigmoid_sqrt, delta = 2.0):
@@ -191,8 +196,7 @@ def binarize(x, x01 = 0.1, x09 = 0.9, funsigm = sigmoid_sqrt, delta = 2.0):
     v1 = funsigm(1, center, slope)
     Y = (Y - v0) * (1.0/(v1-v0))
     
-    Y[Y < 0] = 0
-    Y[Y > 1] = 1
+    Y.clip(0, 1)
     if isnumber(x):
         Y = Y.flatten()[0]
         
@@ -259,3 +263,41 @@ def likelihood(probs, log = np.log, exp = False):
     loglike = mean(log(probs))
     return np.exp(loglike) if exp else loglike
     
+
+class Accumulator2D(object):
+    """A 2D+ numpy array, typically large one, that is built incrementally
+    from multiple (smaller) 2D patches, possibly overlapping.
+    Each patch comes with a non-negative weight or an array of weights (of the same shape as the patch),
+    which can be interpreted as confidence in corresponding patch values.
+    The resulting array is computed as a weighted average of all accumulated patches.
+    """
+    
+    def __init__(self, X, weight = 0.001, dtype = None):
+        """
+        'weight' of the initial fullsize patch X should be strictly positive
+        to avoid "division by zero" errors for the elements where no patch was provided.
+        """
+        assert X.ndim >= 2
+        self.total = X.copy().astype(dtype) * weight
+        # self.count = np.ones_like(self.total) * weight
+        self.count = np.zeros_like(self.total)
+        self.count[:] = weight
+    
+    def add(self, x, y, patch, weight = 1.0):
+        "'weight' can be a scalar or an array of weights of the same shape as 'patch'"
+        h, w = patch.shape[:2]
+        self.total[y : y + h, x : x + w, ...] += patch * weight
+        self.count[y : y + h, x : x + w, ...] += weight
+    
+    def get(self):
+        # print 'Accumulator2D.get(): self.total, self.count...'
+        # k = 300
+        # print self.total[k:k+10, k:k+10]
+        # print self.count[k:k+10, k:k+10]
+        return self.total / self.count
+    
+    def __getitem__(self, key):
+        "Efficient sliced read access to the current value of the accumulated array."
+        return self.total[key] / self.count[key]
+    
+
