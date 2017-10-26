@@ -698,9 +698,9 @@ class Pipe(Cell):
         return Pipeline(other, self)
 
     def __add__(self, other):
-        """Addition '+' operator creates a Union node that performs *sequential concatenation* of data streams from both sources into a single output stream.
+        """Addition '+' operator creates a Chain node that performs *sequential concatenation* of data streams from both sources into a single output stream.
         Note that in Python shifting operations have lower priority than arithmetic operations, so A+B >> C is interpreted as (A+B) >> C, as expected!"""
-        return Union(self, other)
+        return Chain(self, other)
 
     def __batch_iter__(self, maxsize = 100):
         "Like __iter__, but yields batches of data items instead of single items. Every batch is a list."
@@ -767,7 +767,7 @@ RUN = _RUN()
 #    data = (a >> b >> ... >> FETCH)
 # which is equivalent to:
 #    data = list(a >> b >> ... )
-# In some case the former is more readable than the latter.
+# In some cases the former is more readable than the latter.
 # FETCH can also be called with a parameter 'limit', like in:
 #    a >> b >> ... >> FETCH(100)
 # This creates another token object with self.limit defined indicating the maximum no. of values
@@ -1837,19 +1837,59 @@ class Pipeline(Pipe):
 #####################################################################################################################################################
 
 class MultiSource(Pipe):
-    pass
-
-class Union(MultiSource):
-    """Combine items from multiple sources by concatenating corresponding streams one after another: all items from the 1st source; then 2nd... then 3rd...
-    TODO: 'mixed' mode (breadth-first, streams interlaced)."""
-    def __init__(self, *sources):
+    def initKnobs(self, *sources, **knobs):
         self.sources = _normalize(sources)
+        super(MultiSource, self).initKnobs(**knobs)
+        
+    def setup(self):
+        super(MultiSource, self).setup()
+        if not self.sources: raise Exception("%s: no sources attached" % classname(self))
+        
+class Chain(MultiSource):
+    "Combine items from multiple sources by concatenating corresponding streams one after another: all items from the 1st source; then 2nd... then 3rd..."
     def iter(self):
         return itertools.chain(*self.sources)
     def __add__(self, other):
         res = self.copy1()
         res.sources.append(other)
         return res
+
+class Mix(MultiSource):
+    """
+    Mix items from multiple sources:
+    - either in deterministic way, preserving uniform proportions of data volume read from every source at every step (TODO);
+    - or in a random way, picking items independently from each other, with predefined probabilities.
+    Generation of output items continues until the first of the sources is exhausted.
+    """
+    class __knobs__:
+        probs = None        # probabilities or counts of each source, e.g. [0.2,0.3,0.5] or [2,3,5]; None if equal probabilities to be used
+        seed  = None        # optional random seed
+
+    def setup(self):
+        super(Mix, self).setup()
+        cls_rand = random.Random if self.probs is None else np.random.RandomState
+        self.rand = cls_rand(self.seed)
+        if self.probs is not None:
+            self.probs = np.array(self.probs) / float(sum(self.probs))      # normalize probabilities to unit sum
+
+    def iter(self):
+        iters = map(iter, self.sources)
+        if self.probs is not None:
+            iters = np.array(iters, dtype = object)                         # convert list to numpy array for numpy's RandomState.choice()
+
+        try:
+            if self.probs is None:
+                while True:
+                    src = self.rand.choice(iters)
+                    yield src.next()
+            else:
+                while True:
+                    src = self.rand.choice(iters, p = self.probs)           # numpy's RandomState accepts probability distribution
+                    yield src.next()
+            
+        except StopIteration:
+            pass
+    
 
 class Zip(MultiSource):
     """Combines items from multiple sources. Similar to zip(). Available modes: 
