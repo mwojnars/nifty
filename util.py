@@ -590,12 +590,16 @@ class Object(object):
         result = cls.__new__(cls)
         memo[id(self)] = result                         # to avoid excess copying in case the object itself is referenced from its member
         deepcopy = copy.deepcopy
+        
+        # nocopy(): avoid copying of shared variables and generator objects (frequent case in data pipelines)
         if self.__shared__:
-            for k, v in self.__getstate__().iteritems():
-                setattr(result, k, v if k in self.__shared__ else deepcopy(v, memo))
+            def nocopy(k, v): return k in self.__shared__ or isgenerator(v)
         else:
-            for k, v in self.__getstate__().iteritems():
-                setattr(result, k, deepcopy(v, memo))
+            def nocopy(k, v): return isgenerator(v)
+        
+        for k, v in self.__getstate__().iteritems():
+            setattr(result, k, v if nocopy(k, v) else deepcopy(v, memo))
+
         return result
     
 
