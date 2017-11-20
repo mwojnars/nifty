@@ -19,6 +19,7 @@ import HTMLParser
 from collections import defaultdict
 from array import array
 from itertools import imap
+from copy import copy
 
 if __name__ != "__main__":
     from .util import isstring, islist, bound, flatten, merge_spaces
@@ -447,7 +448,7 @@ def keyPattern(keys):
 
 #########################################################################################################################################################
 ###
-###  ALGORITHMS
+###  EDIT DISTANCE
 ###
 
 def levenshtein(a, b, casecost = 1, spacecost = 1, totals = False):
@@ -539,6 +540,210 @@ def levenscore(a, b, casecost = 0.5, spacecost = 0.5):
     """
     return 1.0 - levendist(a, b, casecost, spacecost)
 
+
+#########################################################################################################################################################
+###
+###  STRING ALIGNMENT
+###
+
+def align(s1, s2, mismatch = None, GAP = '_', dtype = 'int'):
+    """
+    Align two strings, s1 and s2, and compute their Levenshtein distance using Wagner-Fischer algorithm.
+    Each of s1/s2 can be a plain character string (str/unicode) or a FuzzyString.
+    Return aligned strings and their distance value: (aligned1, aligned2, distance).
+    During alignment, GAP character is inserted where gaps are created.
+    The cost of each character-level alignment of chars c1 and c2 is evaluated with mismatch(c1,c2) function,
+    or a standard 0/1 equality function if mismatch is None.
+    The order of characters for mismatch() is always kept the same: c1 from s1 as 1st argument, c2 from s2 as second;
+    hence mismatch() can exploit this information in cost calculation, e.g. to weigh differently characters from s1 and s2.
+    
+    >>> align('', '')
+    ('', '', 0)
+    >>> align('align two strings', 'align one string')
+    ('align two strings', 'align one string_', 4)
+    >>> align('algorithm to align', 'align two')
+    ('algorithm t_o align', 'al___ign_ two______', 13)
+    >>> align('to align', 'align two')
+    ('to align____', '___align two', 7)
+    """
+    
+    from numpy import zeros, array
+    
+    if mismatch is None:
+        def mismatch(c1, c2): return int(c1 != c2)
+    
+    n1, n2 = len(s1), len(s2)
+    dist = zeros((n1 + 1, n2 + 1), dtype = dtype)           # dist[i,j]: distance between s1[:i] and s2[:j]
+    
+    # fill out row #0 and column #0
+    for i in xrange(n1):                                    # move along column #0 (string s1)
+        dist[i+1, 0] = dist[i, 0] + mismatch(s1[i], GAP)
+    for j in xrange(n2):                                    # move along row #0 (string s2)
+        dist[0, j+1] = dist[0, j] + mismatch(GAP, s2[j])
+
+    # edit[i,j] = 0/1/2: indicator of the optimal edit operation on (i,j) position when aligning s1[:i] to s2[:j]
+    edit = zeros((n1+1, n2+1), dtype = 'int8')
+    edit[:,0] = 1
+    
+    # fill out the rest of 'dist' and 'edit' arrays
+    for i in range(1, n1+1):
+        for j in xrange(1, n2+1):
+            cost_left = dist[i, j-1] + mismatch(GAP, s2[j-1])
+            cost_up   = dist[i-1, j] + mismatch(s1[i-1], GAP)
+            cost_diag = dist[i-1, j-1] + mismatch(s1[i-1], s2[j-1])
+            
+            cost = array([cost_left, cost_up, cost_diag])
+            step = cost.argmin()
+
+            edit[i,j] = step
+            dist[i,j] = cost[step]
+    
+    i, j = n1, n2
+    a1 = a2 = ''
+    
+    # reconstruct aligned strings a1, a2, from the array of optimal edit operations in each step
+    while i or j:
+        if edit[i,j] == 0:
+            a1 += GAP
+            a2 += s2[j-1]
+            j -= 1
+        elif edit[i,j] == 1:
+            a1 += s1[i-1]
+            a2 += GAP
+            i -= 1
+        elif edit[i,j] == 2:
+            a1 += s1[i-1]
+            a2 += s2[j-1]
+            i -= 1
+            j -= 1
+        
+    assert len(a1) == len(a2)
+    a1 = a1[::-1]
+    a2 = a2[::-1]
+
+    return a1, a2, dist[n1,n2]
+    
+    
+class Charset(object):
+    chars = None            # list of characters in this charset:     chars[0..N-1] -> char
+    classes = None          # dictionary of class IDs for all chars:  classes[char] -> 0..N-1
+    
+    def __init__(self, chars = None, text = None):
+        "'chars': list or string; if a list, it may contain special pseudo-characters in a form of arbitrary string or object."
+        
+        if chars is None: chars = []
+        if text: chars = list(chars) + sorted(set(text))
+        
+        assert len(set(chars)) == len(chars)        # make sure there are no duplicates in 'chars'
+        self.chars = chars
+        self.classes = {char:cls for cls, char in enumerate(chars)}
+    
+    def classOf(self, char):
+        "Mapping: char -> 0..N-1 or None if 'char' not in charset."
+        return self.classes.get(char)
+
+    def encode(self, s, dtype = 'float'):
+        "Convert a plain string of characters into a list of one-hot numpy vectors encoding class IDs."
+        
+        from numpy import zeros
+        N = len(self.chars)
+        
+        def encode_one(char):
+            vec = zeros(N, dtype = dtype)
+            hot = self.classes.get(char)
+            if hot is None: raise Exception("Charset.encode(): trying to encode a character (%s) that is not in charset." % char)
+            vec[hot] = 1
+            return vec
+        
+        return map(encode_one, s)
+        
+    
+class FuzzyString(object):
+    """
+    A string of "fuzzy characters" (fchars), each being a probability distribution over a predefined charset.
+    
+    >>> charset = Charset('abc')
+    >>> fuzzy = FuzzyString('aabccc', charset, dtype = int)
+    >>> list(fuzzy.chars[2])
+    [0, 1, 0]
+    >>> fuzzy += 'aaa'
+    >>> list(fuzzy.chars[-1])
+    [1, 0, 0]
+    >>> fuzzy[0] == 'a'
+    True
+    >>> fuzzy[0] == 'b'
+    False
+    """
+    
+    charset = None          # mapping: char -> 0..N-1
+    chars = None            # list of numpy vectors: chars[pos][c] = probability/frequency of character class 'c' on position 'pos' in string
+                            # kept as a list, not monolithic 2D array, to enable fast edit operations: character insertion/deletion;
+                            # you should treat each array, chars[pos], as IMMUTABLE (!) and make a copy
+                            # whenever particular fraquency values need to be modified. The `chars` list itself is mutable (!).
+    dtype = None
+    
+    def __init__(self, text = '', charset = None, chars = None, dtype = 'float32'):
+        "Convert a crisp string 'text' to fuzzy."
+        
+        assert charset is not None
+        self.charset = charset
+        self.dtype = dtype
+        self.chars = charset.encode(text, dtype) if chars is None else chars
+        
+    def copy(self):
+        "Shallow copy of self."
+        return copy(self)
+        
+    def __getitem__(self, pos):
+        "Character #pos returned as a FuzzyString (!), not a numpy array. Can be safely compared using == or != "
+        dup = copy(self)
+        dup.chars = [self.chars[pos]]
+        return dup
+        
+    def __eq__(self, other):
+        from numpy import array_equal
+        if isinstance(other, basestring):                                       # crisp string?
+            other = FuzzyString(other, self.charset, dtype = self.dtype)
+        return self.charset == other.charset and array_equal(self.chars, other.chars)
+        
+    def _concat_R(self, other, inplace = False):
+        "Concat raw `chars` of self and `other`."
+        if isinstance(other, basestring):                                       # crisp string?
+            if inplace:
+                self.chars += self.charset.encode(other, self.dtype)
+            else:
+                return self.chars + self.charset.encode(other, self.dtype)
+        else:                                                                   # or FuzzyString?
+            # assert isinstance(other, FuzzyString)
+            if not self.charset == other.charset: raise Exception("Trying to add two FuzzyStrings with different charsets")
+            if inplace:
+                self.chars += other.chars
+            else:
+                return self.chars + other.chars
+        
+    def _concat_L(self, other):
+        assert isinstance(other, basestring)
+        return self.charset.encode(other, self.dtype) + self.chars
+        
+    def append(self, other):
+        "Append a char or a string, crisp or fuzzy."
+        self.chars = self._concat_R(other)
+        
+    def __add__(self, other):
+        return FuzzyString(self.charset, chars = self._concat_R(other), dtype = self.dtype)
+        
+    def __radd__(self, other):
+        return FuzzyString(self.charset, chars = self._concat_L(other), dtype = self.dtype)
+
+    def __iadd__(self, other):
+        self._concat_R(other, inplace = True)
+        return self
+
+
+#########################################################################################################################################################
+###
+###  LANGUAGE modeling
+###
 
 def ngrams(text, N = 4):
     '''

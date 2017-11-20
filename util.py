@@ -566,7 +566,7 @@ class Object(object):
         self.__dict__.update(__dict__)
         self.__dict__.update(kwargs)
     def __eq__(self, other): 
-        return self.__dict__ == other.__dict__
+        return self.__dict__ == getattr(other, '__dict__', None)
 #     def __str__(self):
 #         if not self.__verbose__: return object.__str__(self)
 #         items = ["%s = %s" % (k,repr(v)) for k,v in self.__dict__.iteritems()]
@@ -590,12 +590,16 @@ class Object(object):
         result = cls.__new__(cls)
         memo[id(self)] = result                         # to avoid excess copying in case the object itself is referenced from its member
         deepcopy = copy.deepcopy
+        
+        # nocopy(): avoid copying of shared variables and generator objects (frequent case in data pipelines)
         if self.__shared__:
-            for k, v in self.__getstate__().iteritems():
-                setattr(result, k, v if k in self.__shared__ else deepcopy(v, memo))
+            def nocopy(k, v): return k in self.__shared__ or isgenerator(v)
         else:
-            for k, v in self.__getstate__().iteritems():
-                setattr(result, k, deepcopy(v, memo))
+            def nocopy(k, v): return isgenerator(v)
+        
+        for k, v in self.__getstate__().iteritems():
+            setattr(result, k, v if nocopy(k, v) else deepcopy(v, memo))
+
         return result
     
 
@@ -741,6 +745,19 @@ def hashmd5(s, n = 4):
 ###
 ###   NUMBERS
 ###
+
+class Counter(object):
+    """Accumulator that adds up a weighted stream of numbers or numpy arrays and returns their mean
+       at the end (or at any point during accumulation)."""
+    def __init__(self):
+        self.total = 0          # sum total of input values; will be changed to float/numpy during accumulation if necessary
+        self.count = 0          # sum total of weights; will be changed to float during accumulation if necessary
+    def add(self, x, weight = 1):
+        self.total += x * weight
+        self.count += weight
+    def mean(self):
+        return self.total / float(self.count)
+
 
 def minmax(*args):
     if len(args) == 1: args = args[0]                   # you can pass a single argument containing a sequence, or each value separately as multiple arguments
@@ -988,8 +1005,21 @@ def listdir(root, onlyfiles = False, onlydirs = False, recursive = False, fullpa
     """Generic routine for listing directory contents: files or subfolders or both. More versatile than standard os.listdir(), 
     can be used as a replacement. For large folders, with many files/dirs, listing all items is much faster 
     than 'onlyfiles' or 'onlydirs' (file/dir check for each item is very time consuming).
+    'recursive': only partially implemented currently (!).
     """
     root = normdir(root)
+
+    if recursive:
+        items = []
+        for folder, dirnames, filenames in os.walk(root):
+            if not onlydirs:
+                for filename in filenames:
+                    items.append(os.path.join(folder, filename))
+            if not onlyfiles:
+                for dirname in dirnames:
+                    items.append(os.path.join(folder, dirname))
+        return items
+
     if not onlyfiles and not onlydirs:  items = os.listdir(root)
     elif onlyfiles:                     items = os.walk(root).next()[2]
     elif onlydirs:                      items = os.walk(root).next()[1]

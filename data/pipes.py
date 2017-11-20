@@ -4,6 +4,15 @@ Allow construction of complex networks (pipelines) of data processing units, tha
 and process large volumes of data (data streams) efficiently thanks to streamed processing
 (processing one item at a time, instead of a full dataset).
 
+Features:
+- Building pipelines:  pipe1 >> pipe2 >> pipe3 >> ....
+- Generating and processing multi-element samples in the pipeline:
+   ... >> TUPLE(fun1, fun2, fun3) >> ...
+  or
+   ... >> (fun1, fun2, fun3) >> ...
+  applies all the functions to every input item and generates a tuple of atomic results on output.
+  If an input item is a tuple itself, functions are applied selectively to corresponding elements of the tuple.
+
 Related topics:
 - Dataflow programming: https://en.wikipedia.org/wiki/Dataflow_programming
 - Flow-based programming: https://en.wikipedia.org/wiki/Flow-based_programming
@@ -37,21 +46,167 @@ import sys, heapq, math, random, numpy as np, jsonpickle, csv, itertools, thread
 from copy import copy, deepcopy
 from time import time, sleep
 from Queue import Queue
-from itertools import islice
+from itertools import islice, izip
 from collections import OrderedDict
 
 # nifty; whenever possible, use relative imports to allow embedding of the library inside higher-level packages;
 # only when executed as a standalone file, for unit tests, do an absolute import
 if __name__ != "__main__":
     from .. import util
-    from ..util import isint, islist, isstring, issubclass, isfunction, isgenerator, iscontainer, istype, \
+    from ..util import isint, islist, istuple, isstring, issubclass, isfunction, isgenerator, iscontainer, istype, \
                        classname, getattrs, setattrs, Tee, openfile, Object, __Object__
     from ..files import GenericFile, File as files_File, SafeRewriteFile, ObjectFile, JsonFile, DastFile
 else:
     from nifty import util
-    from nifty.util import isint, islist, isstring, issubclass, isfunction, isgenerator, iscontainer, istype, \
+    from nifty.util import isint, islist, istuple, isstring, issubclass, isfunction, isgenerator, iscontainer, istype, \
                        classname, getattrs, setattrs, Tee, openfile, Object, __Object__
     from nifty.files import GenericFile, File as files_File, SafeRewriteFile, ObjectFile, JsonFile, DastFile
+
+
+#####################################################################################################################################################
+###
+###   DATA objects
+###
+
+class __Data__(type):
+    def __init__(cls, *args):
+        type.__init__(cls, *args)
+        
+        # initialize special attribute __metadata__;
+        # set default None values for metadata fields
+        if hasattr(cls, '__metadata__') and cls.__metadata__ is not None:
+            if isstring(cls.__metadata__):
+                cls.__metadata__ = cls.__metadata__.split()
+            for attr in cls.__metadata__:
+                if not hasattr(cls, attr):
+                    setattr(cls, attr, None)
+
+
+class Data(object):
+    """A data item. Keeps the core data value (self.value) + any metadata that is produced
+       or needs to be consumed at different stages of a data processing pipeline.
+       Typically, metadata attributes record the origin or evolution of a data item,
+       or contain ground truth information for training/testing of learning models.
+       
+       Cells, pipes and pipelines can in general operate on data objects of ANY type, not necessarily Data,
+       but in many cases it is more convenient to wrap up original objects in Data class
+       so as to annotate them with various additional information.
+    """
+    __metaclass__ = __Data__
+    
+    # The core data value; an object of any type
+    value = None
+
+    # Name of the attribute holding core data
+    __value__ = 'value'
+
+    # An optional list of metadata attributes.
+    # Inside a subclass definition, it can be initialized with a string of names, which will be automatically
+    # converted to a list of names upon creation of the class.
+    # Corresponding class-level attributes are created automatically with default None values if missing.
+    # If __metadata__ is undefined (None), all other attributes are treated as metadata...
+    __metadata__ = None
+
+
+    def __init__(self, value = None, *meta, **kwmeta):
+        
+        if value is not None: self.value = value
+        if meta:
+            for k, v in izip(self.__metadata__, meta):
+                setattr(self, k, v)
+        if kwmeta:
+            for k, v in kwmeta.iteritems():
+                setattr(self, k, v)
+    
+    def get(self):
+        """Return 'value' and all metadata as a tuple, in the same order as in __metadata__,
+           or sorted alphabetically by name if __metadata__ is None.
+        """
+        keys = self.__metadata__
+        if keys is None:
+            keys = [k for k in self.__dict__.iterkeys() if k != 'value'].sort()
+        return (self.value,) + tuple(getattr(self, k) for k in keys)
+    
+    def meta(self):
+        "Return all metadata as a newly created dict object."
+        d = self.__dict__.copy()  # fast but sometimes incorrect: when a getter is defined for an attribute
+        if 'value' in d: del d['value']
+        return d
+    
+    @staticmethod
+    def derived(origin, value):
+        "Create a Data item with a new 'value'and all metadata copied from a previous Data item, 'origin'."
+        data = Data(value)
+        for meta in origin.__dict__.iterkeys():
+            v = getattr(origin, meta)
+            setattr(data, meta, v)
+        return data
+
+
+class __DataTuple__(type):
+    def __init__(cls, *args):
+        type.__init__(cls, *args)
+        
+        # initialize a list of attributes, __attrs__;
+        # set default None value for an attribute if a default is missing
+        if hasattr(cls, '__attrs__') and cls.__attrs__ is not None:
+            if isstring(cls.__attrs__):
+                cls.__attrs__ = cls.__attrs__.split()
+            for attr in cls.__attrs__:
+                if not hasattr(cls, attr):
+                    setattr(cls, attr, None)
+
+class DataTuple(object):
+    """
+    An object that can be used like a tuple, with the object's predefined attributes
+    being mapped to fixed positions in a tuple.
+    Similar to namedtuple(), but namedtuple is a function not a (base) class,
+    so it's impossible to check isinstance(obj, namedtuple).
+    """
+    __metaclass__ = __DataTuple__
+    __attrs__ = []
+    
+    def get(self):
+        "Return all __attrs__ values as a tuple."
+        return tuple(getattr(self, k) for k in self.__attrs__)
+
+    def set(self, *args, **kwargs):
+        if args:
+            for k, v in izip(self.__attrs__, args):
+                setattr(self, k, v)
+        if kwargs:
+            for k, v in kwargs.iteritems():
+                setattr(self, k, v)
+
+    def __getitem__(self, pos):
+        attrs = self.__attrs__[pos]
+        if isinstance(attrs, list):
+            return [getattr(self, a) for a in attrs]
+        return getattr(self, attrs)
+
+    def __setitem__(self, pos, item):
+        return getattr(self, self.__attrs__[pos])
+
+    def __iter__(self):
+        for a in self.__attrs__: yield getattr(self, a)
+
+    __init__ = set
+
+    # def apply(self, *fun):
+    #     """Returns a function g(x) that applies given functions, fun[0], fun[1], ... to a data item 'x'
+    #        and returns the results combined into a DataTuple of the same class as self.
+    #        If any fun[i] is None, an identity function is used on a given position.
+    #     """
+    #     def ident(x): return x
+    #
+    #     fun = tuple(f or ident for f in fun)            # replace Nones with identity function
+    #     cls = self.__class__
+    #
+    #     def g(x):
+    #         return cls(*(f(x) for f in fun))
+    #
+    #     return g
+    
 
 #####################################################################################################################################################
 ###
@@ -188,7 +343,7 @@ class KGrid(KnobSpace):
 class __Cell__(__Object__):
     "Metaclass for generating Cell subclasses. Sets up the lists of knobs and inner cells."
     def __init__(cls, *args):
-        super(__Cell__, cls).__init__(*args)
+        super(__Cell__, cls).__init__(cls, *args)
         cls.label('__knobs__')
         cls.label('__inner__')
         #print cls, 'knobs:', cls.__knobs__
@@ -417,7 +572,7 @@ class Pipe(Cell):
     - operator '>>'; can use classes, not only instances, with >>; can use collections, functions, ... with >>
       See also PIPE and RUN tokens and Pipeline class.
     - attributes managed by base classes during execution, can be accessed by subclasses:
-        count, yielded, iterating
+        count, yielded, _iterating
     
     See Cell base class for information about knobs and serialization.
     """
@@ -427,11 +582,11 @@ class Pipe(Cell):
     
     source    = None            # source Pipe or iteratable from which input data for 'self' will be pulled
     sources   = None            # list of source pipes; used only in pipes with multiple inputs, instead of 'source'
-    count     = None            # no. of input items read so far in this iteration, or 1-based index of the item currently processed; tracked in most standard pipes (not all)
+    count     = None            # no. of input items read so far in this iteration, or 1-based index of the item currently processed; calculated in most standard pipes, but not all
     yielded   = None            # no. of output items yielded so far in this iteration, EXcluding header item
 
-    created   = False           # has the object been initialized already, in setup()? most pipes have empty setup(), only more complex ones use it for creation of internal structures
-    iterating = False           # flag that protects against multiple iteration of the same pipe, at the same time
+    _created   = False          # has the object been initialized already, in setup()? most pipes have empty setup(), only more complex ones use it for creation of internal structures
+    _iterating = False          # flag that protects against multiple iteration of the same pipe, at the same time
     
 
     def setup(self):
@@ -444,7 +599,7 @@ class Pipe(Cell):
     def reset(self):
         """Reverse of setup(). Clears internal structures and brings the pipe back to an uninitialized state, 
         like if setup() were never executed. Knobs and other static settings should be preserved!
-        If overriding in subclasses, remember to set self.created=False at the end.
+        If overriding in subclasses, remember to set self._created=False at the end.
         """
 
     def open(self):
@@ -464,7 +619,9 @@ class Pipe(Cell):
     
     def __iter__(self):
         """Main method of every data pipe. Pulls data from the source(s), processes and yields results of processing 
-        one by one. Subclasses should override either iter() or __iter__(), in the latter case the subclass 
+        one by one. Implicitly calls self._prolog() before pulling/yielding the 1st item, and self._epilog()
+        at the end of iteration (but only when at least one attempt to pull an item is performed!).
+        Subclasses should override either iter() or __iter__(), in the latter case the subclass
         is responsible for calling _prolog and _epilog. Generic subclasses also allow to override open() and close() 
         to perform custom initialization and clean-up on every cycle of iteration.
         """
@@ -485,15 +642,14 @@ class Pipe(Cell):
         it's typically better to override iter() not __iter__(), to allow for implicit calls to _prolog/_epilog
         at the start/end of iteration.
         """
-        raise NotImplemented()
+        raise NotImplementedError
 
     def _prolog(self):
-        if not self.created:            # call reset/setup() if needed
-            self.reset()
+        if not self._created:               # call reset/setup() if needed
             self.setup()
-            self.created = True
-        if self.iterating: raise Exception("Data pipe %s opened for iteration twice, before previous iteration has been closed" % self)
-        self.iterating = True
+            self._created = True
+        if self._iterating: raise Exception("Data pipe (%s) opened for iteration twice, before previous iteration has been closed" % self)
+        self._iterating = True
         self.yielded = 0
         header = self.open()
         self._pushTrace(self)
@@ -505,16 +661,32 @@ class Pipe(Cell):
         """
         self._popTrace(self)
         self.close()
-        del self.iterating                  # could set self.iterating=False instead, but deleting is more convenient for serialization
+        del self._iterating                 # could set self._iterating=False instead, but deleting is more convenient for serialization
 
     def run(self):
         """Pull all data through the pipe, but don't yield nor return anything. 
         Typically used for Pipelines which end with a sink and only produce side effects."""
         for item in self: pass
 
+    def fetch(self, limit = None):
+        """
+        Pull all data (or up to 'limit' items if limit != None) through the pipe and return as a list.
+        If limit=0, an empty list is returned immediately, otherwise open/close and _prolog/_epilog
+        are called and an actual attempt to pull an item through the pipe is made.
+        """
+        if limit is None:
+            return list(self)
+        else:
+            return list(islice(self, limit))
+
+    def fetch1(self):
+        "Return 1 item from the pipe, or None if the pipe is empty."
+        items = self.fetch(1)
+        return items[0] if items else None
+
     def __rshift__(self, other):
         """'>>' operator overloaded, enables pipeline creation via 'a >> b >> c' syntax. Returned object is a Pipeline.
-        Put RUN token at the end: a >> b >> RUN - to execute the pipeline immediately after creation."""
+        Put RUN of FETCH token at the end: a >> b >> RUN to execute the pipeline immediately after creation."""
         # 'self' is a regular Pipe; specialized implementation for Pipeline defined in the subclass
         if other is RUN:
             Pipeline(self).run()
@@ -526,9 +698,9 @@ class Pipe(Cell):
         return Pipeline(other, self)
 
     def __add__(self, other):
-        """Addition '+' operator creates a Union node that performs *sequential concatenation* of data streams from both sources into a single output stream.
+        """Addition '+' operator creates a Chain node that performs *sequential concatenation* of data streams from both sources into a single output stream.
         Note that in Python shifting operations have lower priority than arithmetic operations, so A+B >> C is interpreted as (A+B) >> C, as expected!"""
-        return Union(self, other)
+        return Chain(self, other)
 
     def __batch_iter__(self, maxsize = 100):
         "Like __iter__, but yields batches of data items instead of single items. Every batch is a list."
@@ -551,33 +723,72 @@ class Pipe(Cell):
 #         "1-line string with technical specification of this pipe: its name and possibly values of its knobs etc."
 
 
-### TOKENS
+#####################################################################################################################################################
+###
+###   TOKENS
+###
 
-class _PIPE(Pipe):                                                          # class of PIPE
+class Token(Pipe):
+    """
+    Base class for special predefined pipe objects that can be used in pipelines
+    to control pipeline creation and execution.
+    """
+
+class _PIPE(Token):                                                         # class of PIPE
     def __rshift__(self, other): return Pipeline(other)
 
-class _OFF(Pipe):                                                           # class of OFF
+class _RUN(Token): pass
+
+class _FETCH(Token):
+    def __init__(self, limit = None): self.limit = limit
+    def __call__(self, limit = None): return _FETCH(limit)
+
+class _OFF(Token):                                                          # class of OFF
     def __div__(self, other): return repr(other)
     __truediv__ = __rdiv__ = __div__
 
-class _ON(Pipe):                                                            # class of ON
+class _ON(Token):                                                           # class of ON
     def __div__(self, other): return other
     __truediv__ = __rdiv__ = __div__
 
+
 # Starts a pipeline. For easy appending of other pipes with automatic type casting: PIPE >> a >> b >> ...
-# Doesn't do any processing itself (is excluded from the pipeline). 
+# Doesn't do any processing itself (is excluded from the pipeline).
+#
 PIPE = _PIPE()
 
-# Invokes execution of a pipeline. When put at the end of a pipeline (a >> b >> ... >> RUN) indicates that it should be executed now. 
-RUN = Pipe()
+# When put at the end of a pipeline (a >> b >> ... >> RUN) indicates that it should be executed now.
+#
+RUN = _RUN()
+
+# When used at the end of a pipeline (a >> b >> ... >> FETCH) indicates that it should be
+# executed now and all output items should be returned as a list. This is convenient
+# for materializing a pipeline into a regular data set:
+#    data = (a >> b >> ... >> FETCH)
+# which is equivalent to:
+#    data = list(a >> b >> ... )
+# In some cases the former is more readable than the latter.
+# FETCH can also be called with a parameter 'limit', like in:
+#    a >> b >> ... >> FETCH(100)
+# This creates another token object with self.limit defined indicating the maximum no. of values
+# that should be fetched from the pipe and returned in a list.
+#
+FETCH = _FETCH()
 
 # When used in division: OFF/pipelike_object or pipelike_object/OFF - turns off a given element of a pipeline by converting it to a string.
 # To be used for easy commenting out of individual pipes in a pipeline.
+#
 OFF = _OFF()
 
 # Complementar to OFF. When used in division: ON/pipelike_object or pipelike_object/ON - does nothing (that is, turns an element ON again).
 # Convenient when you need to turn an element off and on many times: you will first put /OFF, than change it to /ON, and so on.
+#
 ON = _ON()
+
+
+# A token used inside Tuple(...) to indicate that a corresponding input element should be passed unchanged
+# to the output tuple, without any transformation (empty transform).
+FORWARD = object()
 
 
 #####################################################################################################################################################
@@ -643,6 +854,10 @@ class Transform(_Functional):
     def process(self, item):
         "Return modified item; or None, interpreted as no result (drop item). Subclasses can read self.count to get 1-based index of the current item."
         return self.fun(item)
+    
+    def __call__(self, item):
+        return self.process(item)
+    
     
 class Monitor(_Functional):
     """A pipe that (by assumption) doesn't modify input items, only observes the data and possibly produces 
@@ -736,8 +951,9 @@ class Monitor(_Functional):
 
 class Filter(_Functional):
     """Doesn't change input items, but filters out undesired ones. 
-    Method process() must return True (pass the item through) or False (drop the item), not the actual object."""
-    
+    Method process() must return True (pass the item through) or False (drop the item), not the actual object.
+    By default, if no 'fun' is given, filters out false values from the stream.
+    """
     def __iter__(self):
         header = self._prolog()
         if header is not None: yield header
@@ -759,6 +975,7 @@ class Filter(_Functional):
     def accept(self, item):
         return self.process(item)
     def process(self, item):                            # deprecated in Filter; override accept() instead
+        if self.fun is None: return bool(item)
         return self.fun(item)
 
 
@@ -773,6 +990,47 @@ class Filter(_Functional):
 #     def append(self): pass
 #     def load(self): pass
 #     def __getitem__(self, key): pass
+
+
+class Generator(_Functional):
+    """
+    Generator of a sequence of data items produced by an external function passed as self.fun, or by an overriden method
+    (one of: produce, produceMany or generate) implemented in a subclass.
+    """
+    
+    def __iter__(self):
+        header = self._prolog()
+        if header is not None: yield header
+
+        try:
+            self.count = 0
+            for item in self.generate():
+                self.count += 1
+                self.yielded += 1
+                yield item
+        
+        except GeneratorExit, ex:
+            self._epilog()
+            raise
+        self._epilog()
+
+    def produce(self):
+        "Override to produce 1 data item at a time. Return None to indicate no more items."
+        if self.fun is None: raise NotImplementedError
+        return self.fun()
+
+    def produceMany(self):
+        "Override to produce a batch of data items. Each batch should be returned as a list, None if no more items."
+        while True:
+            item = self.produce()
+            if item is None: break
+            return [item]
+
+    def generate(self):
+        "Override to yield a sequence of data items."
+        for batch in self.produceMany():
+            if batch is None: break
+            for item in batch: yield item
 
 
 #####################################################################################################################################################
@@ -827,6 +1085,54 @@ class Function(Transform):
             return "%s %s" % (classname(self), self.oper.func_name)
         return classname(self)
 
+
+class Tuple(Function):
+    """Creates a function-pipe g(x) that applies predefined functions, fun[0], fun[1], ...
+       to a data item 'x' and returns atomic results all combined into a tuple.
+       If fun[i] is FORWARD or [], an identity function is used on a given position.
+       If fun[i] is a list (of functions): fun[i] == [f1,f2,f3...], all the functions will be combined
+       into a composite function: fun[i](x) ::= f3(f2(f1(x))) - note the order (!).
+       If 'x' is a tuple, 'fun' functions are applied to corresponding subitems of 'x'
+       ('x' must be of the same length as 'fun' in such case).
+       
+       Tuple can be used for easy creation of data tuples of any size/structure during pipeline processing:
+       ... >> Tuple(fun1, fun2, fun3) >> ...
+       The above can also be written as:
+       ... >> (fun1, fun2, fun3) >> ...
+       which is automatically converted to a basic form with an explicit Tuple as above.
+    """
+    def __init__(self, *fun):
+        
+        def ident(x): return x
+        def convert(f):
+            if f in (FORWARD, []): return ident
+            if isinstance(f, Pipe): return operator(f)
+            return f
+        
+        def composite(fl):
+            if not islist(fl): return convert(fl)
+            if len(fl) == 1: return convert(fl[0])
+            if len(fl) == 0: return ident
+            def F(x):
+                # 'fl' is a list of functions
+                res = x
+                for f in fl: res = convert(f)(res)
+                return res
+            return F
+    
+        # replace FORWARD tokens with identity functions; convert lists of functions to a composite function
+        self.fun = fun = tuple(composite(f) for f in fun)
+        self.n   = n   = len(fun)
+        self.rng = rng = range(n)
+        
+    def process(self, x):
+        if isinstance(x, tuple):
+            assert len(x) == self.n, 'Tuple.process(): expected an input tuple of length %s, ' \
+                                     'a tuple of length %s received instead: %s' % (self.n, len(x), x)
+            return tuple(self.fun[i](x[i]) for i in self.rng)
+        else:
+            return tuple(f(x) for f in self.fun)
+        
 
 ###  Generators
 
@@ -949,7 +1255,31 @@ class Subset(Pipe):
 class Sample(Pipe):
     """Random sample of input items. Every input item is decided independently with a given probability,
     unconditional on what items were chosen earlier."""
+
     
+###  Transforms
+
+class Batch(Pipe):
+    """Combine every consecutive group of 'batch' items into a single list and yield as an output item (a batch).
+       The last batch can have less than 'batch' items.
+       If 'batch' is None, all input items are combined together into one batch.
+       If no input items were pulled from the source, no output batch is yielded.
+    >>> PIPE >> [1,2,3,4,5,6] >> Batch(4) >> List >> Print >> RUN
+    [[1, 2, 3, 4], [5, 6]]
+    """
+    class __knobs__:
+        batch = None
+    def iter(self):
+        items = []
+        self.count = 0
+        for item in self.source:
+            self.count += 1
+            items.append(item)
+            if None != self.batch <= len(items):
+                yield items
+                items = []
+        if items: yield items
+
 
 ###  Buffers
 
@@ -961,17 +1291,42 @@ class Buffer(Pipe):
 class Random(Buffer):
     """
     Buffers all data in memory, then picks and yields items randomly on each subsequent request.
-    Iterates infinitely over the buffered data.
+    Iterates infinitely over the buffered data. If a weighing function is given, 'weigh',
+    items will be selected with probability proportional to their weights
+    (weights can be any non-negative numbers, they will be normalized to unit sum during buffer setup).
     """
+    NONE = object()
+    
     class __knobs__:
-        seed = None
+        seed  = None        # optional random seed
+        weigh = None        # optional weighing function for items: weigh(item) >= 0
         
     def setup(self):
         super(Random, self).setup()
-        self.rand = random.Random(self.seed)
+        if self.weigh is None:
+            self.rand = random.Random(self.seed)
+            self.probs = None
+        else:
+            self.rand = np.random.RandomState(self.seed)        # use numpy's random to be able to choose items with non-uniform distribution
+            weights = [self.weigh(item) for item in self.data]
+            weights = np.array(weights + [0])                   # append zero weight for NONE below
+            self.probs = weights / float(weights.sum())         # normalize weights to unit sum (probabilities)
+
+            # convert self.data from list to array;
+            # append NONE with zero weight beforehand to avoid merging individual numpy arrays if present in self.data
+            self.data += [Random.NONE]
+            self.data = np.array(self.data, dtype = object)
+
     def iter(self):
-        while True:
-            yield self.rand.choice(self.data)
+        if not len(self.data): return
+        choice = self.rand.choice
+        
+        if self.probs is None:
+            while True:
+                yield choice(self.data)
+        else:
+            while True:
+                yield choice(self.data, p = self.probs)         # numpy's RandomState accepts probability distribution
 
 
 class Sort(Pipe):
@@ -1360,53 +1715,15 @@ class List(Pipe):
         
 #####################################################################################################################################################
 ###
-###   STRUCTURAL PIPES
+###   PIPELINE
 ###
 
 class MetaPipe(Pipe):
-    "Wraps up a number of pipes to provide meta-operations on them."
+    "A pipe that internally contains other pipes to provide meta-operations on them."
 
-class Container(MetaPipe):
-    "Base class for classes that contain multiple pipes inside: self.pipes."
-    pipes = []          # any collection of internal pipes
-    
-#     def copy(self, deep = True):
-#         "Smart shallow copy (in addition to deep copy). In shallow mode, copies the collection of pipes, too, so it can be modified afterwards without affecting the original."
-#         res = super(Container, self).copy(deep)
-#         if not deep: res.pipes = copy(self.pipes)
-#         return res
-#         
-#     def setKnobs(self, knobs, strict = False, pipes = None):
-#         super(Container, self).setKnobs(knobs, strict)          # Container itself has no knobs, but a subclass can define some
-#         if pipes is None: pipes = self.pipes
-#         for pipe in pipes:
-#             try:
-#                 if hasattr(pipe, 'setKnobs'): pipe.setKnobs(knobs, strict)
-#             except:
-#                 print pipe
-#                 raise
-
-class Wrapper(MetaPipe):
-    "Like Container, but always has only 1 internal pipe: self.pipe."
-    
-    pipe = None
-    
-    def setKnobs(self, knobs = {}, strict = False, **kwargs):
-        if kwargs:
-            knobs = knobs.copy()
-            knobs.update(kwargs)
-        super(Wrapper, self).setKnobs(knobs, strict)            # Wrapper itself has no knobs, but a subclass can define some
-        if self.pipe: self.pipe.setKnobs(knobs, strict)
-        
-    def _prolog(self):
-        "Call inner pipe's setup before starting iteration."
-        if self.pipe: self.pipe.setup()
-        return super(Wrapper, self)._prolog()
-
-#####################################################################################################################################################
-
-class Pipeline(MetaPipe):
-    """Sequence of data pipes connected sequentially, one after another. Pipeline is a MetaPipe and a Pipe itself.
+class Pipeline(Pipe):
+    """
+    Sequence of data pipes connected sequentially, one after another. Pipeline is a Pipe itself.
     Inner pipes can be accessed by indexing operator: pipeline[3]
     """
     
@@ -1425,6 +1742,8 @@ class Pipeline(MetaPipe):
         to avoid in-place modifications but preserve '>>' protocol."""
         if other is RUN:
             self.run()
+        elif isinstance(other, _FETCH):         # pull all data and return as a list, possibly with a limit on the no. of items to be fetched
+            return self.fetch(other.limit)
         else:
             res = self.copy1()
             res.pipes.append(other)
@@ -1439,7 +1758,7 @@ class Pipeline(MetaPipe):
     def __getitem__(self, pos):
         """Returns either an operating pipe from self.pipeline, or a static pipe from self.pipes, 
         depending whether called during iteration or not."""
-        return self.pipeline[pos] if self.iterating else self.pipes[pos]
+        return self.pipeline[pos] if self.pipeline else self.pipes[pos]
     
     def setKnobs(self, knobs = {}, strict = False, **kwargs):
         if kwargs:
@@ -1465,16 +1784,18 @@ class Pipeline(MetaPipe):
 #                 raise
 
     def setup(self):
-        #self.pipes = _normalize(self.pipes)
+        # normalize pipes and connect into a list
         self.pipeline = _normalize(self.pipes)
         self.setInnerKnobs(self.knobs)
         self.knobs = None
 #         for pipe in self.pipeline:
 #             pipe.setup()
 
+    def reset(self):
+        del self.pipeline
+        self._created = False
+
     def iter(self):
-        # normalize pipes; connect into a list; connect entire pipeline with the source
-        #self.pipeline = _normalize(self.pipes)
         prev = self.source
         for next in self.pipeline:
             if prev is not None: next.source = prev         # 1st pipe can be a generator or collection, not necessarily a Pipe (no .source attribute)
@@ -1508,27 +1829,67 @@ class Pipeline(MetaPipe):
         return '\n'.join(lines)
     
     def __str__(self):
-        if self.iterating:
-            return "open Pipeline [" + '] >> ['.join(map(str, self.pipeline)) + ']'
-        return "Pipeline [" + '] >> ['.join(map(str, self.pipes)) + ']'
+        if self.pipeline:
+            return "connected Pipeline [" + '] >> ['.join(map(str, self.pipeline)) + ']'
+        return "abstract Pipeline [" + '] >> ['.join(map(str, self.pipes)) + ']'
     
 
 #####################################################################################################################################################
 
 class MultiSource(Pipe):
-    pass
-
-class Union(MultiSource):
-    """Combine items from multiple sources by concatenating corresponding streams one after another: all items from the 1st source; then 2nd... then 3rd...
-    TODO: 'mixed' mode (breadth-first, streams interlaced)."""
-    def __init__(self, *sources):
+    def initKnobs(self, *sources, **knobs):
         self.sources = _normalize(sources)
+        super(MultiSource, self).initKnobs(**knobs)
+        
+    def setup(self):
+        super(MultiSource, self).setup()
+        if not self.sources: raise Exception("%s: no sources attached" % classname(self))
+        
+class Chain(MultiSource):
+    "Combine items from multiple sources by concatenating corresponding streams one after another: all items from the 1st source; then 2nd... then 3rd..."
     def iter(self):
         return itertools.chain(*self.sources)
     def __add__(self, other):
         res = self.copy1()
         res.sources.append(other)
         return res
+
+class Mix(MultiSource):
+    """
+    Mix items from multiple sources:
+    - either in deterministic way, preserving uniform proportions of data volume read from every source at every step (TODO);
+    - or in a random way, picking items independently from each other, with predefined probabilities.
+    Generation of output items continues until the first of the sources is exhausted.
+    """
+    class __knobs__:
+        probs = None        # probabilities or counts of each source, e.g. [0.2,0.3,0.5] or [2,3,5]; None if equal probabilities to be used
+        seed  = None        # optional random seed
+
+    def setup(self):
+        super(Mix, self).setup()
+        cls_rand = random.Random if self.probs is None else np.random.RandomState
+        self.rand = cls_rand(self.seed)
+        if self.probs is not None:
+            self.probs = np.array(self.probs) / float(sum(self.probs))      # normalize probabilities to unit sum
+
+    def iter(self):
+        iters = map(iter, self.sources)
+        if self.probs is not None:
+            iters = np.array(iters, dtype = object)                         # convert list to numpy array for numpy's RandomState.choice()
+
+        try:
+            if self.probs is None:
+                while True:
+                    src = self.rand.choice(iters)
+                    yield src.next()
+            else:
+                while True:
+                    src = self.rand.choice(iters, p = self.probs)           # numpy's RandomState accepts probability distribution
+                    yield src.next()
+            
+        except StopIteration:
+            pass
+    
 
 class Zip(MultiSource):
     """Combines items from multiple sources. Similar to zip(). Available modes: 
@@ -1591,6 +1952,51 @@ class Parallel(MetaPipe):   # DRAFT
 
 class Serial(MetaPipe): pass
 class Sequential(MetaPipe): pass
+
+
+#####################################################################################################################################################
+###
+###   STRUCTURAL PIPES
+###
+
+class Wrapper(MetaPipe):
+    "Provides meta-operations for exactly 1 internal pipe: self.pipe."
+    
+    pipe = None
+    
+    def setKnobs(self, knobs={}, strict=False, **kwargs):
+        if kwargs:
+            knobs = knobs.copy()
+            knobs.update(kwargs)
+        super(Wrapper, self).setKnobs(knobs, strict)  # Wrapper itself has no knobs, but a subclass can define some
+        if self.pipe: self.pipe.setKnobs(knobs, strict)
+    
+    def _prolog(self):
+        "Call inner pipe's setup before starting iteration."
+        if self.pipe: self.pipe.setup()
+        return super(Wrapper, self)._prolog()
+
+
+# class Container(MetaPipe):
+#     "Base class for classes that contain multiple pipes inside: self.pipes."
+#     pipes = []          # any collection of internal pipes
+#
+#     def copy(self, deep = True):
+#         "Smart shallow copy (in addition to deep copy). In shallow mode, copies the collection of pipes, too, so it can be modified afterwards without affecting the original."
+#         res = super(Container, self).copy(deep)
+#         if not deep: res.pipes = copy(self.pipes)
+#         return res
+#
+#     def setKnobs(self, knobs, strict = False, pipes = None):
+#         super(Container, self).setKnobs(knobs, strict)          # Container itself has no knobs, but a subclass can define some
+#         if pipes is None: pipes = self.pipes
+#         for pipe in pipes:
+#             try:
+#                 if hasattr(pipe, 'setKnobs'): pipe.setKnobs(knobs, strict)
+#             except:
+#                 print pipe
+#                 raise
+
 
 #####################################################################################################################################################
 
@@ -1855,12 +2261,12 @@ class Controller(Wrapper):
 #         self.iterator = self.pipeline.__iter__()
 
 
-class operator(Controller):
+def operator(pipe):
     """
-    A wrapper that turns a pipe (pipeline) back to a regular input-output function 
-    (a callable, to be precise) that can be fed with data manually, one item at a time.
+    A wrapper that turns a pipe (pipeline) back to a regular input-output function
+    that can be fed with data manually, one item at a time.
     During processing, the original pipe can still be accessed via 'pipe' property of the wrapper.
-    
+
     >>> pipeline = Function(lambda x: 2*x) >> Function(lambda x: str(x).upper())
     >>> fun = operator(pipeline)
     >>> print fun(3)
@@ -1869,19 +2275,27 @@ class operator(Controller):
     ['ALA', 'ALA']
     >>> print fun.pipe[0]
     Function <lambda>
-    
+
     Typically the pipe is an instance of Transform. Even if not, it still must pull exactly 1 item at a time
     from the source, otherwise an exception will be raised.
     Can be used in the same caller's thread, no need to spawn a new thread.
     """
+    controller = Controller(pipe)
+    controller._prolog()
+    def f(x): return controller.process(x)
+    f.pipe = pipe
+    return f
 
+
+class operator_pipe(Controller):
+    "Same as operator(), but implemented as a callable pipe, a subclass of Controller, rather than a function."
     def __init__(self, pipe):
         super(operator, self).__init__(pipe)
         self._prolog()
-
+    
     # processing can be invoked with op(item), like a function, in addition to op.process(item) defined in base class
     __call__ = Controller.process
-    
+
 
 #####################################################################################################################################################
 
@@ -1961,15 +2375,17 @@ def _normalize(pipes):
     """Normalize a given list of pipes. Remove None's and strings (used for commenting out), 
     instantiate Pipe classes if passed instead of an instance, wrap up functions, collections and files.
     """
-    def convert(h):
+    def convert(pos_h):
+        pos, h = pos_h
         if issubclass(h, Pipe): return h()
         if isfunction(h): return Function(h)
-        if iscontainer(h): return Collection(h)
-        if isgenerator(h): return Collection(h)
+        if istuple(h): return Tuple(*h)
+        if (iscontainer(h) or isgenerator(h)): return Collection(h)
         if isinstance(h, (file, GenericFile, Tee)): return File(h)
         if isstring(h): return None                             # strings can be inserted in a pipeline; treated as comments (ignored)
         return h
-    return filter(None, map(convert, pipes))
+    
+    return filter(None, map(convert, enumerate(pipes)))
 
 
 #####################################################################################################################################################

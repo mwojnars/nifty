@@ -13,6 +13,12 @@ Main classes, methods and functions:
 Instead of dump/load you can also use encode/decode. The only difference is that dump() adds a newline at the end by default,
 while encode() not - this can be changed by explicitly setting 'newline' argument.
 
+To encode a custom class, DAST tries the following approaches, in this order:
+- x.__getstate__()
+- x.__dict__; if x.__transient__ list of attribute names is present, these attributes are excluded from the state.
+Regardless of how the state was retrieved, arguments for new() are retrieved from __getnewargs__() if present
+and serialized as unnamed arguments, too.
+
 
 SYNTAX.
 
@@ -152,7 +158,7 @@ dict:
 
 
 ---
-This file is part of Nifty python package. Copyright (c) 2009-2014 by Marcin Wojnarski.
+This file is part of Nifty python package. Copyright (c) by Marcin Wojnarski.
 
 Nifty is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License 
 as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
