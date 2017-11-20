@@ -4,7 +4,7 @@ Text representation, text processing, text mining. Regular expressions.
 Basic routines for HTML processing (see also nifty.web module for more).
 
 ---
-This file is part of Nifty python package. Copyright (c) 2009-2014 by Marcin Wojnarski.
+This file is part of Nifty python package. Copyright (c) by Marcin Wojnarski.
 
 Nifty is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License 
 as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
@@ -35,7 +35,9 @@ else:
 
 class xbasestring(basestring):
     """Extends standard string classes (str, unicode, basestring) with several convenient methods."""
-    _std = basestring                   # override this in subclasses with specific string class: str/unicode
+    
+    _std = basestring           # the standard class (str/unicode) that should be used to access standard string methods; override in subclasses
+    
     def __new__(cls, s = ""):
         "You can call xbasestring(s) to convert standard string to xstr or xunicode, depending on the type of 's' - appropriate type is picked automatically."
         if isinstance(s, str): return xstr(s)
@@ -68,7 +70,7 @@ class xbasestring(basestring):
         matches = extract_regex(regex, self)
         if multi:           return map(self.__class__, matches)
         elif len(matches):  return self.__class__(matches[0])
-        else:               return self._empty
+        else:               return self.__class__("")
 
     def replace(self, old, new, count = -1):
         return self.__class__(self._std.replace(self,old,new,count))
@@ -82,8 +84,8 @@ class xunicode(xbasestring, unicode):
     _std = unicode
     def __new__(cls, s = ""): return unicode.__new__(cls, s)
 
-xstr._empty = xstr("")
-xunicode._empty = xunicode("")
+# xstr._empty = xstr("")
+# xunicode._empty = xunicode("")
 
 
 #########################################################################################################################################################
@@ -700,21 +702,21 @@ class WordsModelUnderTraining(WordsModel):
 ###  TEXT class for language control
 ###
 
-class Text(unicode):
+class Text(xunicode):
     """
-    A string of text (unicode, str) with associated information about the language (encoding) 
-    that should be used for its interpretation:
+    A string of text (xunicode) with associated information about the language (encoding) 
+    that should be used for its interpretation, for example:
     
-        HTML, SQL, URL, plain text, ... 
+        HTML, SQL, URL, plain, ... 
     
     Allows languages to be nested in one another, possibly multiple times, which yields *compound* languages: 
     
-        HTML/mediawiki, HTML/URL, SQL/HTML/text, ...
+        HTML/mediawiki, HTML/URL, SQL/HTML/plain, ...
     
     The Text class keeps track of language embeddings and thus enables safe, transparent and easy 
     encoding/decoding/converting - to/from/between different (possibly nested) languages.
     With Text, automatic sanitization of strings can be easily implemented, especially in web applications.
-    Nesting/unnesting (vertical transformations, e.g.: text -> HTML/text -> mediawiki/HTML/text) is always lossless. 
+    Nesting/unnesting (vertical transformations, e.g.: plain -> HTML/plain -> mediawiki/HTML/plain) is always lossless. 
     Only conversions (horizontal transformations, e.g.: HTML <-> mediawiki) between languages can be lossy.
     
     Text instances can be manipulated with in a similar way as strings, using all common operators: + * % [].
@@ -730,15 +732,15 @@ class Text(unicode):
     To make a Text instance be treated as a regular string, cast it back to unicode or str, like unicode(text).    
 
     Example languages:
-    - text - plain text, without any encoding nor special meaning
+    - plain - plain text, without any encoding nor special meaning
     - HTML - rich text expressed in HTML language, a full HTML document; it can't be "decoded", because any decoding would have to be lossy
              (tags would be removed), however it might be converted to another rich-text language (wiki-text, YAML, ...),
              possibly with a loss in style information
-    - HTML/text - plain text escaped for inclusion in HTML; contains entities which must be decoded to get plain 'text' again
-    - HyperML/text - plain text escaped for inclusion in HyperML; contains $* escape strings which must be decoded to get plain 'text' again
-    - HyperML/HTML/text - plain text encoded for HTML and later escaped for HyperML; you first have to decode HyperML, only then HTML, 
+    - HTML/plain - plain text escaped for inclusion in HTML; contains entities which must be decoded to get 'plain' text again
+    - HyperML/plain - plain text escaped for inclusion in HyperML; contains $* escape strings which must be decoded to get 'plain' text again
+    - HyperML/HTML/plain - plain text encoded for HTML and later escaped for HyperML; you first have to decode HyperML, only then HTML, 
              only then you will obtain the original string
-    - URL/text - URL-encoded plain text, for inclusion in a URL, typically as a GET parameter
+    - URL/plain - URL-encoded plain text, for inclusion in a URL, typically as a GET parameter
     - URL - full URL of any form
     - SQL
     - value - text representation of a value
@@ -769,32 +771,45 @@ class Text(unicode):
     ('HTML', 'HTML')
     >>> (t + t).language, (t * 3).language, (5 * t).language
     ('HTML', 'HTML', 'HTML')
-    >>> (Text('<h1>Title</h1>', 'HTML') + Text('ala &amp; ola', 'HTML/text')).language
+    >>> (Text('<h1>Title</h1>', 'HTML') + Text('ala &amp; ola', 'HTML/plain')).language
     'HTML'
-    >>> Text().join([Text('<h1>Title</h1>', 'HTML'), Text('ala &amp; ola', 'HTML/text')])
+    >>> Text().join([Text('<h1>Title</h1>', 'HTML'), Text('ala &amp; ola', 'HTML/plain')])
     u'<h1>Title</h1>ala &amp; ola'
-    >>> Text(' ', 'HTML').join(['<h1>Title</h1>', Text('ala &amp; ola', 'HTML/text')])
+    >>> Text(' ', 'HTML').join(['<h1>Title</h1>', Text('ala &amp; ola', 'HTML/plain')])
     u'<h1>Title</h1> ala &amp; ola'
-    >>> t + Text('ola', "text")
+    >>> t + Text('ola', "plain")
     Traceback (most recent call last):
         ...
-    Exception: Can't combine Text/string instances with incompatible languages: 'HTML' and 'text'
+    Exception: Can't combine Text/string instances with incompatible languages: 'HTML' and 'plain'
     >>> unicode(t).language
     Traceback (most recent call last):
         ...
     AttributeError: 'unicode' object has no attribute 'language'
+
+    >>> t = Plain("this is text")
+    >>> t.language, (t+t).language, (t+'undefined').language
+    ('plain', 'plain', 'plain')
+    >>> t = HTML("<a>this is text</a>")
+    >>> t.language, (t+t).language, (t+'undefined').language
+    ('HTML', 'HTML', 'HTML')
+    >>> Plain(Text('<a>this is text</a>', 'HTML')).language
+    'plain'
+    >>> HTML(Text('this is text', 'plain')).language
+    'HTML'
     """
     
-    language = None     # non-empty name of the formal language in which the string is expressed; can be a compound language, like "HTML/text";
-                        # for plain text, we recommend "text" as a name; None = unspecified language that can be combined with any other language 
-    settings = None     # the TextSettings object that contains global configuration for this object: list of converters and conversion settings (UNUSED for now)
+    language = None     # non-empty name of the formal language in which the string is expressed; can be a compound language, like "HTML/plain";
+                        # for plain text, we recommend "plain" as a name; None = unspecified language that can be combined with any other language 
+    settings = None     # (NOT USED) the TextSettings object that contains global configuration for this object: list of converters and conversion settings
 
     def __new__(cls, text = u'', language = None, settings = None): 
         """Wrap up a given string in Text object and mark what language it is. We override __new__ instead of __init__
         because the base class is immutable and overriding __new__ is the only way to modify its initialization.
         """
         self = unicode.__new__(cls, text)
-        self.language = language or (text.language if isinstance(text, Text) else None)
+        language = language or (text.language if isinstance(text, Text) else None)
+        if language is not None:
+            self.language = language
         return self
     
     @staticmethod
@@ -854,10 +869,16 @@ class Text(unicode):
         return Text(unicode.capitalize(self), self.language)
     def center(self, *a, **kw):
         return Text(unicode.center(self, *a, **kw), self.language)
-    #def decode(self, *a, **kw):
-    #    return Text(unicode.capitalize(self, *a, **kw), self.language)
-    #def encode(self, *a, **kw):
-    #    return Text(unicode.capitalize(self, *a, **kw), self.language)
+    
+#     def decode(self, *a, **kw):
+#         res = unicode.decode(self, *a, **kw)
+#         assert isinstance(res, unicode), "Text.decode() can only be used for decoding into <unicode> not <%s>" % type(res)
+#         return Text(res, self.language)
+#     def encode(self, *a, **kw):
+#         res = unicode.encode(self, *a, **kw)
+#         assert isinstance(res, unicode), "Text.encode() can only be used for encoding into <unicode> not <%s>" % type(res)
+#         return Text(res, self.language)
+    
     def expandtabs(self, *a, **kw):
         return Text(unicode.expandtabs(self, *a, **kw), self.language)
     def format(self, *a, **kw):
@@ -908,9 +929,15 @@ class Text(unicode):
         return Text(unicode.zfill(self, *a, **kw), self.language)
 
 
-# shorthand for Text(..., "text")
-def Plain(text, settings = None): return Text(text, "text", settings)
+# class Plain(Text):
+#     language = 'plain'
+# 
+# class HTML(Text):
+#     language = 'HTML'
 
+# shorthand for Text(..., "plain")
+def Plain(text, settings = None): return Text(text, "plain", settings)
+ 
 # shorthand for Text(..., "HTML"); in the future may be converted to a subclass with some additional 
 # HTML-specific functionality or configuration defaults (?)
 def HTML(text, settings = None): return Text(text, "HTML", settings)
