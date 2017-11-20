@@ -29,11 +29,11 @@ from socket import timeout as Timeout
 
 if __name__ != "__main__":
     from .util import islinux, isint, islist, isnumber, isstring, JsonDict, mnoise, unique, classname, noLogger, defaultLogger, Object
-    from .text import regex, xbasestring
+    from .text import regex, xbasestring, HTML, Plain
     from . import util
 else:
     from nifty.util import islinux, isint, islist, isnumber, isstring, JsonDict, mnoise, unique, classname, noLogger, defaultLogger, Object
-    from nifty.text import regex, xbasestring
+    from nifty.text import regex, xbasestring, HTML, Plain
     from nifty import util
     
 now = time.time                 # shorthand for calling now() function, for process-local time measurement
@@ -1007,16 +1007,30 @@ class XNoneType(HtmlXPathSelector):
     __nonzero__ = __bool__
 
     @staticmethod
-    def text(*a, **kw): return ''
+    def text(*a, **kw): return Plain('')
+    def extract(self):  return HTML('')
+    html = __unicode__ = extract
         
 XNone = XNoneType()
 
+_XPathSelector_extract = XPathSelector.extract      # must keep original extract() on aside to still call it after monkey patching
 
-class XPathSelectorPatch(object):
-    "All the methods and properties below will be copied subsequently to XPathSelector (monkey patching). @staticmethod is necessary for this."
+
+class XDoc(object):
+    """
+    All the methods and properties below will be copied subsequently to XPathSelector (monkey patching). 
+    @staticmethod is necessary for this, as a workaround, and its use is only technical, 
+    all the methods below are non-static actually.
+    """
     
     nodes = xpath = XPathSelector.select if OLD_SCRAPY else Selector.xpath          # nodes() and xpath() will be aliases for select/xpath()
-    html = __unicode__ = XPathSelector.extract
+    # html = __unicode__ = XPathSelector.extract
+    
+    @staticmethod
+    def extract(self):
+        return HTML(_XPathSelector_extract(self))
+
+    html = __unicode__ = extract
     
     @staticmethod
     def css1(self, css, none = False):
@@ -1040,7 +1054,7 @@ class XPathSelectorPatch(object):
         xpath = "string(" + xpath + ")"
         if norm: xpath = "normalize-space(" + xpath + ")"
         l = self.nodes(xpath)
-        return xbasestring(l[0].extract() if l else '')
+        return Plain(l[0].extract() if l else '')
     @staticmethod
     def texts(self, xpath, norm = True):
         """ Returns all texts selected by given 'xpath', as a list of x-strings (xbasestring),
@@ -1114,7 +1128,7 @@ class XPathSelectorPatch(object):
 #         return self.extract()
     @staticmethod
     def __str__(self):
-        return self.extract().encode('utf-8')
+        return self.extract().encode('utf-8')       # no HTML() wrapper, use only for print out not data storage
     @staticmethod
     def __contains__(self, s):
         "Checks for occurence of a given plain text in the document (tags stripped out). Shorthand for 's in x.text()'."
@@ -1123,17 +1137,22 @@ class XPathSelectorPatch(object):
 
 def monkeyPatch():
     # copy methods and properties to XPathSelector (monkey patching):
-    methods = filter(lambda k: not k.startswith('__'), XPathSelectorPatch.__dict__.keys())          # all properties with standard names (no __*__)
-    methods += "__unicode__ __str__ __contains__ __getitem__".split()                               # additionally these special names
+    methods = filter(lambda k: not k.startswith('__'), XDoc.__dict__.keys())        # all properties with standard names (no __*__)
+    methods += "__unicode__ __str__ __contains__ __getitem__".split()               # additionally these special names
     for name in methods:
-        method = getattr(XPathSelectorPatch, name)          # here, MUST use getattr not __dict__[name] - they give different results!!! <unbound method> vs <function>!
+        method = getattr(XDoc, name)            # here, MUST use getattr not __dict__[name] - they give different results!!! <unbound method> vs <function>!
         setattr(XPathSelector, name, method) 
 
     # additional patches...
     def XPathSelectorList_text(self, xpath = ".", norm = True):
-        "Runs text() method on all selectors contained in this list"
+        "Run text() method on all selectors in this list and return as a list of Text strings."
         return [x.text(xpath, norm) for x in self]
+    def XPathSelectorList_html(self):
+        "Run html() method on all selectors in this list and return as a list of Text strings."
+        return [x.html() for x in self]
+    
     XPathSelectorList.text     = XPathSelectorList_text
+    XPathSelectorList.html     = XPathSelectorList_html
 
 monkeyPatch()
 
