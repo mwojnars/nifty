@@ -20,6 +20,7 @@ from collections import defaultdict
 from array import array
 from itertools import imap, izip
 from copy import copy
+from numba import jit
 
 if __name__ != "__main__":
     from .util import isstring, islist, bound, flatten, merge_spaces
@@ -546,7 +547,7 @@ def levenscore(a, b, casecost = 0.5, spacecost = 0.5):
 ###  STRING ALIGNMENT
 ###
 
-def align(s1, s2, mismatch = None, GAP = '_', GAP1 = None, GAP2 = None, dtype = 'float32', return_gaps = False):
+def align(s1, s2, mismatch = None, GAP = '_', GAP1 = None, GAP2 = None, dtype = 'float32', return_gaps = False, mismatch_pairs = None):
     u"""
     Align two strings, s1 and s2, and compute their Levenshtein distance using Wagner-Fischer algorithm.
     Each of s1/s2 can be a plain character string (str/unicode) or a FuzzyString.
@@ -594,9 +595,8 @@ def align(s1, s2, mismatch = None, GAP = '_', GAP1 = None, GAP2 = None, dtype = 
     >>> (a2, '%.2f' % d)
     ('bbaccab', '5.00')
     """
-    
-    from numpy import zeros, array
-    
+    from numpy import zeros, array, cumsum
+
     swap = False
     
     # set a default mismatch() function, depending on the types of s1/s2 strings (crisp or fuzzy)
@@ -613,32 +613,30 @@ def align(s1, s2, mismatch = None, GAP = '_', GAP1 = None, GAP2 = None, dtype = 
     if GAP1 is None:  GAP1 = s1.convert(GAP) if isinstance(s1, FuzzyString) else GAP
     if GAP2 is None:  GAP2 = s2.convert(GAP) if isinstance(s2, FuzzyString) else GAP
         
-    n1, n2 = len(s1), len(s2)
-    dist = zeros((n1 + 1, n2 + 1), dtype = dtype)           # dist[i,j]: distance between s1[:i] and s2[:j]
+    # memorize char-vs-GAP mismatch costs to avoid repeated calculation of the same values
+    mismatch_1_GAP = array([0] + [mismatch(c1, GAP2) for c1 in s1], dtype)
+    mismatch_GAP_2 = array([0] + [mismatch(GAP1, c2) for c2 in s2], dtype)
     
-    # fill out row #0 and column #0
-    for i in xrange(n1):                                    # move along column #0 (string s1)
-        dist[i+1, 0] = dist[i, 0] + mismatch(s1[i], GAP2)
-    for j in xrange(n2):                                    # move along row #0 (string s2)
-        dist[0, j+1] = dist[0, j] + mismatch(GAP1, s2[j])
-
+    # initialize 'dist' array: dist[i,j] => distance between s1[:i] and s2[:j]
+    n1, n2 = len(s1), len(s2)
+    dist = zeros((n1+1, n2+1), dtype = dtype)
+    dist[:,0] = cumsum(mismatch_1_GAP)                      # fill out row #0 and column #0
+    dist[0,:] = cumsum(mismatch_GAP_2)
+    
     # edit[i,j] = 0/1/2: indicator of the optimal edit operation on (i,j) position when aligning s1[:i] to s2[:j]
     edit = zeros((n1+1, n2+1), dtype = 'int8')
     edit[:,0] = 1
     
-    # fill out the rest of 'dist' and 'edit' arrays
-    for i in range(1, n1+1):
-        for j in xrange(1, n2+1):
-            cost_left = dist[i, j-1] + mismatch(GAP1, s2[j-1]) # + suffix_cost(lastchar1[i,j-1],GAP) + suffix_cost(lastchar2[i,j-1],s2[j-1])
-            cost_up   = dist[i-1, j] + mismatch(s1[i-1], GAP2)
-            cost_diag = dist[i-1, j-1] + mismatch(s1[i-1], s2[j-1])
-            
-            cost = array([cost_left, cost_up, cost_diag])
-            step = cost.argmin()
-            
-            edit[i,j] = step
-            dist[i,j] = cost[step]
+    if mismatch_pairs is None:
+        mismatch_pairs = np.zeros((n1, n2), dtype = dtype)
+        for i in range(n1):
+            c1 = s1[i]
+            for j in xrange(n2):
+                mismatch_pairs[i,j] = mismatch(c1, s2[j])
     
+    # fill out the rest of 'dist' and 'edit' arrays, in a separate function to allow speed optimization with Numba
+    _align_loop(dist, edit, mismatch_1_GAP, mismatch_GAP_2, mismatch_pairs)
+
     i, j = n1, n2
     a1 = s1.new() if isinstance(s1, FuzzyString) else ''
     a2 = s2.new() if isinstance(s2, FuzzyString) else ''
@@ -648,12 +646,12 @@ def align(s1, s2, mismatch = None, GAP = '_', GAP1 = None, GAP2 = None, dtype = 
     # reconstruct aligned strings a1, a2, from the array of optimal edit operations in each step
     while i or j:
         if edit[i,j] == 0:
-            gaps1.append(len(a1))                   # remember position of the gap being inserted
+            if return_gaps: gaps1.append(len(a1))                   # remember position of the gap being inserted
             a1 += GAP1
             a2 += s2[j-1]
             j -= 1
         elif edit[i,j] == 1:
-            gaps2.append(len(a2))                   # remember position of the gap being inserted
+            if return_gaps: gaps2.append(len(a2))                   # remember position of the gap being inserted
             a1 += s1[i-1]
             a2 += GAP2
             i -= 1
@@ -672,14 +670,35 @@ def align(s1, s2, mismatch = None, GAP = '_', GAP1 = None, GAP2 = None, dtype = 
     if return_gaps:
         gaps1 = [len(a1)-i-1 for i in reversed(gaps1)]              # reverse the order and values of gap indices, like a1/a2 were reversed
         gaps2 = [len(a2)-j-1 for j in reversed(gaps2)]              # reverse the order and values of gap indices, like a1/a2 were reversed
-        assert all(a1[i] == GAP1 for i in gaps1)
-        assert all(a2[j] == GAP2 for j in gaps2)
+        # assert all(a1[i] == GAP1 for i in gaps1)
+        # assert all(a2[j] == GAP2 for j in gaps2)
         return a1, a2, dist[n1,n2], gaps1, gaps2
     else:
         return a1, a2, dist[n1,n2]
     
+@jit
+def _align_loop(dist, edit, mismatch_1_GAP, mismatch_GAP_2, mismatch_pairs):
+    """
+    The main loop of align() function. Separated out from the main function to allow Numba JIT compilation,
+    which gives approx. 6x speedup. Matrices `dist` and `edit` are in-out arguments: they are modified in place
+    and serve as return variables.
+    """
+    n1, n2 = dist.shape
+    for i in range(1, n1):
+        for j in xrange(1, n2):
+            cost_left = dist[i, j-1] + mismatch_GAP_2[j]    #mismatch(GAP1, s2[j-1]) #+ suffix_cost(lastchar1[i,j-1],GAP) + suffix_cost(lastchar2[i,j-1],s2[j-1])
+            cost_up   = dist[i-1, j] + mismatch_1_GAP[i]    #mismatch(s1[i-1], GAP2)
+            cost_diag = dist[i-1, j-1] + mismatch_pairs[i-1, j-1]  #mismatch_idx(i-1, j-1) #mismatch(s1[i-1], s2[j-1])
+            
+            M = dist[i,j] = min(cost_left, cost_up, cost_diag)
+            if M == cost_left: step = 0
+            elif M == cost_up: step = 1
+            else:              step = 2
+            edit[i,j] = step
     
-def align_multiple(strings, mismatch = None, GAP = '_', cost_base = 2, cost_case = 1, cost_gap = 3, cost_gap_gap = 0, return_consensus = False, verbose = False):
+    
+def align_multiple(strings, mismatch = None, GAP = '_', cost_base = 2, cost_case = 1, cost_gap = 3, cost_gap_gap = 0, weights = None,
+                   return_consensus = False, verbose = False):
     """
     Multiple Sequence Alignment (MSA) of given strings through the use of incrementally updated FuzzyString consensus.
     
@@ -694,6 +713,7 @@ def align_multiple(strings, mismatch = None, GAP = '_', cost_base = 2, cost_case
     >>> align_multiple(['aabbcc', 'aadcc', 'aaeecc'], cost_gap = 3)
     ['aabbcc', 'aad_cc', 'aaeecc']
     """
+    from numpy import array, dot, ones
     
     # create charset & cost matrix
     charset = Charset(text = ''.join(strings) + GAP)
@@ -701,28 +721,74 @@ def align_multiple(strings, mismatch = None, GAP = '_', cost_base = 2, cost_case
     classes = charset.classes
     if verbose: print 'cost_matrix:\n', cost_matrix
     
+    if weights is None: weights = ones(len(strings))
+    
     maxlen = max(map(len, strings))
-    consensus = FuzzyString(strings[0], charset = charset, dtype = 'int32')      #'float32'... 'int16' if maxlen*cost_base < 10000 else
+    consensus = FuzzyString(strings[0], charset = charset, dtype = 'float32', weight = weights[0])      #'float32'... 'int16' if maxlen*cost_base < 10000 else
     if verbose: print '#1: ', '%8s' % strings[0]
 
     def mismatch(fuzzy, crisp):
         cls = classes[crisp]
         freq = fuzzy.chars[0]
         # assert freq.min() >= 0
-        return np.dot(cost_matrix[cls,:], freq)
+        return dot(cost_matrix[cls,:], freq)
+    
+    # def get_mismatch_idx(consensus, s):
+    #     "Create mismatch_idx(), a partially pre-computed variant of mismatch() function, to speed up the most critical operation in align() calls."
+    #     consensus_chars = consensus.chars
+    #     classes_s = [classes[c] for c in s]
+    #
+    #     def mismatch_idx(i, j):
+    #         # print 'i,j:', type(i), i, type(j), j
+    #         cls = classes_s[j]
+    #         freq = consensus_chars[i]
+    #         return dot(cost_matrix[cls,:], freq)
+    #
+    #     return mismatch_idx
+
+    # @jit
+    # def _get_mismatch_pairs_loop(consensus_chars, classes_s):
+    #     return dot(consensus_chars, cost_matrix[:,classes_s])
+    #     # for j, cls in enumerate(classes_s):
+    #     #     mismatch_pairs[:,j] = dot(consensus_chars, cost_matrix[:,cls])
+
+    def get_mismatch_pairs(consensus, s, dtype):
+        "Create 2D matrix of mismatch() values for all pairs of letters in both strings, to speed up the most critical operation in align() calls."
+        n1, n2 = len(consensus), len(s)
+        consensus_chars = array(consensus.chars)
+
+        # classes_s = [classes[c] for c in s]
+        # return dot(consensus_chars, cost_matrix[:,classes_s])
+        
+        # classes_s = array([classes[c] for c in s])
+        # return _get_mismatch_pairs_loop(consensus_chars, classes_s)
+        
+        mismatch_pairs = np.zeros((n1, n2), dtype)
+        for j, c in enumerate(s):
+            mismatch_pairs[:,j] = dot(consensus_chars, cost_matrix[:,classes[c]])
+            # for i in xrange(n1):
+            #     mismatch_pairs[i,j] = dot(cost, consensus_chars[i])
+
+        return mismatch_pairs
     
     # 1st pass: come up with a stable consensus; strings are accumulated through adding, NO normalization
     for i, s in enumerate(strings[1:]):
+        count = i + 1
+        weight = sum(weights[:count])
+        
         GAP1 = consensus.convert(GAP)
-        GAP1.chars[0] *= (i+1)          # rescale GAP total weight to account for increased weight of accumulated `consensus`
+        GAP1.chars[0] *= weight             # rescale GAP weight to account for increased total weight of accumulated `consensus`
 
-        # all frequency vectors in consensus must sum up to (i+1)
-        assert all(np.abs(freq.sum() - (i+1)) < 0.0001 for freq in consensus.chars + GAP1.chars)
+        # all frequency vectors in consensus must sum up to `weight`
+        assert all(np.abs(freq.sum() - weight) < 0.0001 for freq in consensus.chars + GAP1.chars)
+
+        dtype = 'float32' #cost_matrix.dtype
+        mismatch_pairs = get_mismatch_pairs(consensus, s, dtype = dtype)
         
         consensus_aligned, string_aligned, dist, c_gaps, s_gaps = \
-            align(consensus, s, GAP1 = GAP1, GAP2 = GAP, return_gaps = True, mismatch = mismatch, dtype = cost_matrix.dtype)
+            align(consensus, s, GAP1 = GAP1, GAP2 = GAP, return_gaps = True, mismatch = mismatch, mismatch_pairs = mismatch_pairs, dtype = dtype)
         
-        consensus = FuzzyString.merge(consensus_aligned, string_aligned, norm = False)
+        consensus = FuzzyString.merge(consensus_aligned, string_aligned, weights = [1,weights[count]], norm = False)
         
         if verbose:
             print '#%-3d a:' % (i+2), '%8s' % string_aligned
@@ -732,20 +798,25 @@ def align_multiple(strings, mismatch = None, GAP = '_', cost_base = 2, cost_case
             print
     if verbose: print
     
+    
     consensus = FuzzyString.merge(consensus, norm = True, dtype = 'float32')
     # if verbose: print 'avg:', consensus.chars
     
     # 2nd pass: align strings once again to a semi-fixed consensus;
     # only gaps can be added to consensus and to previously aligned strings
     
+    dtype = 'float32'
     GAP1 = consensus.convert(GAP)
     def insert_gap(z, pos): return z[:pos] + GAP + z[pos:]
 
     aligned = []                                        # output list of aligned strings
 
     for s in strings:
+        
+        mismatch_pairs = get_mismatch_pairs(consensus, s, dtype)
+        
         c_aligned, s_aligned, dist, c_gaps, s_gaps = \
-            align(consensus, s, GAP1 = GAP1, GAP2 = GAP, return_gaps = True, mismatch = mismatch, dtype = 'float32')
+            align(consensus, s, GAP1 = GAP1, GAP2 = GAP, return_gaps = True, mismatch = mismatch, mismatch_pairs = mismatch_pairs, dtype = dtype)
         
         aligned.append(s_aligned)
         if verbose: print s_aligned
@@ -786,7 +857,7 @@ class Charset(object):
     __len__ = size
     __getitem__ = classOf
     
-    def encode(self, s, dtype = 'float'):
+    def encode(self, s, dtype = 'float', weight = 1):
         "Convert a plain string of characters into a list of one-hot numpy vectors encoding class IDs."
         
         from numpy import zeros
@@ -796,7 +867,7 @@ class Charset(object):
             freq = zeros(N, dtype = dtype)
             hot = self.classes.get(char)
             if hot is None: raise Exception("Charset.encode(): trying to encode a character (%s) that is not in charset." % char)
-            freq[hot] = 1
+            freq[hot] = weight
             return freq
         
         return map(encode_one, s)
@@ -881,12 +952,12 @@ class FuzzyString(object):
                             # whenever particular fraquency values need to be modified. The `chars` list itself is mutable (!).
     dtype = None
     
-    def __init__(self, text = '', charset = None, dtype = 'int32', chars = None):
+    def __init__(self, text = '', charset = None, dtype = 'int32', chars = None, weight = 1):
         "Convert a crisp string 'text' to fuzzy."
         assert charset is not None
         self.charset = charset
         self.dtype = dtype
-        self.chars = charset.encode(text, dtype) if chars is None else chars
+        self.chars = charset.encode(text, dtype, weight) if chars is None else chars
         
     def copy(self):
         "Shallow copy of self."
@@ -905,7 +976,7 @@ class FuzzyString(object):
         "Append a char or a string, crisp or fuzzy, to the end of this string."
         self.chars = self._concat_R(other)
         
-    def discretize(self, minfreq = None, GAP = None):
+    def discretize(self, minfreq = None, UNKNOWN = None):
         """
         On each position in `chars` pick the first most likely crisp character and return concatenated as a crisp string.
         Optionally, apply minimum frequency threshold, if not satisfied insert GAP.
@@ -913,7 +984,7 @@ class FuzzyString(object):
         if minfreq is None:
             return ''.join(self.charset.chars[freq.argmax()] for freq in self.chars)
         else:
-            return ''.join(self.charset.chars[freq.argmax()] if freq.max() >= minfreq else GAP for freq in self.chars)
+            return ''.join(self.charset.chars[freq.argmax()] if freq.max() >= minfreq else UNKNOWN for freq in self.chars)
 
     @staticmethod
     def merge(*strings, **params):
@@ -1035,7 +1106,7 @@ class FuzzyString(object):
         if isinstance(other, basestring):                                       # crisp string?
             other = FuzzyString(other, self.charset, dtype = self.dtype)
         
-        if self.charset != other.charset: return False
+        if self.charset is not other.charset: return False
         if len(self.chars) != len(other.chars): return False
         
         for v1, v2 in izip(self.chars, other.chars):
@@ -1056,7 +1127,7 @@ class FuzzyString(object):
                 return self.chars + self.charset.encode(other, self.dtype)
         else:                                                                   # or FuzzyString?
             # assert isinstance(other, FuzzyString)
-            if not self.charset == other.charset: raise Exception("Trying to add two FuzzyStrings with different charsets")
+            if self.charset is not other.charset: raise Exception("Trying to add two FuzzyStrings with different charsets")
             if inplace:
                 self.chars += other.chars
             else:
@@ -1490,6 +1561,12 @@ def HTML(text, settings = None): return Text(text, "HTML", settings)
 if __name__ == "__main__":
     import doctest
     print doctest.testmod()
+
+    print
+    print "align_multiple..."
+    res = align_multiple([u'This module provides a simple way to time small bits of Python code. It has both a Command-Line Interface as well as a callable one. It avoids a number of common traps for measuring execution times. See also Tim Peters’ introduction to the “Algorithms” chapter in the Python Cookbook, published by O’Reilly.', 'abcbaabcaa', '  ', u'This module provides a simple way to time small bits of Python code. It has both a Command-Line Interface as well as a callable one. It avoids a number of common traps for measuring execution times. See also Tim Peters’ introduction to the “Algorithms” chapter in the Python Cookbook, published by O’Reilly.', u'The following example shows how the Command-Line Interface can be used to compare three different expressions:'])
+    for s in res: print s
+    print
     
     from timeit import timeit
     print 'timeit...',
