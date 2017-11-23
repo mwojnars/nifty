@@ -706,13 +706,10 @@ def align_multiple(strings, mismatch = None, GAP = '_', cost_base = 2, cost_case
     if verbose: print '#1: ', '%8s' % strings[0]
 
     def mismatch(fuzzy, crisp):
-        cls1 = classes[crisp]
-        charfreq = fuzzy.chars[0]
-        cls2 = map(classes.__getitem__, charfreq.chars)
-        return np.dot(cost_matrix[cls2,cls1], charfreq.freqs)
-        # freq = fuzzy.chars[0]
-        # # assert freq.min() >= 0
-        # return np.dot(cost_matrix[cls1,:], freq)
+        cls = classes[crisp]
+        freq = fuzzy.chars[0]
+        # assert freq.min() >= 0
+        return np.dot(cost_matrix[cls,:], freq)
     
     # 1st pass: come up with a stable consensus; strings are accumulated through adding, NO normalization
     for i, s in enumerate(strings[1:]):
@@ -796,13 +793,11 @@ class Charset(object):
         N = len(self.chars)
         
         def encode_one(char):
-            if not char in self.classes: raise Exception("Charset.encode(): trying to encode a character (%s) that is not in charset." % char)
-            return CharFrequency(char, dtype)
-            # freq = zeros(N, dtype = dtype)
-            # hot = self.classes.get(char)
-            # if hot is None: raise Exception("Charset.encode(): trying to encode a character (%s) that is not in charset." % char)
-            # freq[hot] = 1
-            # return freq
+            freq = zeros(N, dtype = dtype)
+            hot = self.classes.get(char)
+            if hot is None: raise Exception("Charset.encode(): trying to encode a character (%s) that is not in charset." % char)
+            freq[hot] = 1
+            return freq
         
         return map(encode_one, s)
         
@@ -845,112 +840,7 @@ class Charset(object):
     
         return D
     
-class CharFrequency(object):
-    """
-    Compact (sparse) representation of a probability/frequency dustribution over a set of characters.
-    Frequencies must be NON-negative, otherwise __le__() and __eq__() comparison methods will work incorrectly.
-    
-    >>> freq = CharFrequency('a') + CharFrequency('b')
-    >>> freq.chars, freq.freqs
-    ('ab', array([ 1.,  1.]))
-    >>> freq /= 2
-    >>> freq.freqs
-    array([ 0.5,  0.5])
-    >>> freq = freq + CharFrequency('b')
-    >>> freq.chars, freq.freqs
-    ('ab', array([ 0.5,  1.5]))
-    """
-
-    chars = None        # string of characters, typically only those with non-zero frequency
-    freqs = None        # numpy vector of frequencies of consecutive 'chars'
-    
-    def __init__(self, single_char = None, dtype = None):
-        if single_char:
-            assert len(single_char) == 1
-            self.chars = single_char
-            self.freqs = np.ones(1, dtype = dtype)
-        else:
-            self.chars = ''
-            self.freqs = np.ones(0, dtype = dtype)
         
-    def __getitem__(self, char):
-        "Frequency of a given character, 0 if missing."
-        i = self.chars.find(char)
-        return self.freqs[i] if i >= 0 else 0
-
-    def __add__(self, other):
-        chars = self.chars
-
-        n = len(set(chars) | set(other.chars))
-        freqs = np.zeros(n, dtype = self.freqs.dtype)
-        freqs[:len(chars)] = self.freqs
-        
-        for c,f in zip(other.chars, other.freqs):
-            i = chars.find(c)
-            if i < 0:
-                i = len(chars)
-                chars += c
-            freqs[i] += f
-            
-        assert len(chars) == len(freqs)
-        new = CharFrequency()
-        new.chars = chars
-        new.freqs = freqs
-        
-        return new
-    
-    def __sub__(self, other):
-        neg_other = copy(other)
-        neg_other.freqs = -other.freqs
-        return self.__add__(neg_other)
-        
-    def __mul__(self, factor):
-        new = CharFrequency()
-        new.chars = self.chars
-        new.freqs = self.freqs * factor
-        return new
-
-    def __div__(self, factor):
-        new = CharFrequency()
-        new.chars = self.chars
-        new.freqs = self.freqs / factor
-        return new
-
-    def __imul__(self, factor):
-        self.freqs *= factor
-        return self
-    
-    def __idiv__(self, factor):
-        self.freqs /= factor
-        return self
-    
-    def __iter__(self):
-        return izip(self.chars, self.freqs)
-    
-    def __le__(self, other):
-        for c, f1 in izip(self.chars, self.freqs):
-            i = other.chars.find(c)
-            f2 = other.freqs[i] if i >= 0 else 0
-            if f1 > f2: return False
-        return True
-
-    def __eq__(self, other):
-        return self.__le__(other) and other.__le__(self)
-        
-    def __ne__(self, other):
-        return not (self.__le__(other) and other.__le__(self))
-
-    def __repr__(self):
-        return '%s%s' % (self.chars, self.freqs)
-
-    def sum(self):
-        return self.freqs.sum()
-    
-    def discretize(self, minfreq = None, GAP = None):
-        if minfreq is not None and self.freqs.max() < minfreq: return GAP
-        return self.chars[self.freqs.argmax()]
-    
-
 class FuzzyString(object):
     """
     A string of "fuzzy characters", each being a probability/frequency distribution over a predefined charset.
@@ -958,10 +848,10 @@ class FuzzyString(object):
     >>> charset = Charset('abc')
     >>> fuzzy = FuzzyString('aabccc', charset, dtype = int)
     >>> list(fuzzy.chars[2])
-    [('b', 1)]
+    [0, 1, 0]
     >>> fuzzy += 'aaa'
     >>> list(fuzzy.chars[-1])
-    [('a', 1)]
+    [1, 0, 0]
     >>> fuzzy[0] == 'a' and 'a' == fuzzy[0]
     True
     >>> fuzzy[0] != 'a' or 'a' != fuzzy[0]
@@ -977,21 +867,19 @@ class FuzzyString(object):
     >>> fuzzy[::2].discretize()
     'abcaa'
     >>> FuzzyString.merge(fuzzy[::2], 'aacc', norm = False).chars
-    [a[ 2.], ba[ 1.  1.], c[ 2.], ac[ 1.  1.], a[ 1.]]
+    [array([2, 0, 0]), array([1, 1, 0]), array([0, 0, 2]), array([1, 0, 1]), array([1, 0, 0])]
     >>> FuzzyString.merge(fuzzy[::2], 'aacc', norm = True, dtype = float).chars
-    [a[ 1.], ba[ 0.5  0.5], c[ 1.], ac[ 0.5  0.5], a[ 1.]]
+    [array([ 1.,  0.,  0.]), array([ 0.5,  0.5,  0. ]), array([ 0.,  0.,  1.]), array([ 0.5,  0. ,  0.5]), array([ 1.,  0.,  0.])]
     """
     
     # __isfuzzy__ = True      # flag to replace isinstance() checks with hasattr()
     
     charset = None          # Charset instance that defines a char-class mapping: char -> 0..N-1
-    chars = None            # list of CharFrequency objects
+    chars = None            # list of numpy vectors: chars[pos][c] = probability/frequency of character class 'c' on position 'pos' in string
+                            # kept as a list, not monolithic 2D array, to enable fast edit operations: character insertion/deletion;
+                            # you should treat each array, chars[pos], as IMMUTABLE (!) and make a copy
+                            # whenever particular fraquency values need to be modified. The `chars` list itself is mutable (!).
     dtype = None
-
-    # chars = None            # list of numpy vectors: chars[pos][c] = probability/frequency of character class 'c' on position 'pos' in string
-    #                         # kept as a list, not monolithic 2D array, to enable fast edit operations: character insertion/deletion;
-    #                         # you should treat each array, chars[pos], as IMMUTABLE (!) and make a copy
-    #                         # whenever particular fraquency values need to be modified. The `chars` list itself is mutable (!).
     
     def __init__(self, text = '', charset = None, dtype = 'int32', chars = None):
         "Convert a crisp string 'text' to fuzzy."
@@ -1022,11 +910,10 @@ class FuzzyString(object):
         On each position in `chars` pick the first most likely crisp character and return concatenated as a crisp string.
         Optionally, apply minimum frequency threshold, if not satisfied insert GAP.
         """
-        return ''.join(char_freq.discretize(minfreq, GAP) for char_freq in self.chars)
-        # if minfreq is None:
-        #     return ''.join(self.charset.chars[freq.argmax()] for freq in self.chars)
-        # else:
-        #     return ''.join(self.charset.chars[freq.argmax()] if freq.max() >= minfreq else GAP for freq in self.chars)
+        if minfreq is None:
+            return ''.join(self.charset.chars[freq.argmax()] for freq in self.chars)
+        else:
+            return ''.join(self.charset.chars[freq.argmax()] if freq.max() >= minfreq else GAP for freq in self.chars)
 
     @staticmethod
     def merge(*strings, **params):
@@ -1068,8 +955,7 @@ class FuzzyString(object):
         # combine numpy arrays on each char position
         v = len(charset)
         n = max(len(s) for s in fuzzy)
-        chars = [CharFrequency() for _ in xrange(n)]
-        # chars = [np.zeros(v, dtype) for _ in xrange(n)]
+        chars = [np.zeros(v, dtype) for _ in xrange(n)]
         
         for i, s in enumerate(fuzzy):
             schars = s.chars
@@ -1121,15 +1007,15 @@ class FuzzyString(object):
         freq = self.chars[0]
         
         if is_basestring or (is_basestring is None and isinstance(other, basestring)):
-            freq_other = freq[other]
-            if degree == 1: return (freq.sum() - freq_other + np.abs(freq_other-1)) * 0.5
-            # cls = self.charset.classes[other]
-            # if degree == 1: return (sum(freq) - freq[cls] + np.abs(freq[cls]-1)) * 0.5                  # same as: sum(abs(diff)) * 0.5
-            # if degree == 2: return ((sum(freq**2) - freq[cls]**2 + (freq[cls]-1)**2) * 0.5) ** 0.5      # same as: sum(diff**2 * 0.5) ** 0.5
+            cls = self.charset.classes[other]
+            # diff = freq.copy()
+            # diff[cls] -= 1
+            if degree == 1: return (sum(freq) - freq[cls] + np.abs(freq[cls]-1)) * 0.5                  # same as: sum(abs(diff)) * 0.5
+            if degree == 2: return ((sum(freq**2) - freq[cls]**2 + (freq[cls]-1)**2) * 0.5) ** 0.5      # same as: sum(diff**2 * 0.5) ** 0.5
 
         diff = freq - other.chars[0]
-        if degree == 1: return sum(np.abs(diff.freqs)) * 0.5
-        if degree == 2: return sum(diff.freqs**2 * 0.5) ** 0.5
+        if degree == 1: return sum(np.abs(diff)) * 0.5
+        if degree == 2: return sum(diff**2 * 0.5) ** 0.5
 
     def mismatch_crisp(self, other, degree = 1):
         "Like mismatch(), for use when `other` is guaranteed to be a crisp string (basestring)."
@@ -1154,8 +1040,7 @@ class FuzzyString(object):
         
         for v1, v2 in izip(self.chars, other.chars):
             if v1 is v2: continue
-            if v1 != v2: return False
-            # if not np.array_equal(v1, v2): return False
+            if not np.array_equal(v1, v2): return False
         
         return True
         
