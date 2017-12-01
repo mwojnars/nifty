@@ -18,7 +18,7 @@ import re, math, numpy as np
 import HTMLParser
 from collections import defaultdict
 from array import array
-from itertools import imap, izip
+from itertools import imap, izip, groupby
 from copy import copy
 from numba import jit
 
@@ -872,10 +872,6 @@ class Charset(object):
         
         return map(encode_one, s)
         
-    def discretize(self, freq):
-        "Discretize a frequency vector back into the first most probable character."
-        return self.chars[freq.argmax()]
-        
     def cost_matrix(self, GAP = '_', cost_base = 2, cost_case = 1, cost_gap = 3, cost_gap_gap = 0, dtype = None):
         "Create a parameterized cost matrix for edit distance."
     
@@ -985,6 +981,91 @@ class FuzzyString(object):
             return ''.join(self.charset.chars[freq.argmax()] for freq in self.chars)
         else:
             return ''.join(self.charset.chars[freq.argmax()] if freq.max() >= minfreq else UNKNOWN for freq in self.chars)
+
+    def regexify(self, minfreq = 0.0, maxchars = 3, GAP = None, merge = True, _escape = set(r'.[]{}()|?\\^$*+-')):
+        """
+        Encode this FuzzyString as a regex pattern, where alternative characters (freq > maxfreq) on each position
+        are encoded as character sets [ABC], uncertainties (all freq <= minfreq) are replaced with a dot '.',
+        and gaps are converted to optional markers '?'.
+        """
+        from nifty.math import np_find
+        charset_chars = self.charset.chars
+        GAP_cls = self.charset.classOf(GAP)
+        
+        def escape(char): return '\\' + char if char in _escape else char
+
+        codes = []
+        modes = []
+        
+        last_code = None            # recent regex code, pending to be emitted
+        last_rep = (0,0)            # (min,max) repetition of the last code
+        
+        for freq in self.chars:
+            idx = list(np_find(freq > minfreq))
+            gap = bool(GAP and GAP_cls in idx)              # gap=True if the current character(s) is optional, or there are no characters (skip)
+            if gap: idx.remove(GAP_cls)
+            
+            n = len(idx)
+            if n == 0 or n > maxchars:
+                # if gap: continue                            # no characters, only a gap? skip without emitting any regex code
+                code = '.'
+            elif n == 1:
+                char = charset_chars[idx[0]]
+                code = escape(char)
+            else:
+                chars = [escape(charset_chars[i]) for i in idx]
+                code = '[%s]' % ''.join(chars)
+            
+            # if code == last_code:
+            # if gap: code += '?'
+            
+            mode = '?' if gap else ''
+            codes.append(code)
+            modes.append(mode)
+        
+        if not merge:
+            return ''.join(c + m for c, m in izip(codes, modes))
+        
+        # merge repetitions of the same code
+        pos = 0
+        codes_final = []
+        
+        for code, code_group in groupby(codes):
+            
+            code_group = list(code_group)
+            k = len(code_group)
+            assert k > 0
+            
+            mode_group = modes[pos:pos+k]
+            pos += k
+
+            # in simple case (low `k`) just copy original <code,mode> pairs to output, no merging
+            if k <= 2:
+                for c, m in izip(code_group, mode_group):
+                    codes_final.append(c + m)
+                continue
+                
+            # merge modes and convert to {repmin,repmax} pair
+            repmin = repmax = 0
+            for mode in mode_group:
+                repmin += int(mode is not '?')
+                repmax += 1
+            
+            repmax = k
+            repmin = k - len([m for m in mode_group if m is '?'])           # subtract the no. of optional '?' characters
+
+            # output a single `code` token with appropriate `mode` as obtained from merge
+                
+            # if repmin == repmax == 1: mode = ''
+            # elif repmin == 0 and repmax == 1: mode = '?'
+            if repmin == repmax:   mode = '{%s}' % repmax
+            elif repmin == 0:      mode = '{,%s}' % repmax
+            else:                  mode = '{%s,%s}' % (repmin, repmax)
+                
+            codes_final.append(code + mode)
+        
+        pattern = ''.join(codes_final)
+        return pattern
 
     @staticmethod
     def merge(*strings, **params):
