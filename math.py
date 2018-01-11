@@ -264,6 +264,32 @@ def likelihood(probs, log = np.log, exp = False):
     return np.exp(loglike) if exp else loglike
     
 
+class Accumulator(object):
+    """Weighted sequence of values (scalars or numpy arrays) where new items are added incrementally
+       and weighted mean() of all the items added so far can be computed at any point.
+       Only the current sum of items is remembered; actual items are not.
+    """
+    total  = 0              # total values*weights
+    weight = 0              # total weights
+    count  = 0              # total no. of items, excluding the initial value
+    dtype  = float
+        
+    def __init__(self, init_value = None, init_weight = None, dtype = None):
+        if dtype: self.dtype = dtype
+        if init_value is not None and init_weight is not None:
+            self.add(init_value, init_weight)
+        self.count = 0
+        
+    def add(self, value, weight = 1):
+        self.total += value * weight
+        self.weight += weight
+        # self.count += repeat
+    
+    def mean(self):
+        "Weighted mean of all the items added so far."
+        return self.total / self.dtype(self.weight)
+    
+
 class Accumulator2D(object):
     """A 2D+ numpy array, typically large one, that is built incrementally
     from multiple (smaller) 2D patches, possibly overlapping.
@@ -289,8 +315,10 @@ class Accumulator2D(object):
         self.total[y : y + h, x : x + w, ...] += patch * weight
         self.count[y : y + h, x : x + w, ...] += weight
     
-    def get(self):
+    def mean(self):
         return self.total / self.count
+    
+    get = mean
     
     def __getitem__(self, key):
         "Efficient sliced read access to the current value of the accumulated array."
