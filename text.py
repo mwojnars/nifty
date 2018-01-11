@@ -982,11 +982,12 @@ class FuzzyString(object):
         else:
             return ''.join(self.charset.chars[freq.argmax()] if freq.max() >= minfreq else UNKNOWN for freq in self.chars)
 
-    def regexify(self, minfreq = 0.0, maxchars = 3, GAP = None, merge = True, _escape = set(r'.[]{}()|?\\^$*+-')):
+    def regexify(self, minfreq = 0.0, maxchars = 3, GAP = None, merge = True, merge_stop = [], _escape = set(r'.[]{}()|?\\^$*+-')):
         """
         Encode this FuzzyString as a regex pattern, where alternative characters (freq > maxfreq) on each position
         are encoded as character sets [ABC], uncertainties (all freq <= minfreq) are replaced with a dot '.',
-        and gaps are converted to optional markers '?'.
+        gaps are converted to optional markers '?' and repeated code points are merged (if merge=True)
+        to repetitions {m,n}. If merge_stop is given, characters (code points) from merge_stop are excluded from merging.
         """
         from nifty.math import np_find
         charset_chars = self.charset.chars
@@ -1039,8 +1040,8 @@ class FuzzyString(object):
             mode_group = modes[pos:pos+k]
             pos += k
 
-            # in simple case (low `k`) just copy original <code,mode> pairs to output, no merging
-            if k <= 2:
+            # in simple case (low `k`) or character from merge_stop, just copy original <code,mode> pairs to output, no merging
+            if k <= 2 or code in merge_stop:
                 for c, m in izip(code_group, mode_group):
                     codes_final.append(c + m)
                 continue
