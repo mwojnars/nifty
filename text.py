@@ -1462,6 +1462,12 @@ class Text(xunicode):
     ('HTML', 'HTML')
     >>> ((t+" %s") % "ala").language, ((t+" %s") % u"ala").language
     ('HTML', 'HTML')
+    >>> s = "'%s'" % t
+    >>> type(s), s
+    (<type 'unicode'>, u"'<a>this is text</a>'")
+    >>> s = u"'%s'" % t
+    >>> type(s), s
+    (<type 'unicode'>, u"'<a>this is text</a>'")
     >>> ("ala " + t).language, (u"ala " + t).language
     ('HTML', 'HTML')
     >>> (t + t).language, (t * 3).language, (5 * t).language
@@ -1550,7 +1556,6 @@ class Text(xunicode):
     def __mod__(self, other):
         res = unicode.__mod__(self, other)
         return Text(res, self.language)
-    __rmod__ = __mod__
 
     def __getitem__(self, idx):
         res = unicode.__getitem__(self, idx)
