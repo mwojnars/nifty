@@ -240,7 +240,7 @@ class regex(object):
     #          XML-like headers <?...?> (also check group 3); comments <!--...--> (group 5); CDATA sections <![CDATA[...
     # Does NOT allow for spaces after "<".
     # See HTML5 reference: http://www.w3.org/TR/html-markup/syntax.html#syntax-start-tags
-    tag = r"""<(?:([a-zA-Z\?][\w:\-]*)(\s(?:\s*[a-zA-Z][\w:\-]*(?:\s*=(?:\s*"(?:\\"|[^"])*"|\s*'(?:\\'|[^'])*'|[^\s>]+))?)*)?(\s*[\/\?]?)|\/([a-zA-Z][\w:\-]*)\s*|!--((?:[^\-]|-(?!->))*)--|!\[CDATA\[((?:[^\]]|\](?!\]>))*)\]\])>"""
+    tag = r"""<(?:([a-zA-Z\?][\w:\-]*)(?:\s+[a-zA-Z][\w:\-]*(?:\s*=(?:\s*"(?:\\"|[^"])*"|\s*'(?:\\'|[^'])*'|[^\s>]+))?)*(\s*[\/\?]?)|\/([a-zA-Z][\w:\-]*)\s*|!--((?:[^\-]|-(?!->))*)--|!\[CDATA\[((?:[^\]]|\](?!\]>))*)\]\])>"""
     tag_re = re.compile(tag, re.IGNORECASE)
 
     @staticmethod
@@ -1102,7 +1102,7 @@ class FuzzyString(object):
             if not s.charset == charset: raise Exception("Trying to combine FuzzyStrings with different charsets")
             # if not np.dtype(s.dtype) <= dtype: raise Exception("Trying to combine FuzzyStrings with incompatible numeric types: %s, %s" % (s.dtype, dtype))
             return s
-
+        
         fuzzy = map(validate, strings)
         
         # combine numpy arrays on each char position
