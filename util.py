@@ -222,7 +222,10 @@ def flatten(*seq):
     [1, 2, 3, 42, None, 4, 5, 6, 7, 'a', 'string', 8, 9]
     """
     result = []
-    if len(seq) == 1: seq = seq[0]
+    try:
+        if len(seq) == 1: seq = seq[0]
+    except: pass
+    
     for x in seq:
         if hasattr(x, "__iter__"): result += flatten(x)
         else: result.append(x)
