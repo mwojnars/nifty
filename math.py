@@ -264,6 +264,63 @@ def likelihood(probs, log = np.log, exp = False):
     return np.exp(loglike) if exp else loglike
     
 
+########################################################################################################################
+###
+###   ACCUMULATORS of streams of values or arrays
+###
+
+class MinMax(object):
+    """
+    Monitors a stream of values and (optionally) their arguments, and upon request returns
+    min(), max(), argmin(), argmax(), idxmin() or idxmax() of values/arguments/indices seen so far.
+    Values can be not-None objects of any type that supports comparison.
+    Arguments can be not-None objects of any type; None is treated as a missing argument: index in the stream is used instead.
+    """
+    
+    curr_min = (None, None, None)           # (idx, argument, value) of the 1st minimum value seen so far
+    curr_max = (None, None, None)           # (idx, argument, value) of the 1st maximum value seen so far
+    
+    count = 0                               # no. of objects seen so far
+    
+    def __init__(self, values = None):
+        if values is not None:
+            for v in values: self.add(v)
+    
+    def reset(self):
+        self.curr_min = self.curr_max = (None, None, None)
+        self.count = 0
+    
+    def add(self, value, arg = None):
+        cmin = self.curr_min[2]
+        if cmin is None or value < cmin:
+            self.curr_min = (self.count, arg, value)
+
+        cmax = self.curr_max[2]
+        if cmax is None or value > cmax:
+            self.curr_max = (self.count, arg, value)
+    
+        self.count += 1
+        
+    def min(self): return self.curr_min[2]
+    def max(self): return self.curr_max[2]
+        
+    def argmin(self):
+        "If corresponding argument was missing (None), index of the minimum value is returned instead, like in idxmin()."
+        return self.curr_min[1] if self.curr_min[1] is not None else self.curr_min[0]
+    
+    def argmax(self):
+        "If corresponding argument was missing (None), index of the maximum value is returned instead, like in idxmax()."
+        return self.curr_max[1] if self.curr_max[1] is not None else self.curr_max[0]
+    
+    def idxmin(self):
+        "0-based index in the stream of the 1st minimum value seen so far."
+        return self.curr_min[0]
+    
+    def idxmax(self):
+        "0-based index in the stream of the 1st maximum value seen so far."
+        return self.curr_max[0]
+    
+
 class Accumulator(object):
     """Weighted sequence of values (scalars or numpy arrays) where new items are added incrementally
        and weighted mean() of all the items added so far can be computed at any point.
