@@ -14,14 +14,19 @@ You should have received a copy of the GNU General Public License along with Nif
 '''
 
 from __future__ import absolute_import
-import re, math, numpy as np
+import sys, re, math, numpy as np
 import HTMLParser
 from collections import defaultdict
 from array import array
 from itertools import imap, izip, groupby
 from copy import copy
-from numba import jit
 
+try:
+    from numba import jit
+except:
+    def jit(f): return f
+    print >>sys.stderr, "nifty.text: numba not found, JIT disabled for multiple string alignment align()"
+    
 if __name__ != "__main__":
     from .util import isstring, islist, bound, flatten, merge_spaces
     from . import util
