@@ -702,8 +702,8 @@ def _align_loop(dist, edit, mismatch_1_GAP, mismatch_GAP_2, mismatch_pairs):
             edit[i,j] = step
     
     
-def align_multiple(strings, mismatch = None, GAP = '_', cost_base = 2, cost_case = 1, cost_gap = 3, cost_gap_gap = 0, weights = None,
-                   return_consensus = False, verbose = False):
+def align_multiple(strings, mismatch = None, GAP = '_', cost_base = 2, cost_case = 1, cost_gap = 3, cost_gap_gap = 0,
+                   weights = None, charset = None, return_consensus = False, verbose = False):
     """
     Multiple Sequence Alignment (MSA) of given strings through the use of incrementally updated FuzzyString consensus.
     
@@ -715,8 +715,10 @@ def align_multiple(strings, mismatch = None, GAP = '_', cost_base = 2, cost_case
     ['aabbcc__', '__bbccaa', 'ccaabb__']
     >>> align_multiple(['aabbcc', 'aadcc', 'aaeecc'], cost_gap = 2)
     ['aabbcc', 'aad_cc', 'aaeecc']
-    >>> align_multiple(['aabbcc', 'aadcc', 'aaeecc'], cost_gap = 3)
-    ['aabbcc', 'aad_cc', 'aaeecc']
+    >>> align_multiple(['aabbcc', 'aadcc', 'aaeecc', ''], cost_gap = 3)
+    ['aabbcc', 'aad_cc', 'aaeecc', '______']
+    >>> align_multiple(['', '   '], cost_gap = 3)
+    ['___', '   ']
     """
     from numpy import array, dot, ones
     
@@ -726,7 +728,7 @@ def align_multiple(strings, mismatch = None, GAP = '_', cost_base = 2, cost_case
         if GAP in s: raise Exception(u"align_multiple(): GAP character '%s' occurs in a string to be matched. Use a different GAP." % GAP)
     
     # create charset & cost matrix
-    charset = Charset(text = ''.join(strings) + GAP)
+    if not charset: charset = Charset(text = ''.join(strings) + GAP)
     cost_matrix = charset.cost_matrix(GAP, cost_base = cost_base, cost_case = cost_case, cost_gap = cost_gap, cost_gap_gap = cost_gap_gap)  #dtype = 'float32'
     classes = charset.classes
     if verbose: print 'cost_matrix:\n', cost_matrix
@@ -765,7 +767,6 @@ def align_multiple(strings, mismatch = None, GAP = '_', cost_base = 2, cost_case
     def get_mismatch_pairs(consensus, s, dtype):
         "Create 2D matrix of mismatch() values for all pairs of letters in both strings, to speed up the most critical operation in align() calls."
         n1, n2 = len(consensus), len(s)
-        consensus_chars = array(consensus.chars)
 
         # classes_s = [classes[c] for c in s]
         # return dot(consensus_chars, cost_matrix[:,classes_s])
@@ -774,6 +775,9 @@ def align_multiple(strings, mismatch = None, GAP = '_', cost_base = 2, cost_case
         # return _get_mismatch_pairs_loop(consensus_chars, classes_s)
         
         mismatch_pairs = np.zeros((n1, n2), dtype)
+        if n1 == 0 or n2 == 0: return mismatch_pairs
+        
+        consensus_chars = array(consensus.chars)
         for j, c in enumerate(s):
             mismatch_pairs[:,j] = dot(consensus_chars, cost_matrix[:,classes[c]])
             # for i in xrange(n1):
@@ -828,9 +832,6 @@ def align_multiple(strings, mismatch = None, GAP = '_', cost_base = 2, cost_case
         c_aligned, s_aligned, dist, c_gaps, s_gaps = \
             align(consensus, s, GAP1 = GAP1, GAP2 = GAP, return_gaps = True, mismatch = mismatch, mismatch_pairs = mismatch_pairs, dtype = dtype)
         
-        aligned.append(s_aligned)
-        if verbose: print s_aligned
-
         # new gaps have been inserted into consensus (c_aligned)?
         # backpropagate them to already-aligned strings...
         if len(consensus) != len(c_aligned):
@@ -839,6 +840,12 @@ def align_multiple(strings, mismatch = None, GAP = '_', cost_base = 2, cost_case
             for gap in c_gaps:
                 for k in xrange(len(aligned)):
                     aligned[k] = insert_gap(aligned[k], gap)
+
+        aligned.append(s_aligned)
+        if verbose: print s_aligned
+
+        assert all(len(a) == len(consensus) for a in aligned)
+                    
     if verbose: print
 
     return (aligned, consensus) if return_consensus else aligned
