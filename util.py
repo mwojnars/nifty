@@ -1033,9 +1033,22 @@ def listdir(root, onlyfiles = False, onlydirs = False, recursive = False, fullpa
 def listdirs(root, recursive = False, fullpath = False):
     "List all subfolders of 'folder', excluding . and .."
     return listdir(root, onlydirs = True, recursive = recursive, fullpath = fullpath)
+
 def listfiles(root, recursive = False, fullpath = False):
     "List all regular files in 'folder', no subfolders."
-    return listdir(root, onlyfiles = True, recursive = recursive, fullpath = fullpath)
+    if not recursive:
+        return listdir(root, onlyfiles = True, recursive = recursive, fullpath = fullpath)
+    # recursive, with subfolders
+    root = normdir(root)
+    files = []
+    for folder, dirnames, filenames in os.walk(root):
+        for filename in filenames:
+            files.append(os.path.join(folder, filename))
+    if not fullpath:
+        assert all(f.startswith(root) for f in files)
+        prefix = len(root)
+        files = [f[prefix:] for f in files]
+    return files
 
 def findfiles(pattern):
     "Return a list of files and folders that match a given shell pattern, possibly with wildcards. Just an alias for glob.glob()."
