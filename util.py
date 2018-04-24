@@ -621,6 +621,10 @@ def merge_spaces(s, pat = re.compile(r'\s+')):
     "Merge multiple spaces, replace newlines and tabs with spaces, strip leading/trailing space. Similar to normalize-space() in XPath."
     return pat.sub(' ', s).strip()
 
+def flat_spaces(s, pat = re.compile(r'[\n\r\t]')):
+    "Replace \n, \r, \t special characters with regular spaces."
+    return pat.sub(' ', s)
+
 def escape(s):
     "Slash-escape (or encode) non-printable characters, including \n and \t."
     return s.encode('unicode_escape')

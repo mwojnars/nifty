@@ -17,7 +17,7 @@ import numpy as np
 import numpy.linalg as linalg
 from numpy import sum, mean, zeros, sqrt, pi, exp, isnan, isinf, arctan
 
-from .util import isnumber
+from .util import isnumber, isdict
 
 
 ########################################################################################################################
@@ -55,7 +55,7 @@ def ceildiv(a, b):
 
 ########################################################################################################################
 ###
-###   RANDOM NUMBERS
+###   RANDOM NUMBERS and PROBABILITY DISTRIBUTIONS
 ###
 
 # see http://eli.thegreenplace.net/2010/01/22/weighted-random-generation-in-python/
@@ -87,6 +87,89 @@ class WeightedRandom(object):
         return self.vals[i]
 
 
+#####################################################################################################################################################
+
+class Distribution(object):
+    "Base class for probability distributions."
+    
+    rand = random.Random()          # fallback Random instance to be used as a source of randomness in random() if `rand` argument is None
+    
+    def random(self, rand = None):
+        "Override in subclasses to implement random selection from a probability distribution implemented by a subclass."
+        return (rand or self.rand).random()
+    
+    
+class Interval(Distribution):
+    """Uniform distribution over [start,stop) or [start,stop] interval, depending on rounding, like in random.uniform().
+       Or just the `start` value if stop=None.
+       If `cast` is not-None, values are passed through cast() before being returned.
+       Typically, cast is a type (e.g., int), or a rounding function that should be applied to the selected value.
+    """
+    
+    def __init__(self, start = 0.0, stop = None, cast = None):
+        self.start = start
+        self.stop = stop
+        self.cast = cast
+    
+    def random(self, rand = None):
+        rand = rand or self.rand
+        if self.stop in (None, self.start): return self.start
+        val = rand.uniform(self.start, self.stop)
+        if self.cast:
+            return self.cast(val)
+        return val
+    
+class Choice(Distribution):
+    """Discrete probability distribution over a fixed set of values.
+       In random(), if a chosen value is an instance of Distribution, a subsequent choice from this distribution is performed.
+    """
+    
+    choices = None      # list of values to choose from
+    is_dist = None      # list of flags: is_dist[i]==True iff choices[i] is a probability distribution itself (an instance of Distribution)
+    
+    def __init__(self, choices):
+        """`choices` is either a sequence (then uniform distribution is assumed), or a dictionary of {value: probability} pairs.
+           The sum of `probability` values must be positive, but not necessarily 1.0 - probabilities are normalized by default to unit sum.
+        """
+        if not choices: raise Exception('Choice.__init__: the list/dict of choices must be non-empty')
+        self.choices = list(choices)
+        self.is_dist = [isinstance(v, Distribution) for v in choices]       # this is pre-computed to speed up execution of random()
+        
+        if isdict(choices):
+            self.probs = np.array([choices[v] for v in self.choices], dtype = float)
+            self.probs /= float(self.probs.sum())                           # normalize probabilities to unit sum
+        else:
+            self.probs = None
+        
+    def random(self, rand = None):
+        rand = rand or self.rand
+        seed = rand.randrange(4294967296)                               # 4294967296 == 2**32 == 1 + the maximum seed for RandomState
+        np_rand = np.random.RandomState(seed)                           # use numpy's random to be able to choose items with non-uniform distribution
+        
+        choice = np_rand.choice(len(self.choices), p = self.probs)      # choose an index into self.choices[]
+        val = self.choices[choice]
+        
+        if self.is_dist[choice]:
+            return val.random(rand)
+        
+        return val
+            
+    
+class Intervals(Choice):
+    "Combination of uniform distributions defined on intervals."
+    
+    def __init__(self, intervals, cast = None):
+        "`intervals` is either a list of (start,stop) pairs, or a dict of {(start,stop): probability} tuples."
+        
+        # wrap up interval pairs in Interval class, so that the Choice class knows these pairs should be treated as sub-distributions
+        if isdict(intervals):
+            choices = {Interval(start, stop, cast = cast): prob for (start,stop), prob in intervals.iteritems()}
+        else:
+            choices = [Interval(start, stop, cast = cast) for (start,stop) in intervals]
+            
+        super(Intervals, self).__init__(choices)
+        
+    
 ########################################################################################################################
 ###
 ###   SCALAR functions & point-wise transformations

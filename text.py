@@ -720,6 +720,11 @@ def align_multiple(strings, mismatch = None, GAP = '_', cost_base = 2, cost_case
     """
     from numpy import array, dot, ones
     
+    # safety checks
+    if len(GAP) != 1: raise Exception(u"Incorrect GAP value, GAP must be a 1-character string.")
+    for s in strings:
+        if GAP in s: raise Exception(u"align_multiple(): GAP character '%s' occurs in a string to be matched. Use a different GAP." % GAP)
+    
     # create charset & cost matrix
     charset = Charset(text = ''.join(strings) + GAP)
     cost_matrix = charset.cost_matrix(GAP, cost_base = cost_base, cost_case = cost_case, cost_gap = cost_gap, cost_gap_gap = cost_gap_gap)  #dtype = 'float32'
@@ -977,15 +982,16 @@ class FuzzyString(object):
         "Append a char or a string, crisp or fuzzy, to the end of this string."
         self.chars = self._concat_R(other)
         
-    def discretize(self, minfreq = None, UNKNOWN = None):
+    def discretize(self, minfreq = None, unknown = None):
         """
         On each position in `chars` pick the first most likely crisp character and return concatenated as a crisp string.
-        Optionally, apply minimum frequency threshold, if not satisfied insert GAP.
+        Optionally, apply minimum frequency threshold, if not satisfied insert `unknown` character.
         """
         if minfreq is None:
             return ''.join(self.charset.chars[freq.argmax()] for freq in self.chars)
         else:
-            return ''.join(self.charset.chars[freq.argmax()] if freq.max() >= minfreq else UNKNOWN for freq in self.chars)
+            if unknown is None: raise Exception('FuzzyString.discretize(): `unknown` character is missing')
+            return ''.join(self.charset.chars[freq.argmax()] if freq.max() >= minfreq else unknown for freq in self.chars)
 
     def regexify(self, minfreq = 0.0, maxchars = 3, GAP = None, merge = True, merge_stop = [], _escape = set(r'.[]{}()|?\\^$*+-')):
         """
@@ -1295,7 +1301,7 @@ class WordsModel(object):
         self.freqMissing = math.log(self.nDocs)
         
     def get(self, word):
-        return self.weights.get(word, self.freqMissing)    
+        return self.weights.get(word, self.freqMissing)
     
 class WordsModelUnderTraining(WordsModel):
     '''
