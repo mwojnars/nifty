@@ -582,7 +582,7 @@ def _align_loop(dist, edit, mismatch_1_GAP, mismatch_GAP_2, mismatch_pairs):
     
     
 def align_multiple(strings, mismatch = None, GAP = '_', cost_base = 2, cost_case = 1, cost_gap = 3, cost_gap_gap = 0,
-                   weights = None, charset = None, return_consensus = False, verbose = False):
+                   weights = None, charset = None, cost_matrix = None, return_consensus = False, verbose = False):
     """
     Multiple Sequence Alignment (MSA) of given strings through the use of incrementally updated FuzzyString consensus.
     
@@ -607,9 +607,11 @@ def align_multiple(strings, mismatch = None, GAP = '_', cost_base = 2, cost_case
         if GAP in s: raise Exception(u"align_multiple(): GAP character '%s' occurs in a string to be matched. Use a different GAP." % GAP)
     
     # create charset & cost matrix
-    if not charset: charset = Charset(text = ''.join(strings) + GAP)
-    cost_matrix = charset.cost_matrix(GAP, cost_base = cost_base, cost_case = cost_case, cost_gap = cost_gap, cost_gap_gap = cost_gap_gap)  #dtype = 'float32'
+    if charset is None: charset = Charset(text = ''.join(strings) + GAP)
     classes = charset.classes
+
+    if cost_matrix is None:
+        cost_matrix = charset.cost_matrix(GAP, cost_base = cost_base, cost_case = cost_case, cost_gap = cost_gap, cost_gap_gap = cost_gap_gap)  #dtype = 'float32'
     if verbose: print 'cost_matrix:\n', cost_matrix
     
     if weights is None: weights = ones(len(strings))
