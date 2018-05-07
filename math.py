@@ -17,7 +17,7 @@ import numpy as np
 import numpy.linalg as linalg
 from numpy import sum, mean, zeros, sqrt, pi, exp, isnan, isinf, arctan
 
-from .util import isnumber, isdict
+from .util import isnumber, isdict, getattrs
 
 
 ########################################################################################################################
@@ -92,11 +92,17 @@ class WeightedRandom(object):
 class Distribution(object):
     "Base class for probability distributions."
     
-    rand = random.Random()          # fallback Random instance to be used as a source of randomness in random() if `rand` argument is None
+    _rand = random.Random()         # fallback Random instance to be used as a source of randomness in random() if `rand` argument is None
+    
+    def __init__(self, rand = None, seed = None):
+        if seed is not None:
+            rand = random.Random(seed)
+        if rand is not None:
+            self._rand = rand
     
     def random(self, rand = None):
         "Override in subclasses to implement random selection from a probability distribution implemented by a subclass."
-        return (rand or self.rand).random()
+        return (rand or self._rand).random()
     
     
 class Interval(Distribution):
@@ -112,7 +118,7 @@ class Interval(Distribution):
         self.cast = cast
     
     def random(self, rand = None):
-        rand = rand or self.rand
+        rand = rand or self._rand
         if self.stop in (None, self.start): return self.start
         val = rand.uniform(self.start, self.stop)
         if self.cast:
@@ -142,7 +148,7 @@ class Choice(Distribution):
             self.probs = None
         
     def random(self, rand = None):
-        rand = rand or self.rand
+        rand = rand or self._rand
         seed = rand.randrange(4294967296)                               # 4294967296 == 2**32 == 1 + the maximum seed for RandomState
         np_rand = np.random.RandomState(seed)                           # use numpy's random to be able to choose items with non-uniform distribution
         
@@ -169,6 +175,41 @@ class Intervals(Choice):
             
         super(Intervals, self).__init__(choices)
         
+    
+class RandomInstance(Distribution):
+    """Probability distribution over a space of instances of a given class.
+       Attribute values of a generated instance are chosen at random from probability distributions defined in the subclass,
+       separately for each attribute.
+    """
+    
+    class_type = None           # the class whose instances are going to be created and returned in random()
+    class_attr = None           # list of attributes that shall be initialized when a random <class_type> object is created;
+                                # in the subclass, these attributes should contain instances of Distribution that define probability distr. to choose values from
+    
+    def __init__(self, rand = None, seed = None):
+        super(RandomInstance, self).__init__(rand, seed)
+        
+        if self.class_attr is None:
+            self.class_attr = [attr for attr in dir(self.__class__) if not attr.startswith('__')]
+        
+    def random(self, rand = None):
+        """Walk through attributes of `self` and for each one being an instance of Distribution (probability distribution)
+           draw a random value and assign to this attribute.
+        """
+        rand = rand or self._rand
+        
+        # print 'RandomInstance class & attributes:', self.class_type, self.class_attr
+        assert self.class_type is not None
+        obj = self.class_type()
+        
+        for attr in self.class_attr:
+            distr = getattr(self, attr, None)
+            if isinstance(distr, Distribution):
+                val = distr.random(rand)
+                setattr(obj, attr, val)
+        
+        return obj
+    
     
 ########################################################################################################################
 ###
