@@ -126,11 +126,12 @@ class Interval(Distribution):
         return val
     
 class Choice(Distribution):
-    """Discrete probability distribution over a fixed set of values.
-       In random(), if a chosen value is an instance of Distribution, a subsequent choice from this distribution is performed.
+    """Discrete probability distribution over a fixed set of possible outcomes (choices).
+       In random(), if a chosen value is an instance of Distribution, a subsequent choice from this distribution is performed,
+       which allows nesting of distributions and building composite ones.
     """
     
-    choices = None      # list of values to choose from
+    choices = None      # list of possible outcomes (values) to choose from
     is_dist = None      # list of flags: is_dist[i]==True iff choices[i] is a probability distribution itself (an instance of Distribution)
     
     def __init__(self, choices):
@@ -160,6 +161,18 @@ class Choice(Distribution):
         
         return val
             
+    
+class Switch(Choice):
+    """Binary True/False switch that generates True with a given probability. Behaves like Choice with 2 outcomes.
+       To assign custom names to outcomes use Choice directly instead of Switch.
+    """
+    def __init__(self, p_true = 0.5):
+        
+        assert 0 <= p_true <= 1
+        p_false = 1 - p_true
+        choices = {True: p_true, False: p_false}
+        super(Switch, self).__init__(choices)
+
     
 class Intervals(Choice):
     "Combination of uniform distributions defined on intervals."
