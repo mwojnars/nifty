@@ -201,11 +201,7 @@ def subclasses(cls, include_self=False):
 ###   COLLECTIONS & DATA STRUCTURES
 ###
 
-def printdict(d, sep = ' = ', indent = ' ', end = '\n'):
-    "Human-readable multi-line printout of dictionary key->value items."
-    line = indent + '%s' + sep + '%s' + end
-    text = ''.join(line % item for item in d.iteritems())
-    print text
+### Sequences
 
 def unique(seq, order = False):
     "List of elements of 'seq' with duplicates removed. If order=True, preserves original order (from: http://stackoverflow.com/a/480227/1202674)."
@@ -241,6 +237,55 @@ def str2list(s, sep = None):
     For convenient definition of string lists: either as lists or as sep-separated strings of words."""
     if s is None or islist(s): return s
     return s.split(sep)
+
+
+def split_where(seq, cut_test, key_func = None):
+    """Split a sequence `seq` on every position `pos` where cut_test(pos,a,b) is True,
+       given a = seq[pos-1], b = seq[pos], 1 <= pos < len(seq).
+       Return a list of subsequences, empty if `seq` is empty. `seq` must support iteration and slicing.
+       If optional `key_func` is given, a list of (subseq, key_func(start,stop)) pairs is returned,
+       where (start,stop) are start-stop indices of `subseq` in `seq`:
+       start = index of subseq[0] in `seq`, stop = 1 + index of subseq[-1] in `seq`.
+    
+    Example of splitting a numeric sequence into monotonic (locally non-decreasing) subsequences:
+    >>> split_where([1, 5, 8, 3, 5, 8, 2, 0, 4], lambda i, x, y: x > y)
+    [[1, 5, 8], [3, 5, 8], [2], [0, 4]]
+    >>> split_where([], None)
+    []
+    """
+    result = []
+    prev = None
+    start = 0
+    stop = -1
+    
+    # test every pair (a,b) of neighboring elements in `seq`, make a split wherever cut_test(a,b) is True
+    for stop, curr in enumerate(seq):
+        if stop >= 1 and cut_test(stop, prev, curr):
+            subseq = seq[start:stop]
+            item = subseq if key_func is None else (subseq, key_func(start, stop))
+            result.append(item)
+            start = stop
+        prev = curr
+    
+    if stop == -1: return []                    # `seq` was empty?
+    assert start <= stop
+    # assert len(seq) == stop + 1
+    
+    subseq = seq[start:]
+    item = subseq if key_func is None else (subseq, key_func(start, stop))
+    result.append(item)
+    
+    return result
+
+
+### Dictionaries & Objects
+
+
+def printdict(d, sep = ' = ', indent = ' ', end = '\n'):
+    "Human-readable multi-line printout of dictionary key->value items."
+    line = indent + '%s' + sep + '%s' + end
+    text = ''.join(line % item for item in d.iteritems())
+    print text
 
 def obj2dict(obj):
     'Recursively convert a tree of nested objects into nested dictionaries. Iterables converted to lists.'
@@ -370,6 +415,7 @@ def get(d, key, default = ''):
     if not v: return default
     return v
 
+
 class ObjDict(dict):
     """A dictionary whose items can be accessed like object properties (d.key), in addition to standard access (d['key']). Be careful with keys named like standard dict properties.
     Keys starting with '__' can't be accessed in this way."""
@@ -397,6 +443,7 @@ class ComparableMixin:
         return not self < other
     def __le__(self, other):
         return not other < self
+
 
 from heapq import heappush, heappop
 
