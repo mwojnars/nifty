@@ -31,10 +31,9 @@ Text processing routines in [nifty.text](https://github.com/mwojnars/nifty/blob/
 - **N-grams**: *ngrams*
 
 Web scraping tools in [nifty.redex](https://github.com/mwojnars/nifty/blob/master/redex/redex.py):
-- **Redex** patterns - a brand new type of tool for extracting data from any markup document. 
-  Bridges the gap between regexes and XPaths as used in web scraping.
+- **Redex** patterns - a new language for extracting data from any markup document. Similar in spirit and structure to regular expressions (regex), but better suited to searching in large tagged documents. Bridges the gap between regex and XPaths as used in web scraping.
   Combines consistency and compactness of regexes (single pattern matches all document and extracts multiple variables at once)
-  with strength and precision of XPaths: redex pattern is defined in a language much simpler than regexes 
+  with strength and precision of XPaths: redex pattern is defined in a form much simpler than regexes 
   and can span multiple fragments of the document, providing precise *context* where each fragment is allowed to match.
 - **parsing** of basic data types from human-readable formats used in web pages: *pdate*, *pdatetime*, *pint*, *pfloat*, *pdecimal*, *percent*
 - **url** absolutization & unquoting: *url*, *url_unquote*
