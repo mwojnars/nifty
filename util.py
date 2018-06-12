@@ -238,9 +238,13 @@ def str2list(s, sep = None):
     if s is None or islist(s): return s
     return s.split(sep)
 
+def list2dict(l, dict_type = dict, invert = False):
+    "Convert a list to {index: value} mapping of a given dict_type. If invert=True, the resulting mapping is inverted: {value: index}."
+    if invert: return dict_type((v,i) for i, v in enumerate(l))
+    else:      return dict_type((i,v) for i, v in enumerate(l))
 
 def split_where(seq, cut_test, key_func = None):
-    """Split a sequence `seq` on every position `pos` where cut_test(pos,a,b) is True,
+    """Split a sequence `seq` on every position `pos` between characters where cut_test(pos,a,b) is True,
        given a = seq[pos-1], b = seq[pos], 1 <= pos < len(seq).
        Return a list of subsequences, empty if `seq` is empty. `seq` must support iteration and slicing.
        If optional `key_func` is given, a list of (subseq, key_func(start,stop)) pairs is returned,
