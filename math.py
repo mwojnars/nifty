@@ -48,9 +48,18 @@ def np_loads(s):
 norm = linalg.norm
 
 
-def ceildiv(a, b):
+def ceildiv(num, divisor):
     "Ceil division that uses pure integer arithmetics. Always correct, unlike floating-point ceil() + conversion to int."
-    return -(-a // b)
+    return -(-num // divisor)
+
+def round_up(num, divisor):
+    "Round `num` up to the nearest multiple of `divisor`."
+    divisor = abs(divisor)
+    return -(-num // divisor) * divisor
+
+def round_down(num, divisor):
+    "Round `num` down to the nearest multiple of `divisor`."
+    return num - (num % divisor)
 
 
 ########################################################################################################################
@@ -92,17 +101,32 @@ class WeightedRandom(object):
 class Distribution(object):
     "Base class for probability distributions."
     
-    _rand = random.Random()         # fallback Random instance to be used as a source of randomness in random() if `rand` argument is None
+    rand = None                         # Random generator to use in random() if `rand` argument is None
+    rand_default = random.Random()      # fallback Random instance to use in random() if both `rand` argument and self.rand are None
     
-    def __init__(self, rand = None, seed = None):
+    def __init__(self, **common):
+        self.set_rand(**common)
+
+    def set_rand(self, rand = None, seed = None, recursive = True, overwrite = False):
         if seed is not None:
             rand = random.Random(seed)
         if rand is not None:
-            self._rand = rand
-    
+            self.rand = rand
+        # print self, rand
+
+    def _set_rand_recursive(self, items, overwrite):
+        "To be used by subclasses that contain nested Distribution objects."
+        if not (overwrite or self.rand): return
+        for item in items:
+            if isinstance(item, Distribution) and (overwrite or item.rand is None):
+                item.set_rand(self.rand, recursive = True, overwrite = overwrite)
+        
+    def get_rand(self, rand = None):
+        return rand or self.rand or self.rand_default
+
     def random(self, rand = None):
         "Override in subclasses to implement random selection from a probability distribution implemented by a subclass."
-        return (rand or self._rand).random()
+        return self.get_rand(rand).random()
     
     # Distribution instances are callable, which provides a shorthand for random():
     #   rand_distribution() is eq. to rand_distribution.random()
@@ -114,9 +138,10 @@ class Distribution(object):
 class Fixed(Distribution):
     "Fixed value (deterministic, no randomness)."
     
-    def __init__(self, value):
+    def __init__(self, value, **common):
+        super(Fixed, self).__init__(**common)
         self.value = value
-    
+
     def random(self, rand = None):
         return self.value
 
@@ -128,13 +153,14 @@ class Interval(Distribution):
        Typically, cast is a type (e.g., int), or a rounding function that should be applied to the selected value.
     """
     
-    def __init__(self, start = 0.0, stop = None, cast = None):
+    def __init__(self, start = 0.0, stop = None, cast = None, **common):
+        super(Interval, self).__init__(**common)
         self.start = start
         self.stop = stop
         self.cast = cast
-    
+
     def random(self, rand = None):
-        rand = rand or self._rand
+        rand = self.get_rand(rand)
         if self.stop in (None, self.start): return self.start
         val = rand.uniform(self.start, self.stop)
         if self.cast:
@@ -150,12 +176,14 @@ class Choice(Distribution):
     choices = None      # list of possible outcomes (values) to choose from
     is_dist = None      # list of flags: is_dist[i]==True iff choices[i] is a probability distribution itself (an instance of Distribution)
     
-    def __init__(self, choices):
+    def __init__(self, choices, **common):
         """`choices` is either a sequence (then uniform distribution is assumed), or a dictionary of {value: probability} pairs.
            The sum of `probability` values must be positive, but not necessarily 1.0 - probabilities are normalized by default to unit sum.
         """
+        super(Choice, self).__init__(**common)
         if not choices: raise Exception('Choice.__init__: the list/dict of choices must be non-empty')
-        self.choices = list(choices)
+        
+        self.choices = sorted(list(choices))                                # sorting is necessary to ensure repeatable outcomes under the same random seed, in case `choices` was a standard (unordered) dict
         self.is_dist = [isinstance(v, Distribution) for v in choices]       # this is pre-computed to speed up execution of random()
         
         if isdict(choices):
@@ -164,8 +192,14 @@ class Choice(Distribution):
         else:
             self.probs = None
         
+    def set_rand(self, rand = None, seed = None, recursive = True, overwrite = False):
+        
+        super(Choice, self).set_rand(rand, seed, recursive, overwrite)
+        if recursive:
+            self._set_rand_recursive(self.choices, overwrite)
+        
     def random(self, rand = None):
-        rand = rand or self._rand
+        rand = self.get_rand(rand)
         seed = rand.randrange(4294967296)                               # 4294967296 == 2**32 == 1 + the maximum seed for RandomState
         np_rand = np.random.RandomState(seed)                           # use numpy's random to be able to choose items with non-uniform distribution
         
@@ -173,7 +207,7 @@ class Choice(Distribution):
         val = self.choices[choice]
         
         if self.is_dist[choice]:
-            return val.random(rand)
+            val = val.random(rand)
         
         return val
             
@@ -182,18 +216,18 @@ class Switch(Choice):
     """Binary True/False switch that generates True with a given probability. Behaves like Choice with 2 outcomes.
        To assign custom names to outcomes use Choice directly instead of Switch.
     """
-    def __init__(self, p_true = 0.5):
+    def __init__(self, p_true = 0.5, **common):
         
         assert 0 <= p_true <= 1
         p_false = 1 - p_true
         choices = {True: p_true, False: p_false}
-        super(Switch, self).__init__(choices)
+        super(Switch, self).__init__(choices, **common)
 
     
 class Intervals(Choice):
     "Combination of uniform distributions defined on intervals."
     
-    def __init__(self, intervals, cast = None):
+    def __init__(self, intervals, cast = None, **common):
         "`intervals` is either a list of (start,stop) pairs, or a dict of {(start,stop): probability} tuples."
         
         # wrap up interval pairs in Interval class, so that the Choice class knows these pairs should be treated as sub-distributions
@@ -202,7 +236,7 @@ class Intervals(Choice):
         else:
             choices = [Interval(start, stop, cast = cast) for (start,stop) in intervals]
             
-        super(Intervals, self).__init__(choices)
+        super(Intervals, self).__init__(choices, **common)
         
     
 class RandomInstance(Distribution):
@@ -215,18 +249,28 @@ class RandomInstance(Distribution):
     class_attr = None           # list of attributes that shall be initialized when a random <class_type> object is created;
                                 # in the subclass, these attributes should contain instances of Distribution that define probability distr. to choose values from
     
-    def __init__(self, rand = None, seed = None):
-        super(RandomInstance, self).__init__(rand, seed)
+    def __init__(self, **common):
         
+        # initialize `class_attr` list of attributes
         if self.class_attr is None:
             self.class_attr = [attr for attr in dir(self.__class__) if not attr.startswith('__')]
+
+        super(RandomInstance, self).__init__(**common)
+        
+    def set_rand(self, rand = None, seed = None, recursive = True, overwrite = False):
+        
+        super(RandomInstance, self).set_rand(rand, seed, recursive, overwrite)
+        
+        # walk through attributes of `self` and for every instance of Distribution initialize its `rand` if missing, or if `overwrite`=True
+        if recursive:
+            items = getattrs(self, self.class_attr).values()
+            self._set_rand_recursive(items, overwrite)
+
         
     def random(self, rand = None):
         """Walk through attributes of `self` and for each one being an instance of Distribution (probability distribution)
            draw a random value and assign to this attribute.
         """
-        rand = rand or self._rand
-        
         # print 'RandomInstance class & attributes:', self.class_type, self.class_attr
         assert self.class_type is not None
         obj = self.class_type()
@@ -237,11 +281,13 @@ class RandomInstance(Distribution):
                 val = distr.random(rand)
                 setattr(obj, attr, val)
         
-        self.postprocess(obj, rand)
+        self.postprocess(obj, self.get_rand(rand))
         return obj
     
     def postprocess(self, obj, rand):
-        "Override in sublasses to perform additional post-processing of an object generated by random()."
+        """Override in sublasses to perform additional post-processing of an object generated by random().
+           `rand` is a Random generator that is guaranteed to be not-None and should be used instead of self.rand.
+        """
         pass
     
     
@@ -377,11 +423,11 @@ def softmax(scores, slope = None, eps = 1e-10):
     "softmax function: turns a vector of real-valued scores into unit-sum probabilities by applying exp() and normalization."
     scores = scores - np.max(scores)            # shift values to avoid overflow in exp()
     if slope is not None: scores *= slope
-    exps = exp(scores) #+ EPS                   # +EPS to avoid 0.0 probabilities
-    Z = np.sum(exps)
+    E = exp(scores) #+ EPS                      # +EPS to avoid 0.0 probabilities
+    Z = np.sum(E)
     #print "", Z, list(exps.flat)
     assert not isnan(Z) and not isinf(Z)
-    return exps / (Z + eps)                     # 1-d vector
+    return E / (Z + eps)                     # 1-d vector
 
 
 ########################################################################################################################
