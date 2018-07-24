@@ -12,7 +12,7 @@ You should have received a copy of the GNU General Public License along with Nif
 '''
 
 from __future__ import absolute_import
-import random, bisect, json
+import random, bisect, json, copy
 import numpy as np
 import numpy.linalg as linalg
 from numpy import sum, mean, zeros, sqrt, pi, exp, isnan, isinf, arctan
@@ -101,6 +101,7 @@ class WeightedRandom(object):
 class Distribution(object):
     "Base class for probability distributions."
     
+    
     rand = None                         # Random generator to use in random() if `rand` argument is None
     rand_default = random.Random()      # fallback Random instance to use in random() if both `rand` argument and self.rand are None
     
@@ -133,6 +134,10 @@ class Distribution(object):
     #
     def __call__(self, *args, **kwargs):
         return self.random(*args, **kwargs)
+    
+    def copy(self):
+        "Deep copy of the random distribution represented by self."
+        return copy.deepcopy(self)
     
     
 class Fixed(Distribution):
@@ -184,7 +189,7 @@ class Choice(Distribution):
         if not choices: raise Exception('Choice.__init__: the list/dict of choices must be non-empty')
         
         self.choices = sorted(list(choices))                                # sorting is necessary to ensure repeatable outcomes under the same random seed, in case `choices` was a standard (unordered) dict
-        self.is_dist = [isinstance(v, Distribution) for v in choices]       # this is pre-computed to speed up execution of random()
+        self.is_dist = [isinstance(v, Distribution) for v in self.choices]  # this is pre-computed to speed up execution of random()
         
         if isdict(choices):
             self.probs = np.array([choices[v] for v in self.choices], dtype = float)
@@ -206,6 +211,8 @@ class Choice(Distribution):
         choice = np_rand.choice(len(self.choices), p = self.probs)      # choose an index into self.choices[]
         val = self.choices[choice]
         
+        # print self, 'random() choices:', self.choices, '  is_dist:', self.is_dist
+        # if isinstance(val, Distribution):
         if self.is_dist[choice]:
             val = val.random(rand)
         
@@ -254,6 +261,14 @@ class RandomInstance(Distribution):
         # initialize `class_attr` list of attributes
         if self.class_attr is None:
             self.class_attr = [attr for attr in dir(self.__class__) if not attr.startswith('__')]
+            
+        # copy nested sub-Distributions from class-level attributes to instance attributes, to allow their customization
+        # (e.g., setting a random seed) without affecting the shared class-level object
+        for attr in dir(self.__class__):
+            if attr in self.__dict__: continue              # already has a value at instance level? skip
+            item = getattr(self, attr, None)
+            if isinstance(item, Distribution):
+                setattr(self, attr, item.copy())
 
         super(RandomInstance, self).__init__(**common)
         
