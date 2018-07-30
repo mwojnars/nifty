@@ -24,6 +24,7 @@ from collections import namedtuple, deque
 from copy import deepcopy
 from datetime import datetime
 from urllib2 import HTTPError, URLError
+from cookielib import CookieJar
 from socket import timeout as Timeout
 #from lxml.html.clean import Cleaner        -- might be good for HTML sanitization (no scritps, styles, frames, ...), but not for general HTML tag filering 
 
@@ -744,9 +745,8 @@ class WebClient(Object):
         :param cacheRefresh: either None, or a number (refresh == retain), or a pair (refresh, retain); typically refresh <= retain
         """
         H = handlers
-        urllib2hand = []
+        urllib2hand = [urllib2.HTTPCookieProcessor(CookieJar())]
         self.logger = logger
-        
         if isnumber(history): histLimit = max(history, 1)           # always keep at least 1 history item
         elif history is True: histLimit = None
         else: histLimit = 1
@@ -764,6 +764,7 @@ class WebClient(Object):
         self._head = head if islist(head) else [head]
         self._tail = tail if islist(tail) else [tail]
         self._client = H.StandardClient(urllib2hand)
+
         self._rebuild()                                             # connect all the handlers into a chain
         
         self.url_now = None                 # URL being processed now (started but not finished); for debugging purposes, when exception occurs inside open()
