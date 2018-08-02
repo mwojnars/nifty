@@ -12,12 +12,12 @@ You should have received a copy of the GNU General Public License along with Nif
 '''
 
 from __future__ import absolute_import
-import random, bisect, json, copy
-import numpy as np
+import random, bisect, json, copy, numbers, numpy as np
 import numpy.linalg as linalg
 from numpy import sum, mean, zeros, sqrt, pi, exp, isnan, isinf, arctan
+from collections import OrderedDict
 
-from .util import isnumber, isdict, getattrs
+from .util import isnumber, isstring, isdict, getattrs
 
 
 ########################################################################################################################
@@ -181,21 +181,45 @@ class Choice(Distribution):
     choices = None      # list of possible outcomes (values) to choose from
     is_dist = None      # list of flags: is_dist[i]==True iff choices[i] is a probability distribution itself (an instance of Distribution)
     
-    def __init__(self, choices, **common):
+    def __init__(self, *choices, **common):
         """`choices` is either a sequence (then uniform distribution is assumed), or a dictionary of {value: probability} pairs.
            The sum of `probability` values must be positive, but not necessarily 1.0 - probabilities are normalized by default to unit sum.
         """
         super(Choice, self).__init__(**common)
         if not choices: raise Exception('Choice.__init__: the list/dict of choices must be non-empty')
+        if len(choices) == 1: choices = choices[0]
         
-        self.choices = sorted(list(choices))                                # sorting is necessary to ensure repeatable outcomes under the same random seed, in case `choices` was a standard (unordered) dict
-        self.is_dist = [isinstance(v, Distribution) for v in self.choices]  # this is pre-computed to speed up execution of random()
+        self.choices = self._list_outcomes(choices)
+        self.is_dist = [isinstance(v, Distribution) for v in self.choices]      # this is pre-computed to speed up execution of random()
         
         if isdict(choices):
             self.probs = np.array([choices[v] for v in self.choices], dtype = float)
-            self.probs /= float(self.probs.sum())                           # normalize probabilities to unit sum
+            self.probs /= float(self.probs.sum())                               # normalize probabilities to unit sum
         else:
             self.probs = None
+        
+    def _list_outcomes(self, choices):
+        """
+        Convert a collection (list, dict, iterable) of `choices` to a list of outcomes: ordered
+        and with probabilities dropped for now. Make sure the outcomes are unique and their ordering is deterministic,
+        to guarantee repeatable outcomes under the same random seed.
+        Deterministic ordering can be either predefined by a caller, if `choices` are provided originally
+        as a list or OrderedDict - but not as a standard (unordered) dict in Python 2 (!) -
+        or by explicit sorting of choice values, the latter being reliable for standard types only, though.
+        """
+        outcomes = list(choices)
+        
+        if len(outcomes) != len(set(outcomes)): raise Exception('The list of choices contain duplicates: %s' % outcomes)
+        if isinstance(choices, (list, OrderedDict)): return outcomes
+        
+        # `choices` collection has no predefined ordering? must sort `outcomes` explicitly,
+        # but first ensure all values are reliably (deterministically) sortable...
+        for v in outcomes:
+            if not isinstance(v, (basestring, list, tuple, numbers.Number)):
+                raise Exception('Unsortable choice value, must be a number/string/list/tuple: %s' % v)
+        
+        return sorted(outcomes)
+    
         
     def set_rand(self, rand = None, seed = None, recursive = True, overwrite = False):
         
@@ -237,11 +261,13 @@ class Intervals(Choice):
     def __init__(self, intervals, cast = None, **common):
         "`intervals` is either a list of (start,stop) pairs, or a dict of {(start,stop): probability} tuples."
         
+        outcomes = self._list_outcomes(intervals)
+
         # wrap up interval pairs in Interval class, so that the Choice class knows these pairs should be treated as sub-distributions
         if isdict(intervals):
-            choices = {Interval(start, stop, cast = cast): prob for (start,stop), prob in intervals.iteritems()}
+            choices = OrderedDict([(Interval(start, stop, cast = cast), intervals[(start,stop)]) for (start,stop) in outcomes])
         else:
-            choices = [Interval(start, stop, cast = cast) for (start,stop) in intervals]
+            choices = [Interval(start, stop, cast = cast) for (start,stop) in outcomes]
             
         super(Intervals, self).__init__(choices, **common)
         
