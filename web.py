@@ -353,9 +353,11 @@ class WebHandler(Object):
 
 class StandardClient(WebHandler):
     "Returns a web page using standard urllib2 access. Custom urllib2 handlers can be added upon initialization"
-    def __init__(self, addHandlers = []):
+    def __init__(self, addHandlers = [], cj = None):
+        "cj - a cookiejar if cookies handled"
         self.opener = urllib2.build_opener(*addHandlers)
         self.added = [h.__class__.__name__ for h in addHandlers]
+        self.cj = cj  # we need to keep CookieJar in order to clean cookies
     def handle(self, req):
         assert isinstance(req, Request)
         #self.log.info("StandardClient, downloading page. Request & handlers: " + jsondump([req, self.added]))
@@ -368,6 +370,12 @@ class StandardClient(WebHandler):
         except HTTPError, e:
             e.msg += ", " + req.url
             raise
+        try:
+            # clean cookies between requests, this is not a browser, it does
+            # not need to remember them
+            self.cj.clear()
+        except KeyError:
+            pass  # if there was no cookie, KeyError is risen, skip
         return Response(stream, req.url)
     
 class FixURL(WebHandler):
@@ -734,7 +742,9 @@ class WebClient(Object):
     
     
     def __init__(self, timeout = None, identity = True, referer = True, cache = None, cacheRefresh = None, tor = False, history = 5, delay = None, 
-                 retryOnTimeout = None, retryOnError = None, retryCustom = None, head = [], tail = [], logger = None):
+                 retryOnTimeout = None, retryOnError = None,
+                 retryCustom = None, head = [], tail = [], logger = None,
+                 cookies = False):
         """
         :param identity: how to set User-Agent. Can be either: 
             None/False (no custom identity); 
@@ -745,7 +755,13 @@ class WebClient(Object):
         :param cacheRefresh: either None, or a number (refresh == retain), or a pair (refresh, retain); typically refresh <= retain
         """
         H = handlers
-        urllib2hand = [urllib2.HTTPCookieProcessor(CookieJar())]
+        # create cookiejar, which handles cookies while requesting
+        # unfortunately cj is required for cleaning cookies
+        cj = CookieJar()
+        if cookies:
+            urllib2hand = [urllib2.HTTPCookieProcessor(cj)]
+        else:
+            urllib2hand = []
         self.logger = logger
         if isnumber(history): histLimit = max(history, 1)           # always keep at least 1 history item
         elif history is True: histLimit = None
@@ -763,7 +779,7 @@ class WebClient(Object):
         if tor:         self._tor = True; urllib2hand.append(urllib2.ProxyHandler({'http': '127.0.0.1:8118'}))
         self._head = head if islist(head) else [head]
         self._tail = tail if islist(tail) else [tail]
-        self._client = H.StandardClient(urllib2hand)
+        self._client = H.StandardClient(urllib2hand, cj)
 
         self._rebuild()                                             # connect all the handlers into a chain
         
