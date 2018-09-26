@@ -681,7 +681,7 @@ class CustomTransform(WebHandler):
     def postprocess(self, resp):
         "Override in subclasses"
         return resp
-        
+
 class Callback(WebHandler):
     """Call predefined external functions on forward and backward passes, with Request or Request+Response objects as arguments.
        Typically, the functions should only perform monitoring and reporting,
@@ -744,7 +744,7 @@ class WebClient(Object):
     def __init__(self, timeout = None, identity = True, referer = True, cache = None, cacheRefresh = None, tor = False, history = 5, delay = None, 
                  retryOnTimeout = None, retryOnError = None,
                  retryCustom = None, head = [], tail = [], logger = None,
-                 cookies = False):
+                 cookies = False, proxyAddr = None):
         """
         :param identity: how to set User-Agent. Can be either: 
             None/False (no custom identity); 
@@ -753,6 +753,7 @@ class WebClient(Object):
             or <number> X (identity will be picked randomly and changed to another random one after every 'X' minutes) 
         :param history: if number, maximum num of extract to be kept in web history; if True, history with no limit; otherwise (None, <1), limit=1
         :param cacheRefresh: either None, or a number (refresh == retain), or a pair (refresh, retain); typically refresh <= retain
+        :param proxy: if string with proxy address (as adress:port) then connections will be proxies via this address or None
         """
         H = handlers
         # create cookiejar, which handles cookies while requesting
@@ -777,12 +778,18 @@ class WebClient(Object):
         if retryOnTimeout: self._retryOnTimeout = H.RetryOnTimeout(retryOnTimeout)
         if retryCustom:    self.setRetryCustom(retryCustom)
         if tor:         self._tor = True; urllib2hand.append(urllib2.ProxyHandler({'http': '127.0.0.1:8118'}))
+        if proxyAddr and not tor: # either tor, or proxy, not both, tor is cheaper so has priority
+            self._proxy = True
+            handler = urllib2.ProxyHandler({'http': proxyAddr,
+                                            'https': proxyAddr})
+            # TODO maybe some checking correctness of proxy string?
+            urllib2hand.append(handler)
         self._head = head if islist(head) else [head]
         self._tail = tail if islist(tail) else [tail]
         self._client = H.StandardClient(urllib2hand, cj)
 
         self._rebuild()                                             # connect all the handlers into a chain
-        
+
         self.url_now = None                 # URL being processed now (started but not finished); for debugging purposes, when exception occurs inside open()
 
     def copy(self):
