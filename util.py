@@ -13,11 +13,23 @@ You should have received a copy of the GNU General Public License along with Nif
 '''
 
 from __future__ import absolute_import
-import __builtin__, os, sys, glob, types as _types, copy, re, numbers, json, time, datetime, calendar
+import os, sys, glob, types as _types, copy, re, numbers, json, time, datetime, calendar
 import logging, random, math, collections, unicodedata, heapq, threading, inspect, hashlib
-from StringIO import StringIO
 
+try:                                        # Python 2
+    import __builtin__ as builtins
+    from StringIO import StringIO
 
+except ImportError:                         # Python 3
+    import builtins, io
+    from io import StringIO
+    from functools import reduce
+    
+    basestring = str
+    unicode    = str
+    file       = io.IOBase
+    
+    
 #####################################################################################################################################################
 ###
 ###   TYPE CHECKING
@@ -45,7 +57,7 @@ def isregex(x):
     return isinstance(x, re._pattern_type)
 # def isarray(x) - defined in 'math' module
 
-def isfunction(x, funtypes = (_types.FunctionType, _types.BuiltinFunctionType, _types.MethodType, _types.BuiltinMethodType, _types.UnboundMethodType)):
+def isfunction(x, funtypes = (_types.FunctionType, _types.BuiltinFunctionType, _types.MethodType, _types.BuiltinMethodType, getattr(_types, 'UnboundMethodType',_types.MethodType))):
     "True if x is any kind of a 'syntactic' function: function, method, built-in; but NOT any other callable (object with __call__ method is not a function)."
     return isinstance(x, funtypes)
 def isgenerator(x):
@@ -163,7 +175,7 @@ def runCommand(context = {}, params = None, fun = None):
 
 def issubclass(x, cls):                         #@ReservedAssignment
     "True if x is a class and subclass of cls, False otherwise. Overrides built-in issubclass() which raised exception if 'x' was not a class (inconvenient in many cases); this function accepts non-classes too."
-    return isinstance(x, type) and __builtin__.issubclass(x, cls)
+    return isinstance(x, type) and builtins.issubclass(x, cls)
 
 def classname(obj = None, full = False, cls = None):
     "Return (fully qualified) class name of the object 'obj' or class 'cls'."
@@ -289,7 +301,7 @@ def printdict(d, sep = ' = ', indent = ' ', end = '\n'):
     "Human-readable multi-line printout of dictionary key->value items."
     line = indent + '%s' + sep + '%s' + end
     text = ''.join(line % item for item in d.iteritems())
-    print text
+    print(text)
 
 def obj2dict(obj):
     'Recursively convert a tree of nested objects into nested dictionaries. Iterables converted to lists.'
@@ -342,7 +354,8 @@ def lowerkeys(d):
     return d.__class__((k.lower(), v) for k,v in d.iteritems())
 
 def getattrs(obj, names = None, exclude = "__", default = None, missing = True, usedict = False):
-    """Similar to built-in getattr(), but returns many attributes at once, as a dict.
+    """
+    Like the built-in getattr(), but returns many attributes at once, as a dict of {name: value} pairs.
     Attribute names are given in 'names' as a list of strings, or a string with 1+ space-separated names.
     By default, attributes are retrieved using getattr(), which detects class attributes, 
     fires up descriptors (if any) and returns methods as <unbound method> not <function>. 
@@ -715,7 +728,7 @@ class JsonObjEncoder(json.JSONEncoder):
 def dumpJson(obj):
     return json.dumps(obj, cls = JsonObjEncoder)
 def printJson(*objs):
-    for obj in objs: print json.dumps(obj, indent = 4, cls = JsonObjEncoder)
+    for obj in objs: print(json.dumps(obj, indent = 4, cls = JsonObjEncoder))
 jsondump = dumpjson = jsonDump = dumpJson
 jsonprint = printjson = jsonPrint = printJson
 
@@ -784,7 +797,7 @@ def dumpdast(obj, **kwargs):
 
 def printdast(obj, **kwargs):
     from .data import dast
-    print dast.encode(obj, **kwargs)
+    print(dast.encode(obj, **kwargs))
 
 
 ### Hashing
@@ -1340,10 +1353,12 @@ class Logger(object):
         
 defaultLogger = Logger()
 
-logging._levelNames[0] = ''
-logging._levelNames[''] = 0
-logging._levelNames[None] = 0
-
+try:                                                # Python 2
+    logging._levelNames[0] = ''
+    logging._levelNames[''] = 0
+    logging._levelNames[None] = 0
+except:
+    pass
 
 ###  DRAFT below  ###
 
@@ -1420,4 +1435,4 @@ from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
 
 if __name__ == "__main__":
     import doctest
-    print doctest.testmod()
+    print(doctest.testmod())
