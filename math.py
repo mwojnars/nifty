@@ -2,7 +2,7 @@
 Statistical and mathematical routines. Built on top of 'numpy'.
 
 ---
-This file is part of Nifty python package. Copyright (c) 2009-2014 by Marcin Wojnarski.
+This file is part of Nifty python package. Copyright (c) by Marcin Wojnarski.
 
 Nifty is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License 
 as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
@@ -12,12 +12,16 @@ You should have received a copy of the GNU General Public License along with Nif
 '''
 
 from __future__ import absolute_import
-import random, bisect, json, copy, numbers, numpy as np
+import random, bisect, json, copy, numbers, math, numpy as np
 import numpy.linalg as linalg
 from numpy import sum, mean, zeros, sqrt, pi, exp, isnan, isinf, arctan
 from collections import OrderedDict
 
-from .util import isnumber, isstring, isdict, getattrs
+
+if __name__ != "__main__":
+    from .util import isnumber, isstring, isdict, getattrs
+else:
+    from nifty.util import isnumber, isstring, isdict, getattrs
 
 
 ########################################################################################################################
@@ -573,14 +577,14 @@ class Accumulator(object):
     """
     total  = 0              # total values*weights
     weight = 0              # total weights
-    count  = 0              # total no. of items, excluding the initial value
+    #count = 0              # total no. of items, excluding the initial value
     dtype  = float
         
     def __init__(self, init_value = None, init_weight = None, dtype = None):
         if dtype: self.dtype = dtype
         if init_value is not None and init_weight is not None:
             self.add(init_value, init_weight)
-        self.count = 0
+        # self.count = 0
         
     def add(self, value, weight = 1):
         self.total += value * weight
@@ -626,4 +630,83 @@ class Accumulator2D(object):
         "Efficient sliced read access to the current value of the accumulated array."
         return self.total[key] / self.count[key]
     
+
+class Stack(object):
+    """
+    An automatically growing numpy vector or array.
+    An accumulator that collects a sequence of scalar values or numpy arrays of a predefined shape, passed one be one through add() method;
+    stacks them up along the new 1st axis of a "greater" resizable array; and upon get() returns the accumulated
+    greater array as a regular numpy vector or array. All data values are cast onto a predefined `dtype` (float by default).
+    
+    >>> stack = Stack()
+    >>> stack.add(-5)
+    >>> stack.add(3.1)
+    >>> stack.get()
+    array([-5. ,  3.1])
+    
+    >>> stack = Stack((3,))
+    >>> stack.add([1,2,3])
+    >>> stack.add([5,6,7])
+    >>> stack.get()
+    array([[1., 2., 3.],
+           [5., 6., 7.]])
+
+    >>> for _ in range(100): stack.add([10,10,10])
+    >>> stack.get().sum()
+    3024.0
+    """
+    
+    GROWTH_RATE = 1.5       # `data` array can be at most 50% larger than the actual data stored in it
+    
+    data = None             # the preallocated greater array; new items are added along the 1st dimension
+    size = None             # the current no. of items in `data`
+    
+    def __init__(self, shape = (), dtype = float, like = None, init = None, size = None):
+        if init is not None:
+            self.data = init.copy()
+            self.size = init.shape[0]
+            return
+            
+        if like is not None:
+            shape = like.shape
+            dtype = like.dtype
+        
+        assert shape is not None
+        if isnumber(shape): shape = (shape,)
+        self.data = np.zeros((size or 10,) + shape, dtype)
+        self.size = 0
+        
+    def add(self, item):
+        
+        # do we have empty space in `data` where to insert another item? if not, perform resizing
+        if self.size >= self.data.shape[0]:
+            assert self.size == self.data.shape[0]
+            self._resize()
+        
+        self.data[self.size, ...] = item
+        self.size += 1
+
+    def _resize(self):
+        
+        data, size = self.data, self.size
+        
+        new_size = int(math.ceil(size * self.GROWTH_RATE))
+        assert new_size > size == data.shape[0]
+        
+        extended = (new_size,) + data.shape[1:]
+        new_data = np.zeros(extended, data.dtype)
+        new_data[:size,...] = data
+        
+        self.data = new_data
+
+    def get(self):
+        
+        return self.data[:self.size,...]
+    
+
+#####################################################################################################################################################
+
+if __name__ == "__main__":
+    import doctest
+    print(doctest.testmod())
 
