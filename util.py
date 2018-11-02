@@ -3,7 +3,7 @@
 Collection of short but frequently used routines and classes - shorthands for different daily tasks.
 
 ---
-This file is part of Nifty python package. Copyright (c) 2009-2014 by Marcin Wojnarski.
+This file is part of Nifty python package. Copyright (c) by Marcin Wojnarski.
 
 Nifty is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License 
 as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
@@ -13,7 +13,7 @@ You should have received a copy of the GNU General Public License along with Nif
 '''
 
 from __future__ import absolute_import
-import os, sys, glob, types as _types, copy, re, numbers, json, time, datetime, calendar
+import os, sys, glob, types as _types, copy, re, numbers, json, time, datetime, calendar, itertools
 import logging, random, math, collections, unicodedata, heapq, threading, inspect, hashlib
 
 try:                                        # Python 2
@@ -814,7 +814,7 @@ def hashmd5(s, n = 4):
 
 #####################################################################################################################################################
 ###
-###   NUMBERS
+###   NUMBERS & COUNTING
 ###
 
 class Counter(object):
@@ -864,6 +864,10 @@ def parseint(s):
     s = s.translate(None, ',. \n()')
     return int(s)
     
+def enumerate_limit(sequence, limit, start = 0):
+    "Like enumerate(), but reads at most `limit` number of items from `sequence`."
+    return enumerate(itertools.islice(sequence, 0, limit), start = start)
+
 
 #####################################################################################################################################################
 ###
