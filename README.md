@@ -2,10 +2,7 @@ Nifty
 =====
 
 *Nifty* is a library of utility functions and classes that simplify various common tasks in Python programming - a handy add-on to standard libraries that makes Python even easier to use. 
-Contains also a number of advanced tools for *web scraping*, *data processing* and *data mining*.
-Proudly used by [Paperity](http://paperity.org/), an aggregator of scholarly literature.
-
-Brought to you by **Marcin Wojnarski** ([blog](http://wojnarski.wordpress.com/marcin-wojnarski), [Twitter](http://twitter.com/mwojnarski), [LinkedIn](http://www.linkedin.com/in/marcinwojnarski)). Licensed on GPL.
+In addition, Nifty contains a number of advanced tools for *web scraping*, *data processing* and *data mining*. Brought to you by Marcin Wojnarski ([Twitter](http://twitter.com/mwojnarski), [LinkedIn](http://www.linkedin.com/in/marcinwojnarski)). Licensed on **GPL**.
 
 Contents
 --------
@@ -45,3 +42,10 @@ Data storage and object serialization with a new **DAST** format, in [nifty.data
 For more information, check pydocs and comments in the source code. Other modules to be documented in the near future.
 
 Nifty includes code of [Waxeye](http://waxeye.org/), a PEG parser generator (MIT license) used to generate parser for [Redex](https://github.com/mwojnars/nifty/blob/master/redex/redex.py).
+
+Use cases
+---------
+
+Projects that use Nifty:
+- [Paperity](http://paperity.org/), an aggregator of scholarly literature
+
