@@ -657,7 +657,7 @@ class Stack(object):
     >>> stack.get()
     array([-5. ,  3.1])
     
-    >>> stack = Stack((3,))
+    >>> stack = Stack((3,), maxsize = 200)
     >>> stack.add([1,2,3])
     >>> stack.add([5,6,7])
     >>> stack.get()
@@ -674,7 +674,7 @@ class Stack(object):
     data = None             # the preallocated greater array; new items are added along the 1st dimension
     size = None             # the current no. of items in `data`
     
-    def __init__(self, shape = (), dtype = float, like = None, init = None, size = None):
+    def __init__(self, shape = (), dtype = float, like = None, init = None, size = None, maxsize = None):
         if init is not None:
             self.data = init.copy()
             self.size = init.shape[0]
@@ -684,10 +684,15 @@ class Stack(object):
             shape = like.shape
             dtype = like.dtype
         
+        initsize = size or 10
+        if maxsize: initsize = min(initsize, maxsize)
+
         assert shape is not None
         if isnumber(shape): shape = (shape,)
-        self.data = np.zeros((size or 10,) + shape, dtype)
+        
+        self.data = np.zeros((initsize,) + shape, dtype)
         self.size = 0
+        self.maxsize = maxsize
         
     def add(self, item):
         
@@ -704,6 +709,9 @@ class Stack(object):
         data, size = self.data, self.size
         
         new_size = int(math.ceil(size * self.GROWTH_RATE))
+        if self.maxsize:
+            if size >= self.maxsize: raise Exception("Can't resize the Stack beyond its maximum size (%s)" % self.maxsize)
+            new_size = min(new_size, self.maxsize)
         assert new_size > size == data.shape[0]
         
         extended = (new_size,) + data.shape[1:]
@@ -711,10 +719,24 @@ class Stack(object):
         new_data[:size,...] = data
         
         self.data = new_data
-
+        
     def get(self):
         
         return self.data[:self.size,...]
+    
+    def __getitem__(self, pos):
+        
+        if pos > self.size: raise IndexError("Index %s is out of bounds of the Stack (size %s)" % (pos, self.size))
+        return self.data[pos,...]
+        
+    def __setitem__(self, pos, value):
+    
+        if pos > self.size: raise IndexError("Index %s is out of bounds of the Stack (size %s)" % (pos, self.size))
+        self.data[pos,...] = value
+        
+    def __len__(self):
+        
+        return self.size
     
 
 #####################################################################################################################################################
