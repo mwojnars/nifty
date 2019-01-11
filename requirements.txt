@@ -1,4 +1,4 @@
-PyYAML==3.11
+PyYAML>=4.2b1
 Scrapy==0.16.4
 httplib2==0.7.2
 jsonpickle==0.4.0
