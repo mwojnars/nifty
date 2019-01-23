@@ -139,7 +139,7 @@ def runCommand(context = {}, params = None, fun = None):
     Note: the called function should convert internally the parameters from a string to a proper type and 
     this conversion is done in a local context of the function, so it may be hard to pass variables as parameters.
     """
-    if not isdict(context): context = context.__dict__
+    if not isdict(context): context = {atr: getattr(context, atr) for atr in dir(context)}
     if params is None: params = sys.argv[1:]                        # argv[0] is the script name, omit
     
     # set function 'fun' if possible; retrieve command string 'cmd' from 'params' if needed
