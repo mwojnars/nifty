@@ -106,7 +106,7 @@ class Distribution(object):
     "Base class for probability distributions."
     
     
-    rand = None                         # Random generator to use in random() if `rand` argument is None
+    rand = None                         # Random generator to use in get_random() if `rand` argument is None
     rand_default = random.Random()      # fallback Random instance to use in random() if both `rand` argument and self.rand are None
     
     def __init__(self, **common):
@@ -117,6 +117,8 @@ class Distribution(object):
             rand = random.Random(seed)
         if rand is not None:
             self.rand = rand
+        else:
+            self.rand_default = random.Random()
         # print self, rand
 
     def _set_rand_recursive(self, items, overwrite):
@@ -126,18 +128,40 @@ class Distribution(object):
             if isinstance(item, Distribution) and (overwrite or item.rand is None):
                 item.set_rand(self.rand, recursive = True, overwrite = overwrite)
         
-    def get_rand(self, rand = None):
-        return rand or self.rand or self.rand_default
+    def _fix_rand(self, rand = None):
+        fixed_rand = rand or self.rand or self.rand_default
+        assert fixed_rand is not None
+        return fixed_rand
 
-    def random(self, rand = None):
-        "Override in subclasses to implement random selection from a probability distribution implemented by a subclass."
-        return self.get_rand(rand).random()
+    def _get_random_value(self, rand):
+        """
+        Returns a single item from the probability distribution represented by self.
+        Override in subclasses to implement selection from a custom probability distribution.
+        :param rand: instance of standard python <random.Random> class that should be used as a source of randomness
+        :return: value drawn from the probability distribution represented by self
+        """
+        return rand.random()
+
+    def get_random(self, rand = None):
+        """
+        Returns a single item from the probability distribution represented by self.
+        In subclasses, always ovveride _get_random_value() instead of this method.
+        """
+        rand = self._fix_rand(rand)
+        return self._get_random_value(rand)
+        # return self._get_rand(rand).random()
     
-    # Distribution instances are callable, which provides a shorthand for random():
-    #   rand_distribution() is eq. to rand_distribution.random()
+    def generate_random(self, rand = None):
+        "Generate an infinite stream of random items from the distribution represented by self."
+        rand = self._fix_rand(rand)
+        while True:
+            yield self._get_random_value(rand)
+    
+    # Distribution instances are callable, which provides a shorthand for get_random():
+    #   distribution() is equiv. to distribution.get_random()
     #
     def __call__(self, *args, **kwargs):
-        return self.random(*args, **kwargs)
+        return self.get_random(*args, **kwargs)
     
     def copy(self):
         "Deep copy of the random distribution represented by self."
@@ -151,7 +175,7 @@ class Fixed(Distribution):
         super(Fixed, self).__init__(**common)
         self.value = value
 
-    def random(self, rand = None):
+    def _get_random_value(self, rand):
         return self.value
 
     
@@ -168,13 +192,28 @@ class Interval(Distribution):
         self.stop = stop
         self.cast = cast
 
-    def random(self, rand = None):
-        rand = self.get_rand(rand)
+    def _get_random_value(self, rand):
         if self.stop in (None, self.start): return self.start
         val = rand.uniform(self.start, self.stop)
         if self.cast:
             return self.cast(val)
         return val
+    
+    
+class Range(Distribution):
+    """Uniform distribution over integral numbers in [start,stop] range, including both endpoints, like in random.randint().
+       Or just the `start` value if stop=None.
+    """
+    
+    def __init__(self, start = 0.0, stop = None, **common):
+        super(Range, self).__init__(**common)
+        self.start = start
+        self.stop = stop
+
+    def _get_random_value(self, rand):
+        if self.stop in (None, self.start): return self.start
+        return rand.randint(self.start, self.stop)
+    
     
 class Choice(Distribution):
     """Discrete probability distribution over a fixed set of possible outcomes (choices).
@@ -231,8 +270,8 @@ class Choice(Distribution):
         if recursive:
             self._set_rand_recursive(self.choices, overwrite)
         
-    def random(self, rand = None):
-        rand = self.get_rand(rand)
+    def _get_random_value(self, rand):
+        
         seed = rand.randrange(4294967296)                               # 4294967296 == 2**32 == 1 + the maximum seed for RandomState
         np_rand = np.random.RandomState(seed)                           # use numpy's random to be able to choose items with non-uniform distribution
         
@@ -242,7 +281,7 @@ class Choice(Distribution):
         # print self, 'random() choices:', self.choices, '  is_dist:', self.is_dist
         # if isinstance(val, Distribution):
         if self.is_dist[choice]:
-            val = val.random(rand)
+            val = val.get_random(rand)
         
         return val
             
@@ -312,7 +351,7 @@ class RandomInstance(Distribution):
             self._set_rand_recursive(items, overwrite)
 
         
-    def random(self, rand = None):
+    def _get_random_value(self, rand):
         """Walk through attributes of `self` and for each one being an instance of Distribution (probability distribution)
            draw a random value and assign to this attribute.
         """
@@ -323,10 +362,10 @@ class RandomInstance(Distribution):
         for attr in self.class_attr:
             distr = getattr(self, attr, None)
             if isinstance(distr, Distribution):
-                val = distr.random(rand)
+                val = distr.get_random(rand)
                 setattr(obj, attr, val)
         
-        self.postprocess(obj, self.get_rand(rand))
+        self.postprocess(obj, self._fix_rand(rand))
         return obj
     
     def postprocess(self, obj, rand):
