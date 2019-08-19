@@ -15,10 +15,17 @@ You should have received a copy of the GNU General Public License along with Nif
 
 from __future__ import absolute_import
 import re, math
-import HTMLParser
 from collections import defaultdict
 from array import array
-from itertools import imap
+
+try:                                                # Python 2
+    from HTMLParser import HTMLParser
+    from itertools import imap
+except:                                             # Python 3
+    from six.moves.html_parser import HTMLParser
+    imap = map
+    basestring = str
+    unicode = str
 
 if __name__ != "__main__":
     from .util import isstring, islist, bound, flatten, merge_spaces
@@ -110,7 +117,7 @@ def trim_text(text, mlen, pat = re.compile(r"\W+"), ellipsis = ""):
 ###  HTML processing
 ###
 
-def html_unescape(s, h = HTMLParser.HTMLParser()):
+def html_unescape(s, h = HTMLParser()):
     "Turn HTML entities (&amp; &#169; ...) into characters. 's' string does NOT have to be a correct HTML, any piece of text can be decoded."
     return h.unescape(s)
 decode_entities = html_unescape
@@ -508,7 +515,7 @@ def levenshtein(a, b, casecost = 1, spacecost = 1, totals = False):
                 current[j] = min(add, delete, change)
 
     except UnicodeWarning:
-        print "unicode error in levenshtein(%s, %s)" % (repr(a), repr(b))
+        print("unicode error in levenshtein(%s, %s)" % (repr(a), repr(b)))
         raise
 
     if totals:
@@ -958,4 +965,4 @@ def HTML(text, settings = None): return Text(text, "HTML", settings)
 
 if __name__ == "__main__":
     import doctest
-    print doctest.testmod()
+    print(doctest.testmod())
