@@ -56,9 +56,10 @@ except:
 if _use_keras:
     
     def keras_log1x(x):
-        """Keras activation function: log(|x|+1)*sgn(x)
+        """Keras activation function: ln(|x|+1)*sgn(x)
            This function resembles a sigmoid: it is symmetric with respect to (0,0), negative for x<0 and positive for x>0,
-           but unlike `sigmoid` or `relu` it is unbounded on both sides and thus can approximate functions
+           with a derivative at the origin f'(0)=1 (approximates linear function),
+           but unlike `sigmoid` or `relu` is unbounded on both sides and thus can approximate functions
            with values in <-inf,+inf>, not just in <-1,1>, <0,1> or <0,+inf>.
         """
         return K.log(K.abs(x) + 1) * K.sign(x)

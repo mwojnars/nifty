@@ -21,6 +21,7 @@ from keras.layers.normalization import BatchNormalization
 from keras.initializers import RandomUniform
 from keras.utils.generic_utils import get_custom_objects
 from keras.utils.conv_utils import normalize_tuple
+from keras.regularizers import l2
 
 # nifty; whenever possible, use relative imports to allow embedding of the library inside higher-level packages;
 # only when executed as a standalone file, for unit tests, do an absolute import
@@ -277,6 +278,66 @@ class SmartNoise(Layer):
     def compute_output_shape(self, input_shape):
         return input_shape
     
+
+class SCS_Layer(Layer):
+    """
+    Layer of fully-connected Signal-Control-Scale (SCS) neurons.
+    """
+    def __init__(self, units, **kwargs):
+        assert kwargs.get('activation') is None
+        kwargs.pop('activation', None)
+        super(SCS_Layer, self).__init__(**kwargs)
+        self.units = units
+        self.seed  = None
+
+    def build(self, input_shape):
+
+        assert len(input_shape) >= 2
+        input_dim = input_shape[-1]
+        # input_all = np.prod(input_shape)
+        
+        self.channel_axis = -1          # channel_axis = 1 if self.data_format == 'channels_first' else -1
+
+        # uniform_01 = RandomUniform(-.01, +.01, seed = None)
+
+        # (input_dim, self.units)
+        self.signal_w = self.add_weight(name = 'signal_w', shape = (input_dim, self.units), initializer = 'uniform', regularizer = l2(0.001), trainable = True)
+        self.signal_b = self.add_weight(name = 'signal_b', shape = (self.units,),           initializer = 'uniform', regularizer = l2(0.001), trainable = True)
+        
+        self.control_w = self.add_weight(name = 'control_w', shape = (input_dim, self.units), initializer = 'uniform', regularizer = l2(0.001), trainable = True)
+        self.control_b = self.add_weight(name = 'control_b', shape = (self.units,),           initializer = 'uniform', regularizer = l2(0.001), trainable = True)
+        
+        # self.scale = self.add_weight(name = 'scale', shape = (self.units,), initializer = RandomUniform(.95, 1.05), trainable = True)
+        # self.scale_w = self.add_weight(name = 'scale_w', shape = (input_dim, self.units), initializer = uniform_01, regularizer = l2(0.01), trainable = True)
+        # self.scale_b = self.add_weight(name = 'scale_b', shape = (self.units,),           initializer = uniform_01, regularizer = l2(0.01), trainable = True)
+        
+        super(SCS_Layer, self).build(input_shape)       # Be sure to call this at the end
+
+    def call(self, x):
+        
+        def log1x(y):
+            """ ln(|x|+1) * sgn(x) """
+            return K.sign(y) * K.log(K.abs(y) + 1) #** self.scale
+        
+        # x = K.expand_dims(K.flatten(x), 0)
+        signal  = log1x     (K.dot(x, self.signal_w)  + self.signal_b)
+        control = K.sigmoid (K.dot(x, self.control_w) + self.control_b)
+        # scale   = K.square  (K.dot(x, self.scale_w)   + self.scale_b)
+        
+        # signal  = log1x    (K.bias_add(K.dot(x, self.signal_w),  self.signal_b,  data_format = 'channels_last'))
+        # control = K.sigmoid(K.bias_add(K.dot(x, self.control_w), self.control_b, data_format = 'channels_last'))
+        # scale   = K.exp    (K.bias_add(K.dot(x, self.scale_w),   self.scale_b,   data_format = 'channels_last'))
+        
+        return signal * control #* self.scale
+
+    def compute_output_shape(self, input_shape):
+
+        assert input_shape and len(input_shape) >= 2
+        assert input_shape[-1]
+        output_shape = list(input_shape)
+        output_shape[-1] = self.units
+        return tuple(output_shape)
+
 
 #####################################################################################################################################################
 #####

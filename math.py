@@ -19,9 +19,9 @@ from collections import OrderedDict
 
 
 if __name__ != "__main__":
-    from .util import isnumber, isstring, isdict, getattrs
+    from .util import isnumber, isstring, isdict, isfunction, getattrs
 else:
-    from nifty.util import isnumber, isstring, isdict, getattrs
+    from nifty.util import isnumber, isstring, isdict, isfunction, getattrs
 
 
 ########################################################################################################################
@@ -322,18 +322,18 @@ class RandomInstance(Distribution):
     """
     
     class_type = None           # the class whose instances are going to be created and returned in random()
-    class_attr = None           # list of attributes that shall be initialized when a random <class_type> object is created;
+    attributes = None           # list of attributes that shall be initialized when a random <class_type> object is created;
                                 # in the subclass, these attributes should contain instances of Distribution that define probability distr. to choose values from
     
     def __init__(self, **common):
         
-        # initialize `class_attr` list of attributes
-        if self.class_attr is None:
-            self.class_attr = [attr for attr in dir(self.__class__) if not attr.startswith('__')]
+        # initialize the list of attributes
+        if self.attributes is None:
+            self.attributes = [attr for attr in dir(self.__class__) if not attr.startswith('__')]
             
         # copy nested sub-Distributions from class-level attributes to instance attributes, to allow their customization
         # (e.g., setting a random seed) without affecting the shared class-level object
-        for attr in dir(self.__class__):
+        for attr in self.attributes:
             if attr in self.__dict__: continue              # already has a value at instance level? skip
             item = getattr(self, attr, None)
             if isinstance(item, Distribution):
@@ -347,7 +347,7 @@ class RandomInstance(Distribution):
         
         # walk through attributes of `self` and for every instance of Distribution initialize its `rand` if missing, or if `overwrite`=True
         if recursive:
-            items = getattrs(self, self.class_attr).values()
+            items = getattrs(self, self.attributes).values()
             self._set_rand_recursive(items, overwrite)
 
         
@@ -359,7 +359,7 @@ class RandomInstance(Distribution):
         assert self.class_type is not None
         obj = self.class_type()
         
-        for attr in self.class_attr:
+        for attr in self.attributes:
             distr = getattr(self, attr, None)
             if isinstance(distr, Distribution):
                 val = distr.get_random(rand)
@@ -373,6 +373,100 @@ class RandomInstance(Distribution):
            `rand` is a Random generator that is guaranteed to be not-None and should be used instead of self.rand.
         """
         pass
+    
+
+#####################################################################################################################################################
+
+class Randomized(object):
+    """
+    Base class for classes that can generate their own instances randomly with the following syntax:
+    
+        ClassName.get_random() or
+        ClassName.generate_random(),
+    
+    where get_random() and generate_random() are class-level methods and are implemented by this base class.
+    """
+
+    _rand = None                        # Random generator to use in get_random() if `rand` argument is None
+    _rand_default = random.Random()     # fallback Random instance to use in random() if both `rand` argument and self.rand are None
+    
+
+    @classmethod
+    def get_random(cls, randomness = "__random__", rand = None, **params):
+        """
+        Returns a single item from the probability distribution represented by self.
+        In subclasses, always ovveride _get_random_value() instead of this method.
+        """
+        if isstring(randomness): randomness = getattr(cls, randomness)
+        if isinstance(randomness, RandomInstance):
+            return randomness.get_random(rand)
+        
+        attributes = cls._get_attributes(randomness, params)
+        return cls._get_random_instance(attributes, rand)
+    
+    
+    @classmethod
+    def generate_random(cls, randomness = "__random__", rand = None):
+        "Generate an infinite stream of random items from the distribution represented by self."
+        
+        if isstring(randomness): randomness = getattr(cls, randomness)
+        if isinstance(randomness, RandomInstance):
+            def get_next():
+                return randomness.get_random(rand)
+        else:
+            attributes = cls._get_attributes(randomness)
+            def get_next():
+                return cls._get_random_instance(attributes, rand)
+
+        while True:
+            yield get_next()
+    
+    
+    @classmethod
+    def _get_attributes(cls, randomness, params):
+        "Check the type of 'randomness' object and convert it appropriately to a dictionary of attribute values/distributions."
+        
+        if isdict(randomness):          return randomness
+        elif isfunction(randomness):    return randomness(**params)
+        else:                           return getattrs(randomness)
+
+    
+    @classmethod
+    def _get_random_instance(cls, attributes, rand):
+
+        obj = cls()
+        for attr, val in attributes.items():
+            if isinstance(val, Distribution):
+                val = val.get_random(rand)
+            setattr(obj, attr, val)
+        
+        obj.postprocess(cls._fix_rand(rand))
+        return obj
+    
+
+    @classmethod
+    def _fix_rand(cls, rand = None):
+        fixed_rand = rand or cls._rand or cls._rand_default
+        assert fixed_rand is not None
+        return fixed_rand
+
+
+    # def set_rand(self, rand = None, seed = None, recursive = True, overwrite = False):
+    #
+    #     super(RandomInstance, self).set_rand(rand, seed, recursive, overwrite)
+    #
+    #     # walk through attributes of `self` and for every instance of Distribution initialize its `rand` if missing, or if `overwrite`=True
+    #     if recursive:
+    #         items = getattrs(self, self.class_attr).values()
+    #         self._set_rand_recursive(items, overwrite)
+
+    def postprocess(self, obj, rand):
+        """
+        Override in sublasses to perform additional post-processing of a newly generated random object.
+        `rand` is a Random generator that is guaranteed to be not-None and should be used instead of self.rand.
+        """
+        pass
+    
     
     
 ########################################################################################################################
