@@ -112,90 +112,6 @@ def trim_text(text, mlen, pat = re.compile(r"\W+"), ellipsis = ""):
     p = cut.rfind(splits[-1])      # p = position of the right-most split point
     return cut[:p] + ellipsis
 
-#########################################################################################################################################################
-###
-###  HTML processing
-###
-
-def html_unescape(s, h = HTMLParser()):
-    "Turn HTML entities (&amp; &#169; ...) into characters. 's' string does NOT have to be a correct HTML, any piece of text can be decoded."
-    return h.unescape(s)
-decode_entities = html_unescape
-
-def html_escape(text):
-    """Escape HTML/XML special characters (& < >) in a string that's to be embedded in a text part of an HTML/XML document.
-    For escaping attribute values use html_attr_escape() - attributes need a different set of special characters to be escaped.
-    """
-    return text.replace('&', '&amp;').replace('>', '&gt;').replace('<', '&lt;')
-
-def html_attr_escape(text):
-    """Escape special characters (& ' ") in a string that's to be used as a (quoted!) attribute value inside an HTML/XML tag.
-    Don't use for un-quoted values, where escaping should be much more extensive!
-    """
-    return text.replace('&', '&amp;').replace('>', '&gt;').replace('<', '&lt;').replace("'", '&#39;').replace('"', '&#34;')
-
-def html2text(html, sub = ''):
-    "Simple regex-based converter. Strips out all HTML tags, decodes HTML entities, merges multiple spaces. No HTML parsing is performed, only regexes."
-    if not html: return ''
-    s = regex.tag_re.sub(sub, html)         # strip html tags, replace with 'sub' (use sub=' ' to avoid concatenation of neighboring words)
-    s = html_unescape(s)                    # turn HTML entities (&amp; &#169; ...) into characters
-    return merge_spaces(s)                  # merge multiple spaces, remove newlines and tabs
-
-def striptags(html, remove = [], allow = [], replace = '', ignorecase = True):
-    r"""Regex-based stripping of HTML tags. Optional 'remove' is a list of tag names to remove.
-    Optional 'allow' is a list of tag names to preserve (remove all others).
-    At most one of remove/allow parameters can be non-empty. If both are empty, all tags are removed.
-    remove/allow are given either as a list of strings or a single string with space-separated tag names.
-    By default, tag names are matched case-insensitive.
-    Watch out: striptags() removes tags only, not elements - body of the tags being removed is preserved!
-    Use stripelem() for simple regex-based removal of arbitrary elements, including their body.
-
-    >>> striptags("<i>one</i> <u>two</u>")
-    'one two'
-    >>> striptags("  <html><HTML><A><a><a/><a /><img></img><image> <form><script><style><!-- ala --><?xml ?><![CDATA[...]]></body>")    # spaces preserved
-    '   '
-    >>> striptags("< b></ body>")              # leading spaces inside tags not allowed
-    '< b></ body>'
-    >>> html = r"<html><A> <a href=\n 'http://xyz.com/'>ala ma <i>kota</i></a><a /><img>\n</img><image><form><!-- \n ala -->"
-    >>> striptags(html, allow = 'a i u')
-    "<A> <a href=\\n 'http://xyz.com/'>ala ma <i>kota</i></a><a />\\n"
-    >>> striptags(html, remove = ['i', 'html', 'form', 'img'])
-    "<A> <a href=\\n 'http://xyz.com/'>ala ma kota</a><a />\\n<image><!-- \\n ala -->"
-    >>> striptags("<a href = 'http://xyz.com/?q=3' param=xyz boolean> ala </a>", remove = ['a'])
-    ' ala '
-    """
-    if remove:
-        pat = regex.tags(remove)
-    elif allow:
-        pat = regex.tags_except(allow)
-    else:
-        pat = regex.tag
-    #print pat
-    return re.sub(pat, replace, html, flags = re.IGNORECASE if ignorecase else 0)
-
-def stripelem(html, remove = [], replace = '', ignorecase = True):
-    r"""Like striptags(), but removes entire elements, including their body: <X>...</X>, not only tags <X> and </X>.
-    Elements are detected using simple regex matching, without actual markup parsing!
-    This can behave incorrectly in more complex cases: with nested or unclosed elements, HTML comments, script/style elements etc.
-    Self-closing or unclosed elements are NOT removed. By default, tag names are matched case-insensitive.
-
-    >>> stripelem("<i>one</i> <u>two</u>")
-    ' '
-    >>> stripelem(r"  <html></HTML> outside\n <A>inside\n</a> <a/><a /><img src=''></img><image> <form><!--\nala--><?xml ?><![CDATA[...]]></body>")
-    '   outside\\n  <a/><a /><image> <form><!--\\nala--><?xml ?><![CDATA[...]]></body>'
-    >>> stripelem("< b></ b>")                 # leading spaces inside tags not allowed
-    '< b></ b>'
-    >>> html = r"<A> <a href=\n 'http://xyz.com/'>ala ma <i>kota</i></a> <img src=''>\n</img> <I>iii</I>"
-    >>> stripelem(html, remove = 'a i u')
-    " <img src=''>\\n</img> "
-    >>> stripelem(html, remove = 'i img')
-    "<A> <a href=\\n 'http://xyz.com/'>ala ma </a>  "
-    """
-    pat = regex.tags_pair(remove)
-    flags = re.DOTALL
-    if ignorecase: flags |= re.IGNORECASE
-    return re.sub(pat, replace, html, flags = flags)
-
 
 #########################################################################################################################################################
 ###
@@ -338,6 +254,105 @@ def findEmails(text, exclude = set(), pat = re.compile(regex.email_nospam, re.IG
     if not unique: return emails
     emails = set(emails) - set(exclude)
     return list(emails)
+
+
+#########################################################################################################################################################
+###
+###  HTML processing
+###
+
+def html_unescape(s, h = HTMLParser()):
+    "Turn HTML entities (&amp; &#169; ...) into characters. 's' string does NOT have to be a correct HTML, any piece of text can be decoded."
+    return h.unescape(s)
+decode_entities = html_unescape
+
+def html_escape(text):
+    """Escape HTML/XML special characters (& < >) in a string that's to be embedded in a text part of an HTML/XML document.
+    For escaping attribute values use html_attr_escape() - attributes need a different set of special characters to be escaped.
+    """
+    return text.replace('&', '&amp;').replace('>', '&gt;').replace('<', '&lt;')
+
+def html_attr_escape(text):
+    """Escape special characters (& ' ") in a string that's to be used as a (quoted!) attribute value inside an HTML/XML tag.
+    Don't use for un-quoted values, where escaping should be much more extensive!
+    """
+    return text.replace('&', '&amp;').replace('>', '&gt;').replace('<', '&lt;').replace("'", '&#39;').replace('"', '&#34;')
+
+def html2text(html, sub = ''):
+    "Simple regex-based converter. Strips out all HTML tags, decodes HTML entities, merges multiple spaces. No HTML parsing is performed, only regexes."
+    if not html: return ''
+    s = regex.tag_re.sub(sub, html)         # strip html tags, replace with 'sub' (use sub=' ' to avoid concatenation of neighboring words)
+    s = html_unescape(s)                    # turn HTML entities (&amp; &#169; ...) into characters
+    return merge_spaces(s)                  # merge multiple spaces, remove newlines and tabs
+
+def html2text_smart(html, NONE = '', SPACE = ' ', re_inline_tags = re.compile(regex.tags("a abbr acronym b big u i em s small span strong sub sup tt"))):
+    """
+    Like html2text(), but treats inline vs. block elements differently: inline tags are replaced with '' (empty string), while block tags are replaced with ' ' (space),
+    to avoid concatenation of text of adjacent blocks.
+    """
+
+    if not html: return ''
+    s = html
+    s = re_inline_tags.sub(NONE, s)         # drop inline tags (no space)
+    s = regex.tag_re.sub(SPACE, s)          # turn other tags to spaces
+    s = html_unescape(s)                    # turn HTML entities (&amp; &#169; ...) into characters
+    return merge_spaces(s)                  # merge multiple spaces, remove newlines and tabs
+
+
+def striptags(html, remove = [], allow = [], replace = '', ignorecase = True):
+    r"""Regex-based stripping of HTML tags. Optional 'remove' is a list of tag names to remove.
+    Optional 'allow' is a list of tag names to preserve (remove all others).
+    At most one of remove/allow parameters can be non-empty. If both are empty, all tags are removed.
+    remove/allow are given either as a list of strings or a single string with space-separated tag names.
+    By default, tag names are matched case-insensitive.
+    Watch out: striptags() removes tags only, not elements - body of the tags being removed is preserved!
+    Use stripelem() for simple regex-based removal of arbitrary elements, including their body.
+
+    >>> striptags("<i>one</i> <u>two</u>")
+    'one two'
+    >>> striptags("  <html><HTML><A><a><a/><a /><img></img><image> <form><script><style><!-- ala --><?xml ?><![CDATA[...]]></body>")    # spaces preserved
+    '   '
+    >>> striptags("< b></ body>")              # leading spaces inside tags not allowed
+    '< b></ body>'
+    >>> html = r"<html><A> <a href=\n 'http://xyz.com/'>ala ma <i>kota</i></a><a /><img>\n</img><image><form><!-- \n ala -->"
+    >>> striptags(html, allow = 'a i u')
+    "<A> <a href=\\n 'http://xyz.com/'>ala ma <i>kota</i></a><a />\\n"
+    >>> striptags(html, remove = ['i', 'html', 'form', 'img'])
+    "<A> <a href=\\n 'http://xyz.com/'>ala ma kota</a><a />\\n<image><!-- \\n ala -->"
+    >>> striptags("<a href = 'http://xyz.com/?q=3' param=xyz boolean> ala </a>", remove = ['a'])
+    ' ala '
+    """
+    if remove:
+        pat = regex.tags(remove)
+    elif allow:
+        pat = regex.tags_except(allow)
+    else:
+        pat = regex.tag
+    #print pat
+    return re.sub(pat, replace, html, flags = re.IGNORECASE if ignorecase else 0)
+
+def stripelem(html, remove = [], replace = '', ignorecase = True):
+    r"""Like striptags(), but removes entire elements, including their body: <X>...</X>, not only tags <X> and </X>.
+    Elements are detected using simple regex matching, without actual markup parsing!
+    This can behave incorrectly in more complex cases: with nested or unclosed elements, HTML comments, script/style elements etc.
+    Self-closing or unclosed elements are NOT removed. By default, tag names are matched case-insensitive.
+
+    >>> stripelem("<i>one</i> <u>two</u>")
+    ' '
+    >>> stripelem(r"  <html></HTML> outside\n <A>inside\n</a> <a/><a /><img src=''></img><image> <form><!--\nala--><?xml ?><![CDATA[...]]></body>")
+    '   outside\\n  <a/><a /><image> <form><!--\\nala--><?xml ?><![CDATA[...]]></body>'
+    >>> stripelem("< b></ b>")                 # leading spaces inside tags not allowed
+    '< b></ b>'
+    >>> html = r"<A> <a href=\n 'http://xyz.com/'>ala ma <i>kota</i></a> <img src=''>\n</img> <I>iii</I>"
+    >>> stripelem(html, remove = 'a i u')
+    " <img src=''>\\n</img> "
+    >>> stripelem(html, remove = 'i img')
+    "<A> <a href=\\n 'http://xyz.com/'>ala ma </a>  "
+    """
+    pat = regex.tags_pair(remove)
+    flags = re.DOTALL
+    if ignorecase: flags |= re.IGNORECASE
+    return re.sub(pat, replace, html, flags = flags)
 
 
 #########################################################################################################################################################
