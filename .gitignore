@@ -1,5 +1,6 @@
 *.pyc
 *.py[cod]
+.idea
 
 # Drafts
 *.draft.*
