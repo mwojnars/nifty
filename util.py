@@ -1040,6 +1040,45 @@ fileexists = os.path.isfile
 pathexists = os.path.exists
 normpath = os.path.normpath             # path normalization: convert to shortest string (no trailing slashes! no '.' etc.)
 
+# operations on file extensions...
+
+def getext(filename):
+    "Get file extension, no dot '.'"
+    ext = os.path.splitext(filename)[1]
+    return ext[1:] if ext else ext
+
+def dropext(filename, sep = os.path.sep, extsep = os.path.extsep):
+    """Remove extension, if exists, from a file name or path
+    >>> dropext("/home/marcin/ala.ma.kota.txt")
+    '/home/marcin/ala.ma.kota'
+    """
+    if extsep not in filename: return filename      # no extension?
+    extpos = filename.rindex(extsep)
+    if sep in filename[extpos:]: return filename    # extension only at a higher level of the directory tree?
+    return filename[:extpos]
+
+def dropexts(filename, sep = os.path.sep, extsep = os.path.extsep):
+    """Remove all chained extensions from a file name
+    >>> dropexts("/home/marcin.jan/ala.ma.kota.txt")
+    '/home/marcin.jan/ala'
+    >>> dropexts("/home/marcin.jan/ala")
+    '/home/marcin.jan/ala'
+    """
+    name = filename.rsplit(sep, 1)[-1]
+    cut = name.find(extsep)
+    if cut < 0: return filename
+    extpos = len(filename) - len(name) + cut
+    return filename[:extpos]
+
+def setext(filename, ext = None):
+    """Set filename's extension to a given one, or truncate if ext=None.
+    >>> setext("/home/marcin/ala.ma.kota.txt", 'png')
+    '/home/marcin/ala.ma.kota.png'
+    """
+    suffix = ('.' + ext) if ext != None else ''
+    return dropext(filename) + suffix
+
+
 def filesize(name): return os.stat(name).st_size            # file size in bytes
 def filetime(name): return os.stat(name).st_mtime           # file modification time (mtime); you can use os.path.getmtime() instead
 def filectime(name): return os.stat(name).st_ctime          # file metadata modification (Unix) or creation (Win) time (ctime); you can use os.path.getctime() instead
