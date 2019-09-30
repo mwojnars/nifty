@@ -395,7 +395,7 @@ class Randomized(object):
     def get_random(cls, randomness = "__random__", rand = None, **params):
         """
         Returns a single item from the probability distribution represented by self.
-        In subclasses, always ovveride _get_random_value() instead of this method.
+        In subclasses, always overide _get_random_instance() instead of this method.
         """
         if isstring(randomness): randomness = getattr(cls, randomness)
         if isinstance(randomness, RandomInstance):
