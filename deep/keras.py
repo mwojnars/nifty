@@ -16,7 +16,7 @@ from __future__ import absolute_import
 import numpy as np
 import keras.layers
 from keras import backend as K
-from keras.layers import Layer, Conv2D, Activation, Lambda, concatenate, add as layers_add
+from keras.layers import Layer, Dense, Conv2D, Activation, Lambda, concatenate, add as layers_add
 from keras.layers.normalization import BatchNormalization
 from keras.initializers import RandomUniform
 from keras.utils.generic_utils import get_custom_objects
@@ -339,6 +339,26 @@ class SCS_Layer(Layer):
         return tuple(output_shape)
 
 
+class Sparse(Dense):
+    """
+    Like a Dense layer, but picks for every neuron a random subset of inputs which would be (permanently) dropped through multiplying with 0.0.
+    """
+    
+    def __init__(self, units, prob = 0.5, **kwargs):
+        super(Sparse, self).__init__(units, **kwargs)
+        self.prob = prob
+    
+    def build(self, input_shape):
+
+        self.select_features = K.random_binomial(shape = input_shape[1:], p = self.prob, seed = None)          # binary mask of features to be selected
+        super(Sparse, self).build(input_shape)
+
+    def call(self, x, training = None):
+        
+        q = x * self.select_features
+        return super(Sparse, self).call(q)
+
+    
 #####################################################################################################################################################
 #####
 #####  BLOCKS
