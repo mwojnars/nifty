@@ -500,19 +500,6 @@ def mexican(x, std = 1.0, mean = 0.0):
     return f1 * f2 * f3
     
 
-def one_hot(value, length, dtype = bool):
-    """
-    Encode a given integer `value` (0..length-1) into a numpy one-hot vector, hot,
-    such that hot==0 everywhere except hot[value]==1. By default, the one-hot vector has elements of type bool.
-    This can be changed with `dtype`.
-    """
-    
-    assert 0 <= value < length
-    hot = np.zeros(length, dtype = dtype)
-    hot[value] = 1
-    return hot
-
-
 ########################################################################################################################
 ###
 ###   SIGMOIDAL functions, for predictive models and data processing
