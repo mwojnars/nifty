@@ -4,7 +4,7 @@
 Utilities for standard Machine Learning. Some of them implement scikit-learn API.
 """
 
-import numpy as np, pandas as pd
+import re, numpy as np, pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.metrics import f1_score
 
@@ -57,6 +57,15 @@ class OneHot:
         self.map_encode = {val: i for i, val in enumerate(self.values)}
         assert len(self.map_encode) == self.length
         
+        
+    def __len__(self):
+        
+        return self.length
+    
+    def index(self, value):
+        """Position of `value` in the one-hot encoding."""
+        
+        return self.map_encode[value]
         
     def encode(self, value = None):
         """

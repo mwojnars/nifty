@@ -33,6 +33,57 @@ else:
 
 #####################################################################################################################################################
 #####
+#####  METRICS
+#####
+
+def mse_weighted(class_weight, normalize = True, scale = 1.0, channels_axis = -1):
+    """
+    Mean-Squared Error (MSE) with class weighting along the channels axis. Can handle multi-dimensional tensors unlike standard Keras MSE.
+    """
+    
+    assert all(w >= 0 for w in class_weight)
+    weights = np.array(class_weight)[np.newaxis, :]
+    if normalize:
+        weights /= weights.sum()
+        weights *= scale
+    weights = K.constant(weights)                   # convert to a tensor
+
+    def mse_w(y_true, y_pred):
+        return K.mean(K.square(y_pred - y_true) * weights, axis = channels_axis)
+    
+    return mse_w
+
+
+def accuracy_weighted(class_weight, channels_axis = -1):
+    """
+    Like standard classification accuracy, but with class weighting over multi-dimensional arrays
+    (1D/2D/3D spatial dimensions + channels as dimension no. -1 by default).
+    The result is calculated as a weighted average of point-wise (over channels) classification errors
+    over all spatial positions. The weights during averaging are assigned from `class_weight` list/array according to
+    the ground-true class that should have been predicted in a given spatial position.
+    """
+
+    assert all(w >= 0 for w in class_weight)
+    weights = np.array(class_weight)
+    weights = K.constant(weights)
+
+    def acc_w(y_true, y_pred):
+        
+        class_true = K.argmax(y_true, axis = channels_axis)
+        class_pred = K.argmax(y_pred, axis = channels_axis)
+        point_error = K.cast(K.equal(class_true, class_pred), K.floatx())
+
+        point_error = K.flatten(point_error)
+        class_true  = K.flatten(class_true)
+        weight_array = K.gather(weights, class_true)
+
+        return K.sum(point_error * weight_array) / K.sum(weight_array)
+
+    return acc_w
+
+
+#####################################################################################################################################################
+#####
 #####  LAYERS & ACTIVATIONS
 #####
 

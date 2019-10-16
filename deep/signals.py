@@ -22,9 +22,11 @@ from collections import OrderedDict
 if __name__ != "__main__":
     from ..util import list2dict
     from ..math import isarray
+    from .keras import mse_weighted
 else:
     from nifty.util import list2dict
     from nifty.math import isarray
+    from nifty.keras import mse_weighted
 
 
 #####################################################################################################################################################
@@ -109,20 +111,6 @@ if _use_keras:
     
     get_custom_objects().update({'log1x': activ_log1x})
     get_custom_objects().update({'exp1x': activ_exp1x})
-
-
-    def MSE_weighted(weights, normalize = True):
-        "MSE with class weighing along the last axis (channels). Can handle multi-dimensional tensors unlike standard Keras MSE."
-        
-        assert all(w >= 0 for w in weights)
-        weights = np.array(weights)[np.newaxis, :]
-        if normalize: weights /= weights.sum()
-        weights = K.constant(weights)                   # convert to a tensor
-    
-        def _mse(y_true, y_pred):
-            return K.mean(K.square(y_pred - y_true) * weights, axis = -1)
-        
-        return _mse
 
 
 #####################################################################################################################################################
@@ -725,7 +713,7 @@ class MultiHotSignal(Signal2D):
         for w, label in zip(weights, self.labels):
             print '%7.3f  %s' % (w, label)
         
-        return MSE_weighted(weights, normalize = False)
+        return mse_weighted(weights, normalize = False)
         
     
 
