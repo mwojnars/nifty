@@ -99,10 +99,11 @@ class OneHot:
         return hot
         
     
-    def decode(self, hot, binary = False, none_threshold = 0.0):
+    def decode(self, hot, none_threshold = 0.0, binary = False, confidence = False):
         """
         `hot` is either a 0/1 binary (or boolean/int/float) vector where the single occurrence of "1" is seeked;
         or a real-valued vector (if binary=False) where the first occurrence of maximum value is decoded.
+        If confidence=True, the score (probability) of the returned value is provided additionally.
         """
         
         assert len(hot) == self.length
@@ -114,8 +115,13 @@ class OneHot:
         else:
             pos = np.argmax(hot)
             val = hot[pos]
-            if val <= none_threshold: return None
+            if val <= none_threshold:
+                if confidence: return None, (1.0 - val)
+                else: return None
             
+        if confidence:
+            return self.values[pos], hot[pos]
+        
         return self.values[pos]
 
 
