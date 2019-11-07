@@ -208,12 +208,11 @@ def subclasses(cls, include_self=False):
         l.append(cls)
     return l
 
+
 #####################################################################################################################################################
 ###
-###   COLLECTIONS & DATA STRUCTURES
+###   SEQUENCES & STREAMS
 ###
-
-### Sequences
 
 def unique(seq, order = False):
     "List of elements of 'seq' with duplicates removed. If order=True, preserves original order (from: http://stackoverflow.com/a/480227/1202674)."
@@ -238,22 +237,6 @@ def flatten(*seq):
         if hasattr(x, "__iter__"): result += flatten(x)
         else: result.append(x)
     return result
-
-def list2str(l, sep = " ", f = str):
-    "Convert all items of list 'l' into strings by mapping them through function 'f' and joining by separator 'sep'. 'f' can also be a format string."
-    if isstring(f): f = lambda x: f % x
-    return sep.join(map(f, l))
-
-def str2list(s, sep = None):
-    """Return s.split(sep), but first check if 's' is not already a list or None (return unchanged in such case). 
-    For convenient definition of string lists: either as lists or as sep-separated strings of words."""
-    if s is None or islist(s): return s
-    return s.split(sep)
-
-def list2dict(l, dict_type = dict, invert = False):
-    "Convert a list to {index: value} mapping of a given dict_type. If invert=True, the resulting mapping is inverted: {value: index}."
-    if invert: return dict_type((v,i) for i, v in enumerate(l))
-    else:      return dict_type((i,v) for i, v in enumerate(l))
 
 def split_where(seq, cut_test, key_func = None):
     """Split a sequence `seq` on every position `pos` between characters where cut_test(pos,a,b) is True,
@@ -293,15 +276,50 @@ def split_where(seq, cut_test, key_func = None):
     
     return result
 
+def batch(sequence, size):
+    "Split a sequence into batches of max. `size` items each and yield as a stream of batches, every batch as a list."
+    assert size >= 1
+    batch = []
+    for item in sequence:
+        if len(batch) >= size:
+            yield batch
+            batch = []
+        batch.append(item)
+    if batch: yield batch
 
-### Dictionaries & Objects
+def chain(iterables):
+    "Like itertools.chain(), but accepts a sequence of sequences as a single argument, rather than each sequence as a separate argument."
+    for seq in iterables:
+        for item in seq:
+            yield item
 
+
+#####################################################################################################################################################
+###
+###   DICTIONARIES & LISTS
+###
 
 def printdict(d, sep = ' = ', indent = ' ', end = '\n'):
     "Human-readable multi-line printout of dictionary key->value items."
     line = indent + '%s' + sep + '%s' + end
     text = ''.join(line % item for item in d.iteritems())
     print(text)
+
+def list2str(l, sep = " ", f = str):
+    "Convert all items of list 'l' into strings by mapping them through function 'f' and joining by separator 'sep'. 'f' can also be a format string."
+    if isstring(f): f = lambda x: f % x
+    return sep.join(map(f, l))
+
+def str2list(s, sep = None):
+    """Return s.split(sep), but first check if 's' is not already a list or None (return unchanged in such case).
+    For convenient definition of string lists: either as lists or as sep-separated strings of words."""
+    if s is None or islist(s): return s
+    return s.split(sep)
+
+def list2dict(l, dict_type = dict, invert = False):
+    "Convert a list to {index: value} mapping of a given dict_type. If invert=True, the resulting mapping is inverted: {value: index}."
+    if invert: return dict_type((v,i) for i, v in enumerate(l))
+    else:      return dict_type((i,v) for i, v in enumerate(l))
 
 def obj2dict(obj):
     'Recursively convert a tree of nested objects into nested dictionaries. Iterables converted to lists.'
