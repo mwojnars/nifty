@@ -44,6 +44,10 @@ class DB(object):
         
         self.db.commit()
 
+    def vacuum(self):
+        
+        self.executescript("VACUUM")
+
     def _check_connected(self):
         
         if not self.db: raise Exception("Database not connected")
@@ -108,7 +112,7 @@ class DB(object):
 
         placeholders = '(%s)' % ','.join([self.PLACEHOLDER] * len(row))
 
-        query = "INSERT INTO %s %s VALUES (%s)" % (table, attrs_list, placeholders)
+        query = "INSERT INTO %s %s VALUES %s" % (table, attrs_list, placeholders)
 
         self.execute(query, row)
         
@@ -200,6 +204,11 @@ class SQLite3(DB):
         
         self.db.executescript(sql)
         if commit: self.commit()
+
+    def table_exists(self, tablename):
+        
+        row = self.select_one(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{tablename}'")
+        return row is not None
 
 
 #####################################################################################################################################################
