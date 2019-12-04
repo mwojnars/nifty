@@ -12,16 +12,25 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public 
 You should have received a copy of the GNU General Public License along with Nifty. If not, see <http://www.gnu.org/licenses/>.
 '''
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
+
 import sys, numpy as np
-from itertools import izip, groupby
+from itertools import groupby
 from copy import copy
+
+try:                                                # Python 2
+    from itertools import izip
+except:                                             # Python 3
+    from past.builtins import xrange
+    izip = zip
+    basestring = str
+
 
 try:
     from numba import jit
 except:
     def jit(f): return f
-    print >>sys.stderr, "nifty.text: numba not found, JIT disabled for multiple string alignment align()"
+    print("nifty.algo.alignment: numba not found, JIT disabled for multiple string alignment align()", file = sys.stderr)
 
 
 #########################################################################################################################################################
@@ -65,7 +74,7 @@ class Charset(object):
             freq[hot] = weight
             return freq
         
-        return map(encode_one, s)
+        return list(map(encode_one, s))
         
     def cost_matrix(self, GAP = '_', cost_base = 2, cost_case = 1, cost_gap = 3, cost_gap_gap = 0, dtype = None):
         "Create a parameterized cost matrix for edit distance."
@@ -131,12 +140,12 @@ class FuzzyString(object):
     >>> FuzzyString.merge(fuzzy[::2], 'aacc', norm = False).chars
     [array([2, 0, 0]), array([1, 1, 0]), array([0, 0, 2]), array([1, 0, 1]), array([1, 0, 0])]
     >>> FuzzyString.merge(fuzzy[::2], 'aacc', norm = True, dtype = float).chars
-    [array([ 1.,  0.,  0.]), array([ 0.5,  0.5,  0. ]), array([ 0.,  0.,  1.]), array([ 0.5,  0. ,  0.5]), array([ 1.,  0.,  0.])]
+    [array([1., 0., 0.]), array([0.5, 0.5, 0. ]), array([0., 0., 1.]), array([0.5, 0. , 0.5]), array([1., 0., 0.])]
     """
     
     # __isfuzzy__ = True      # flag to replace isinstance() checks with hasattr()
     
-    charset = None          # Charset instance that defines a char-class mapping: char -> 0..N-1
+    charset = None          # Charset instance that defines a char-code mapping: char -> 0..N-1
     chars = None            # list of numpy vectors: chars[pos][c] = probability/frequency of character class 'c' on position 'pos' in string
                             # kept as a list, not monolithic 2D array, to enable fast edit operations: character insertion/deletion;
                             # you should treat each array, chars[pos], as IMMUTABLE (!) and make a copy
@@ -299,7 +308,7 @@ class FuzzyString(object):
             # if not np.dtype(s.dtype) <= dtype: raise Exception("Trying to combine FuzzyStrings with incompatible numeric types: %s, %s" % (s.dtype, dtype))
             return s
         
-        fuzzy = map(validate, strings)
+        fuzzy = list(map(validate, strings))
         
         # combine numpy arrays on each char position
         v = len(charset)
@@ -431,16 +440,23 @@ class FuzzyString(object):
 ###  STRING ALIGNMENT
 ###
 
-def align(s1, s2, mismatch = None, GAP = '_', GAP1 = None, GAP2 = None, dtype = 'float32', return_gaps = False, mismatch_pairs = None):
+def align(s1, s2, mismatch = None, GAP = '_', GAP1 = None, GAP2 = None, dtype = 'float32', substring = False, return_gaps = False, mismatch_pairs = None):
     u"""
     Align two strings, s1 and s2, and compute their Levenshtein distance using Wagner-Fischer algorithm.
-    Each of s1/s2 can be a plain character string (str/unicode) or a FuzzyString.
     Return aligned strings and their distance value: (aligned1, aligned2, distance).
+    If return_gaps=True, additionally return lists of positions (..., gaps1, gaps2) where (new) gaps have been inserted;
+    note that, in general, s1 and/or s2 can already contain some gaps! - this is typically the case
+    for a consensus string during multiple alignment.
+
+    Each of s1/s2 can be a plain character string (str/unicode) or a FuzzyString.
     During alignment, GAP character is inserted where gaps are created.
     The cost of each character-level alignment of chars c1 and c2 is evaluated with mismatch(c1,c2) function,
     or a standard 0/1 equality function if mismatch is None.
-    The order of characters for mismatch() is always kept the same: c1 from s1 as 1st argument, c2 from s2 as second;
+    The order of characters for mismatch() is always: c1 is a character from s1, c2 is from s2,
     hence mismatch() can exploit this information in cost calculation, e.g. to weigh differently characters from s1 and s2.
+    Insertions/deletions are represented by GAP1 and GAP2 characters in mismatch().
+    Remember to always check for c1==c2 inside mismatch() and return 0 in such case.
+    
     
     >>> align('', '', dtype = 'int8')
     ('', '', 0)
@@ -496,7 +512,9 @@ def align(s1, s2, mismatch = None, GAP = '_', GAP1 = None, GAP2 = None, dtype = 
     # convert GAP to a FuzzyString if needed, separately for each string (their types can differ: FuzzyString / basestring)
     if GAP1 is None:  GAP1 = s1.convert(GAP) if isinstance(s1, FuzzyString) else GAP
     if GAP2 is None:  GAP2 = s2.convert(GAP) if isinstance(s2, FuzzyString) else GAP
-        
+    # if GAP1 is None and isinstance(s1, FuzzyString):  GAP1 = s1.convert(GAP)
+    # if GAP2 is None and isinstance(s2, FuzzyString):  GAP2 = s2.convert(GAP)
+    
     # memorize char-vs-GAP mismatch costs to avoid repeated calculation of the same values
     mismatch_1_GAP = array([0] + [mismatch(c1, GAP2) for c1 in s1], dtype)
     mismatch_GAP_2 = array([0] + [mismatch(GAP1, c2) for c2 in s2], dtype)
@@ -506,6 +524,11 @@ def align(s1, s2, mismatch = None, GAP = '_', GAP1 = None, GAP2 = None, dtype = 
     dist = zeros((n1+1, n2+1), dtype = dtype)
     dist[:,0] = cumsum(mismatch_1_GAP)                      # fill out row #0 and column #0
     dist[0,:] = cumsum(mismatch_GAP_2)
+    
+    if substring:
+        dist[0,:] = 0
+        assert not swap
+        assert not return_gaps
     
     # edit[i,j] = 0/1/2: indicator of the optimal edit operation on (i,j) position when aligning s1[:i] to s2[:j]
     edit = zeros((n1+1, n2+1), dtype = 'int8')
@@ -524,9 +547,20 @@ def align(s1, s2, mismatch = None, GAP = '_', GAP1 = None, GAP2 = None, dtype = 
     i, j = n1, n2
     a1 = s1.new() if isinstance(s1, FuzzyString) else ''
     a2 = s2.new() if isinstance(s2, FuzzyString) else ''
+    distance = dist[n1, n2]
+
+    # GAP1 = GAP1 or GAP              # change None to GAP for GAP1/GAP2
+    # GAP2 = GAP2 or GAP
     gaps1 = []
     gaps2 = []
     
+
+    if substring:
+        j = np.argmin(dist[-1,:])
+        a1 += GAP1 * (n2 - j)
+        a2 += s2[j:] [::-1]
+        distance = dist[n1, j]
+
     # reconstruct aligned strings a1, a2, from the array of optimal edit operations in each step
     while i or j:
         if edit[i,j] == 0:
@@ -545,7 +579,7 @@ def align(s1, s2, mismatch = None, GAP = '_', GAP1 = None, GAP2 = None, dtype = 
             i -= 1
             j -= 1
         
-    assert len(a1) == len(a2)
+    assert len(a1) == len(a2), (len(a1), len(a2))
     a1 = a1[::-1]
     a2 = a2[::-1]
 
@@ -556,9 +590,9 @@ def align(s1, s2, mismatch = None, GAP = '_', GAP1 = None, GAP2 = None, dtype = 
         gaps2 = [len(a2)-j-1 for j in reversed(gaps2)]              # reverse the order and values of gap indices, like a1/a2 were reversed
         # assert all(a1[i] == GAP1 for i in gaps1)
         # assert all(a2[j] == GAP2 for j in gaps2)
-        return a1, a2, dist[n1,n2], gaps1, gaps2
+        return a1, a2, distance, gaps1, gaps2
     else:
-        return a1, a2, dist[n1,n2]
+        return a1, a2, distance
     
 @jit
 def _align_loop(dist, edit, mismatch_1_GAP, mismatch_GAP_2, mismatch_pairs):
@@ -579,6 +613,49 @@ def _align_loop(dist, edit, mismatch_1_GAP, mismatch_GAP_2, mismatch_pairs):
             elif M == cost_up: step = 1
             else:              step = 2
             edit[i,j] = step
+    
+    
+def align_substring(query, text, mismatch = None, GAP = u'⎽', return_aligned = False, **kwargs):
+    """
+    Levenshtein substring search.
+    
+    Calls align() with substring=True to find the (start,stop) position of a substring in `text`
+    that most closely resembles the `query` string, the difference being measured with edit distance,
+    possibly modified with a custom mismatch(c1,c2) function.
+    Returns a triple (start, stop, distance) if return_aligned=False (default);
+    or a 5-tuple (start, stop, distance, query_aligned, match_aligned) if return_aligned=True.
+    
+    GAP character must be chosen in such a way that neither `query` nor `text` contain it.
+    The default GAP character (u'⎽') looks similar to ASCII '_', but actually it is a distinct Unicode char: u'\u23bd',
+    hence the standard '_' character can be used in strings.
+    
+    If custom mismatch() is provided, remember to return zero costs for c1=c2 character pairs!
+    """
+    
+    assert GAP not in query, (GAP, query)
+    assert GAP not in text,  (GAP, text)
+    
+    query_aligned, text_aligned, distance = align(query, text, mismatch = mismatch, GAP = GAP, substring = True, **kwargs)
+    assert len(query_aligned) == len(text_aligned)
+
+    lstrip = query_aligned.lstrip(GAP)
+    rstrip = query_aligned.rstrip(GAP)
+
+    lgaps = len(query_aligned) - len(lstrip)
+    rgaps = len(query_aligned) - len(rstrip)
+    assert GAP not in text_aligned[:lgaps]
+    assert GAP not in text_aligned[len(rstrip):]
+
+    start = lgaps
+    stop  = len(text) - rgaps
+
+    query_aligned = query_aligned[lgaps : len(rstrip)]
+    match_aligned = text_aligned [lgaps : len(rstrip)]
+    
+    if return_aligned:
+        return start, stop, distance, query_aligned, match_aligned
+    else:
+        return start, stop, distance
     
     
 def align_multiple(strings, mismatch = None, GAP = '_', cost_base = 2, cost_case = 1, cost_gap = 3, cost_gap_gap = 0,
@@ -612,13 +689,13 @@ def align_multiple(strings, mismatch = None, GAP = '_', cost_base = 2, cost_case
 
     if cost_matrix is None:
         cost_matrix = charset.cost_matrix(GAP, cost_base = cost_base, cost_case = cost_case, cost_gap = cost_gap, cost_gap_gap = cost_gap_gap)  #dtype = 'float32'
-    if verbose: print 'cost_matrix:\n', cost_matrix
+    if verbose: print('cost_matrix:\n', cost_matrix)
     
     if weights is None: weights = ones(len(strings))
     
     maxlen = max(map(len, strings))
     consensus = FuzzyString(strings[0], charset = charset, dtype = 'float32', weight = weights[0])      #'float32'... 'int16' if maxlen*cost_base < 10000 else
-    if verbose: print '#1: ', '%8s' % strings[0]
+    if verbose: print('#1: ', '%8s' % strings[0])
 
     def mismatch(fuzzy, crisp):
         cls = classes[crisp]
@@ -686,12 +763,12 @@ def align_multiple(strings, mismatch = None, GAP = '_', cost_base = 2, cost_case
         consensus = FuzzyString.merge(consensus_aligned, string_aligned, weights = [1,weights[count]], norm = False)
         
         if verbose:
-            print '#%-3d a:' % (i+2), '%8s' % string_aligned
-            print '     c: %8s' % consensus_aligned.discretize()
-            # print '  gaps:', s_gaps
-            # print '       ', c_gaps
-            print
-    if verbose: print
+            print('#%-3d a:' % (i+2), '%8s' % string_aligned)
+            print('     c: %8s' % consensus_aligned.discretize())
+            # print('  gaps:', s_gaps)
+            # print('       ', c_gaps)
+            print()
+    if verbose: print()
     
     
     consensus = FuzzyString.merge(consensus, norm = True, dtype = 'float32')
@@ -723,11 +800,11 @@ def align_multiple(strings, mismatch = None, GAP = '_', cost_base = 2, cost_case
                     aligned[k] = insert_gap(aligned[k], gap)
 
         aligned.append(s_aligned)
-        if verbose: print s_aligned
+        if verbose: print(s_aligned)
 
         assert all(len(a) == len(consensus) for a in aligned)
                     
-    if verbose: print
+    if verbose: print()
 
     return (aligned, consensus) if return_consensus else aligned
 
@@ -735,19 +812,31 @@ def align_multiple(strings, mismatch = None, GAP = '_', cost_base = 2, cost_case
 #########################################################################################################################################################
 
 if __name__ == "__main__":
-    import doctest
-    print doctest.testmod()
+    
+    # import doctest
+    # print(doctest.testmod())
 
-    print
-    print "align_multiple..."
+    def mismatch(c1, c2, GAP = u'⎽'):
+        
+        if c1==c2: return 0.0
+        if GAP in (c1,c2) and ' ' in (c1,c2):
+            return 0.1
+        return 1.0
+
+    print(align("querry", "Let's find a qu erry substring in a longer text querrzy", GAP = u'⎽', mismatch = mismatch, substring = True))
+    print(align_substring("querry", "Let's find a qu erry substring in a longer text querrzy", mismatch = mismatch, return_aligned = True))
+
+    
+    print()
+    print("align_multiple...")
     res = align_multiple([u'This module provides a simple way to time small bits of Python code. It has both a Command-Line Interface as well as a callable one. It avoids a number of common traps for measuring execution times. See also Tim Peters’ introduction to the “Algorithms” chapter in the Python Cookbook, published by O’Reilly.', 'abcbaabcaa', '  ', u'This module provides a simple way to time small bits of Python code. It has both a Command-Line Interface as well as a callable one. It avoids a number of common traps for measuring execution times. See also Tim Peters’ introduction to the “Algorithms” chapter in the Python Cookbook, published by O’Reilly.', u'The following example shows how the Command-Line Interface can be used to compare three different expressions:'])
-    for s in res: print s
-    print
+    for s in res: print(s)
+    print()
     
     from timeit import timeit
-    print 'timeit...',
-    print timeit("""align_multiple([u'This module provides a simple way to time small bits of Python code. It has both a Command-Line Interface as well as a callable one. It avoids a number of common traps for measuring execution times. See also Tim Peters’ introduction to the “Algorithms” chapter in the Python Cookbook, published by O’Reilly.', 'abcbaabcaa', '  ', u'This module provides a simple way to time small bits of Python code. It has both a Command-Line Interface as well as a callable one. It avoids a number of common traps for measuring execution times. See also Tim Peters’ introduction to the “Algorithms” chapter in the Python Cookbook, published by O’Reilly.', u'The following example shows how the Command-Line Interface can be used to compare three different expressions:'])""",
+    print('timeit...',)
+    print(timeit("""align_multiple([u'This module provides a simple way to time small bits of Python code. It has both a Command-Line Interface as well as a callable one. It avoids a number of common traps for measuring execution times. See also Tim Peters’ introduction to the “Algorithms” chapter in the Python Cookbook, published by O’Reilly.', 'abcbaabcaa', '  ', u'This module provides a simple way to time small bits of Python code. It has both a Command-Line Interface as well as a callable one. It avoids a number of common traps for measuring execution times. See also Tim Peters’ introduction to the “Algorithms” chapter in the Python Cookbook, published by O’Reilly.', u'The following example shows how the Command-Line Interface can be used to compare three different expressions:'])""",
                  "from __main__ import align_multiple",
                  number = 10
-                 )
+                 ))
     
