@@ -126,11 +126,11 @@ class DB(object):
             attrs = record.keys()
             # attrs = [atr for atr in record.keys() if not atr.startswith('__')]
 
-        attrs_list   = "(%s)" % ','.join(attrs)
-        placeholders = '(%s)' % ','.join([self.PLACEHOLDER] * len(values))
-
         values = tuple(record[atr] for atr in attrs)
         assert len(attrs) == len(values)
+
+        attrs_list   = "(%s)" % ','.join(attrs)
+        placeholders = '(%s)' % ','.join([self.PLACEHOLDER] * len(values))
 
         query = "INSERT INTO %s %s VALUES %s" % (table, attrs_list, placeholders)
 
@@ -207,7 +207,7 @@ class SQLite3(DB):
 
     def table_exists(self, tablename):
         
-        row = self.select_one(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{tablename}'")
+        row = self.select_one("SELECT name FROM sqlite_master WHERE type='table' AND name='%s'" % tablename)
         return row is not None
 
 
