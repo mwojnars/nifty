@@ -173,6 +173,7 @@ from six import StringIO, PY2, PY3
 from datetime import datetime, date, time
 from collections import OrderedDict, defaultdict, namedtuple
 from collections.abc import Iterator
+from numba import jit
 
 # nifty; whenever possible, use relative imports to allow embedding of the library inside higher-level packages;
 # only when executed as a standalone file, for unit tests, do an absolute import
@@ -213,14 +214,14 @@ class Tokenizer(object):
 
     # Tokens and their corresponding regexes...
     
-    _noalpha = r'(%s)(?!\w)'                    # checks that no alpha-numeric character follows after the match (expected whitespace or special)
+    _noalpha = r'(?:%s)(?!\w)'                    # checks that no alpha-numeric character follows after the match (expected whitespace or special)
     tokens = [
         # all special chars: newline, parentheses, separators
         ('SPEC' , r'[\n\(\)\[\]\{\}:,=]'),
         
         # atomic values
+        ('INT'  ,  _noalpha % r'[+-]?\d+(?!\.)'),
         ('FLOAT',  _noalpha % (regex.float + r'|([+-]?[iI]nf)|NaN|nan')),       # any floating-point number, or Inf, or NaN
-        ('INT'  ,  _noalpha % regex.int),
         ('STR'  ,  regex.escaped_string),
         ('UNI'  ,  r'[uU]' + regex.escaped_string),                             # unicode string
         ('NONE' ,  _noalpha % r'None|null|~|-'),
@@ -232,12 +233,12 @@ class Tokenizer(object):
         ('OBJ',  r"[\w\.]+(?=\()"),        # closed object: identifier followed immediately by '('. Space before ( interpreted as open obj with a tuple arg (!)
         ('OPEN', r"[\w\.]+"),              # open object
     ]
-        
+    
+    # combined regex: detects a subsequent token of any type
     regex = '|'.join([r'(?P<%s>%s)' % pair for pair in tokens])
     regex = r'[ \t\v]*(?:%s)' % regex             # every token can have a leading whitespace
     regex = re.compile(regex)
 
-    
     @staticmethod
     def tokenize(text, line = 1, getindent = re.compile(r'[ \t]*').match, gettoken = regex.match):
         "'text' should be a single line, \n-terminated. 'line' is the current line number, counted from 1."
@@ -249,6 +250,8 @@ class Tokenizer(object):
         pos = match.end()
         yield 'INDENT', value, line, column
 
+        # for quadruple in _tokenize(text, line, pos): yield quadruple
+        
         match = gettoken(text, pos)
         while match is not None:
             token = match.lastgroup
@@ -262,7 +265,7 @@ class Tokenizer(object):
             #    line += 1
             #    indent, pos = matchIndent()                 # match and yield indentation at the beginning of the next line
             #    yield indent
-            
+
             match = gettoken(text, pos)
         
         if pos != len(text):
@@ -273,6 +276,19 @@ class Tokenizer(object):
         #yield Token('EOL', '\n', line, pos + 1)     
         yield ('EOL', '\n', line, pos + 1)          # superflous \n at the end to allow arbitrary consumption (or not) of trailing \n (the true one may be consumed by tokenizer)
 
+# @jit
+# def _tokenize(text: str, line: str, pos: int):
+#     # gettoken = Tokenizer.regex.match
+#     match = Tokenizer.regex.match(text, pos)
+#     while match is not None:
+#         token = match.lastgroup
+#         value = match.group(token)
+#         column = match.start() + 1
+#         pos = match.end()
+#         yield token, value, line, column
+#
+#         match = Tokenizer.regex.match(text, pos)
+    
 
 class Analyzer(object):
     "General concept based on: http://effbot.org/zone/simple-iterator-parser.htm"
@@ -301,8 +317,6 @@ class Analyzer(object):
         self.decode = decode
         self.linenum = 1        # current line number, for error messages
         
-    # TODO: turn off assertions to speed up
-        
     def parse(self, line, tokenize = Tokenizer.tokenize):
         """Parses the next line (input string must be a single line, \n-terminated). Returns a tuple: (indent, isopen, ispair, value),
         where 'value' is the final fully decoded object, except for the case when the line is open, 
@@ -320,7 +334,7 @@ class Analyzer(object):
         item = self.lineitem(next())
         
         # try reading the terminating \n, sometimes it remains in the input stream despite the item being parsed
-        try: 
+        try:
             end = next()
             if end[1] != '\n': raise DAST_SyntaxError("Too many elements in line, expected newline instead of '%s'", end)
         except StopIteration as e: pass
@@ -353,29 +367,39 @@ class Analyzer(object):
         def _unescape(text, utf8):
             return Analyzer.ESCAPE_SEQUENCE_RE.sub(Analyzer._decode_match, text)
             
+    # _value_decoders = {
+    #     'S': (lambda val: Analyzer._unescape(val[1:-1], False)),
+    #     'U': (lambda val: Analyzer._unescape(val[2:-1], True)),
+    #     'I': (lambda val: int(val, 0)),
+    #     'F': (lambda val: float(val)),
+    #     'K': (lambda val: val),
+    #     'N': (lambda val: None),
+    #     'B': (lambda val: val[0] in 'tT'),
+    # }
+    
     def value(self, token):
         "Parses an object (atomic or composite value, but NOT a pair) that starts with 'token' at the current position."
         name, val = token[:2]
-        n = name[0]
         
         # atomic value
+        n = name[0]
         if n in 'SUIFKNB':
-            if n == 'S' and name == 'STR':
-                return self._unescape(val[1:-1], False)
+            if name == 'STR':
+                return Analyzer._unescape(val[1:-1], False)
                 # return val[1:-1].decode("string-escape")
-            if n == 'U' and name == 'UNI':
-                return self._unescape(val[2:-1], True)
-                # return val[2:-1].decode("string-escape").decode("utf-8")
-            if n == 'I' and name == 'INT':
+            if name == 'INT':
                 return int(val, 0)
-            if n == 'F' and name == 'FLOAT':
+            if name == 'FLOAT':
                 return float(val)
-            if n == 'K' and name == 'KEY':
+            if name == 'KEY':
                 return val
-            if n == 'N' and name == 'NONE':
+            if name == 'NONE':
                 return None
-            if n == 'B' and name == 'BOOL':
+            if name == 'BOOL':
                 return val[0] in 'tT'
+            if name == 'UNI':
+                return Analyzer._unescape(val[2:-1], True)
+                # return val[2:-1].decode("string-escape").decode("utf-8")
         
         # collection
         if val in '([{':
@@ -391,6 +415,11 @@ class Analyzer(object):
                 if not vals: return dict(pairs)
                 if pairs: raise DAST_SyntaxError("mixed atomic values and key-value pairs inside {...} expression (%s)", token)
                 return set(vals)
+        
+        # # atomic value
+        # decode = Analyzer._value_decoders.get(name[0])
+        # if decode is not None:
+        #     return decode(val)
         
         # closed object
         if name == 'OBJ':
@@ -1214,8 +1243,25 @@ if __name__ == "__main__":
     # test(x for x in range(5))                   # generator object... how to handle?
     test(Class)                                 # user-defined type with custom (inherited) __metaclass__
 
-    print("\ndone")
+    print("Timeit:")
     
     #__main__.Comment(date = datetime "2013-04-20 10:10:10", text = __main__.RichText(content = "Ala ma kota"))
 
-
+    import json
+    from timeit import timeit
+    
+    data = {"title": "Ala ma kota Sierściucha i psa Kłapoucha.", "value": 100000,
+            "struct": [123, 4567854, 98765400, None, list(range(20))],
+            "fulltext": "some text some text some text some text some text some text some text some text",
+            "another_value": 23.046}
+    
+    dump_dast = dast.dump(data, mode=0)
+    dump_json = json.dumps(data)
+    setup = "from __main__ import dump_dast, dump_json, loads, json"
+    
+    for _ in range(100000):
+        loads(dump_dast)
+    
+    # print("DAST load:", timeit('loads(dump_dast)', setup, number = 10000))
+    # print("JSON load:", timeit('json.loads(dump_json)', setup, number = 10000))
+    print("\ndone")
