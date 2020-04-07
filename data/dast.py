@@ -142,7 +142,7 @@ Indented format:
 >>> out1
 'list 1, 2, 3, ["ala", "kot", "pies"], 5, 6\\n'
 
->>> print encode({1:'ala', 2:'kot', 3:['ala',{'i','kot'}, {'jaki':'burek',10:'as'}], 4:None}, mode = 2)
+>>> print(encode({1:'ala', 2:'kot', 3:['ala',{'i','kot'}, {'jaki':'burek',10:'as'}], 4:None}, mode = 2))
 dict:
   1: "ala"
   2: "kot"
@@ -170,8 +170,7 @@ You should have received a copy of the GNU General Public License along with Nif
 
 from __future__ import absolute_import
 import re, numpy as np
-from StringIO import StringIO
-from itertools import izip
+from six import StringIO
 from datetime import datetime, date, time
 from collections import OrderedDict, defaultdict, namedtuple, Iterator
 
@@ -308,7 +307,7 @@ class Analyzer(object):
         try: 
             end = next()
             if end[1] != '\n': raise DAST_SyntaxError("Too many elements in line, expected newline instead of '%s'", end)
-        except StopIteration, e: pass
+        except StopIteration as e: pass
         
         self.linenum += 1
         return (indent, self.isopen) + item
@@ -802,13 +801,13 @@ class Decoder(object):
         "Load next line to the buffer."
         try:
             line = self.input.next()
-        except StopIteration, e:
+        except StopIteration as e:
             self.line = None
             return
-        #print '--', line
+        #print('--', line)
         self.linenum += 1
         self.line = self.parser.parse(line)                 # a tuple: (indent, isopen, ispair, value)
-        #print '++', self.line
+        #print('++', self.line)
 
     def hasnext(self, indent):
         "Check if the buffered line (next to be parsed) exists AND is indented MORE than 'indent' (part of a block with header's indentation of 'indent')."
@@ -907,9 +906,9 @@ def _import(path):
     else:
         mod, name = path.rsplit('.', 1)
     module = __import__(mod, fromlist = [mod])
-    #print mod, name
-    #print module
-    #print module.__dict__
+    #print(mod, name)
+    #print(module)
+    #print(module.__dict__)
     return getattr(module, name)
 
 
@@ -988,7 +987,7 @@ class DAST(object):
         "Decode only the 1st object, ignore the rest. Exception if no object present."
         try:
             return self.decode(input).next()
-        except StopIteration, e:
+        except StopIteration as e:
             raise Exception("No object decoded")
 
     
@@ -1006,7 +1005,7 @@ def encode(obj, **kwargs):  return dast.encode(obj, **kwargs)
 def decode(input):          return dast.decode(input)
 def decode1(input):         return dast.decode1(input)
 
-def printdast(obj, **kwargs): print encode(obj, **kwargs)
+def printdast(obj, **kwargs): print(encode(obj, **kwargs))
 
 
 #####################################################################################################################################################
@@ -1094,7 +1093,7 @@ FLOAT_REPR = repr
 
 if __name__ == "__main__":
     import doctest
-    print doctest.testmod()
+    print(doctest.testmod())
 
     class RichText(Object):
         def __init__(self, text):
@@ -1123,14 +1122,14 @@ if __name__ == "__main__":
     
     def test1(x, verbose = False, **kwargs):
         "Test that consists of encoding 'x' and then decoding back from the resulting code."
-        if verbose: print "input:   ", x
+        if verbose: print("input:   ", x)
         y = encode(x, **kwargs)
         if verbose: 
-            print "encoded: ",
-            if '\n' in y: print
-        print y
+            print("encoded: ",)
+            if '\n' in y: print()
+        print(y)
         z = decode1(y)
-        if verbose: print "decoded: ", z
+        if verbose: print("decoded: ", z)
     
         # for comparing x and z, we first must remove transient attributes if present in x
         trans = getattr(x, '__transient__', [])
@@ -1140,14 +1139,14 @@ if __name__ == "__main__":
         same = (x == z)
         if isinstance(same, np.ndarray): same = np.all(same)
         if verbose: 
-            print "OK" if same else "DIFFERENT"
-            print
+            print("OK" if same else "DIFFERENT")
+            print()
         if not same:
-            print "decoded:", z
+            print("decoded:", z)
             raise Exception("test1, decoded object differs from the original one")
     
     def test(x):
-        print
+        print()
         test1(x, mode=0)
         test1(x, mode=1)
         test1(x, mode=2)
@@ -1178,7 +1177,7 @@ if __name__ == "__main__":
     test(x for x in range(5))                   # generator object... how to handle?
     test(Class)                                 # user-defined type with custom (inherited) __metaclass__
 
-    print "\ndone"
+    print("\ndone")
     
     #__main__.Comment(date = datetime "2013-04-20 10:10:10", text = __main__.RichText(content = "Ala ma kota"))
 
