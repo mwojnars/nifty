@@ -293,6 +293,18 @@ def chain(iterables):
         for item in seq:
             yield item
 
+def partition(test, sequence):
+    """Split `sequence` into 2 lists: (positive,negative), according to the bool value of test(x), order preserved.
+       `test` is either a 1-arg function; or None, which is equivalent to test=bool.
+       `test` is called only ONCE for each element of `sequence`.
+    """
+    pos = []
+    neg = []
+    test = test if test is not None else bool
+    for x in sequence:
+        if test(x): pos.append(x)
+        else: neg.append(x)
+    return pos, neg
 
 #####################################################################################################################################################
 ###
