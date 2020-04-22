@@ -17,6 +17,7 @@ from __future__ import absolute_import
 import re, math
 from collections import defaultdict
 from array import array
+from six.moves import reduce
 
 try:                                                # Python 2
     from HTMLParser import HTMLParser
