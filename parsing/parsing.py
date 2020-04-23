@@ -171,6 +171,7 @@ class Tree(object):
         type = None                         # name of non-terminal that produced this node, [str]   @ReservedAssignment
         display = ""                        # string representation of this node for debugging purposes
         
+        parent = None                       # parent node; None if root
         children = []                       # list of child nodes after rewriting
         
         def __init__(self, tree, astnode): 
@@ -290,6 +291,7 @@ class WaxeyeTree(Tree):
 
     def _rewriteNode(self, waxnode):
         children = [self.rewrite(c) for c in waxnode.children]
+        for child in children: child.parent = self
         return waxnode.pos, waxnode.type, children
     
 
@@ -340,6 +342,7 @@ class ParsimoniousTree(Tree):
     
     def _rewriteNode(self, astnode):
         children = flatten(self.rewrite(c) for c in astnode.children)
+        for child in children: child.parent = self
         return (astnode.start, astnode.end), astnode.expr_name, children        # pos, type, children
     
 
