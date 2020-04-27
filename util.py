@@ -228,13 +228,15 @@ def flatten(*seq):
     >>> flatten([[[1,2,3], (42,None)], [4,5], [6], 7, ('a','string')], (8, 9))
     [1, 2, 3, 42, None, 4, 5, 6, 7, 'a', 'string', 8, 9]
     """
-    result = []
     try:
-        if len(seq) == 1: seq = seq[0]
+        l = len(seq)
+        if l == 0: return []
+        if l == 1: seq = seq[0]
     except: pass
     
+    result = []
     for x in seq:
-        if hasattr(x, "__iter__"): result += flatten(x)
+        if hasattr(x, "__iter__") and not isinstance(x, basestring): result += flatten(x)
         else: result.append(x)
     return result
 
