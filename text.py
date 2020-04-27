@@ -976,6 +976,9 @@ def Plain(text, settings = None): return Text(text, "plain", settings)
 # HTML-specific functionality or configuration defaults (?)
 def HTML(text, settings = None): return Text(text, "HTML", settings)
 
+# like above, for HyML
+def HyML(text, settings = None): return Text(text, "HyML", settings)
+
 
 #########################################################################################################################################################
 
