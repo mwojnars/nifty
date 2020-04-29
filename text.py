@@ -18,12 +18,13 @@ import re, math
 from collections import defaultdict
 from array import array
 from six.moves import reduce
+from six.moves.html_parser import unescape as html_unescape
 
 try:                                                # Python 2
-    from HTMLParser import HTMLParser
+    # from HTMLParser import HTMLParser
     from itertools import imap
 except:                                             # Python 3
-    from six.moves.html_parser import HTMLParser
+    # from six.moves.html_parser import HTMLParser
     imap = map
     basestring = str
     unicode = str
@@ -262,9 +263,9 @@ def findEmails(text, exclude = set(), pat = re.compile(regex.email_nospam, re.IG
 ###  HTML processing
 ###
 
-def html_unescape(s, h = HTMLParser()):
-    "Turn HTML entities (&amp; &#169; ...) into characters. 's' string does NOT have to be a correct HTML, any piece of text can be decoded."
-    return h.unescape(s)
+# def html_unescape(s, h = HTMLParser()):
+#     "Turn HTML entities (&amp; &#169; ...) into characters. 's' string does NOT have to be a correct HTML, any piece of text can be decoded."
+#     return h.unescape(s)
 decode_entities = html_unescape
 
 def html_escape(text):
@@ -766,8 +767,8 @@ class Text(xunicode):
              (tags would be removed), however it might be converted to another rich-text language (wiki-text, YAML, ...),
              possibly with a loss in style information
     - HTML/plain - plain text escaped for inclusion in HTML; contains entities which must be decoded to get 'plain' text again
-    - HyperML/plain - plain text escaped for inclusion in HyperML; contains $* escape strings which must be decoded to get 'plain' text again
-    - HyperML/HTML/plain - plain text encoded for HTML and later escaped for HyperML; you first have to decode HyperML, only then HTML,
+    - HyML/plain - plain text escaped for inclusion in HyML; contains $* escape strings which must be decoded to get 'plain' text again
+    - HyML/HTML/plain - plain text encoded for HTML and later escaped for HyML; you first have to decode HyML, only then HTML,
              only then you will obtain the original string
     - URL/plain - URL-encoded plain text, for inclusion in a URL, typically as a GET parameter
     - URL - full URL of any form
@@ -962,6 +963,33 @@ class Text(xunicode):
     def zfill(self, *a, **kw):
         return Text(unicode.zfill(self, *a, **kw), self.language)
 
+    def html_unescape(self, lang = "HTML"):
+        """
+        Perform UNescaping of HTML entities. If `lang` is given, and self.language is `lang`
+        or starts with lang+'/', this initial component is truncated or language is set to None
+        in the resulting text.
+        """
+        s = unicode(html_unescape(self))
+        language = self.language
+        if not lang: return Text(s, language)
+        if language == lang:
+            language = None
+        elif language.startswith(lang + "/"):
+            language = language[len(lang)+1:]
+        text = Text(s, language)
+        return text
+        
+    def html_escape(self, lang = "HTML"):
+        """
+        Perform escaping of HTML entities. If `lang` is given, it is prepended
+        as the 1st component in the language of resulting text.
+        """
+        s = unicode(html_escape(self))
+        language = self.language
+        if lang:
+            language = lang + '/' + language if language else lang
+        return Text(s, language)
+    
 
 # class Plain(Text):
 #     language = 'plain'
