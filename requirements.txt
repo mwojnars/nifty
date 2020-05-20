@@ -1,6 +1,6 @@
 PyYAML>=4.2b1
 Scrapy==0.16.4
-httplib2==0.7.2
+httplib2==0.18.0
 jsonpickle==0.4.0
 lxml==2.3.2
 matplotlib==1.1.1rc
