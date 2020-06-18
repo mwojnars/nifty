@@ -15,6 +15,7 @@ You should have received a copy of the GNU General Public License along with Nif
 from __future__ import absolute_import
 import os, sys, glob, types as _types, copy, re, numbers, json, time, datetime, calendar, itertools
 import logging, random, math, collections, unicodedata, heapq, threading, inspect, hashlib
+from six import PY2, PY3, class_types, iterkeys, iteritems
 
 try:                                        # Python 2
     import __builtin__ as builtins
@@ -40,7 +41,7 @@ isintegral = isinteger = isint
 def isnumber(x):   return isinstance(x, numbers.Number)
 def isstring(s):   return isinstance(s, basestring)
 def isdict(x):     return isinstance(x, dict)
-def istype(x):     return isinstance(x, type) or isinstance(x, _types.ClassType)        # recognizes old-style classes, too
+def istype(x):     return isinstance(x, class_types)                # recognizes Python2 old-style classes, too
 
 def islist(x, orTuple = True):
     if orTuple: return isinstance(x, (list,tuple))
@@ -316,7 +317,7 @@ def partition(test, sequence):
 def printdict(d, sep = ' = ', indent = ' ', end = '\n'):
     "Human-readable multi-line printout of dictionary key->value items."
     line = indent + '%s' + sep + '%s' + end
-    text = ''.join(line % item for item in d.iteritems())
+    text = ''.join(line % item for item in iteritems(d))
     print(text)
 
 def list2str(l, sep = " ", f = str):
@@ -340,7 +341,7 @@ def obj2dict(obj):
     if hasattr(obj, "__iter__"):
         return [obj2dict(v) for v in obj]
     elif hasattr(obj, "__dict__"):
-        return dict([(k, obj2dict(v)) for k,v in obj.__dict__.iteritems() if not callable(v) and not k.startswith('_')])
+        return dict([(k, obj2dict(v)) for k,v in iteritems(obj.__dict__) if not callable(v) and not k.startswith('_')])
     else:
         return obj
         
@@ -369,21 +370,21 @@ def subdict(d, keys, strict = False, default = False):
     if strict: return dict((k,d[k]) for k in keys)
     if default: return dict((k,d.get(k)) for k in keys)
     if len(keys) <= len(d): return dict((k,d[k]) for k in keys if k in d)
-    return dict(item for item in d.iteritems() if item[0] in keys)
+    return dict(item for item in iteritems(d) if item[0] in keys)
 
 def splitkeys(d):
     """Split multi-name keys of dictionary 'd' and return as a new dictionary. If 'd' contains string keys of the form 'key1 key2 key3 ...' 
     (several keys merged into one string, sharing the same value), they will be split on whitespaces, creating separate keys with the same value assigned. 
     All keys in 'd' must be strings, or exception is raised."""
     d2 = {}
-    for key, val in d.iteritems():
+    for key, val in iteritems(d):
         for k in key.split():
             d2[k] = val
     return d2    
 
 def lowerkeys(d):
     "Copy dictionary 'd' with all keys changed to lowercase. Class of 'd' is preserved (can be other than dict)."
-    return d.__class__((k.lower(), v) for k,v in d.iteritems())
+    return d.__class__((k.lower(), v) for k,v in iteritems(d))
 
 def getattrs(obj, names = None, exclude = "__", default = None, missing = True, usedict = False):
     """
@@ -429,7 +430,7 @@ def setattrs(obj, d, values = None):
         if not islist(values): values = [values] * len(d)
         pairs = zip(d,values)
     else:
-        pairs = d.iteritems()
+        pairs = iteritems(d)
     for k,v in pairs:
         setattr(obj, k, v)
     return obj
@@ -563,7 +564,7 @@ class __Labelled__(type):
         if istype(attrs):                                   # inner class?
             inner = attrs
             vals = getattrs(inner)
-            for name in vals.iterkeys():                    # check that all attrs can be safely copied to top class, without overwriting regular attr
+            for name in iterkeys(vals):                     # check that all attrs can be safely copied to top class, without overwriting regular attr
                 if not name in cls.__dict__: continue 
                 raise Exception("Attribute %s appears twice in %s: as a regular attribute and inside label class %s" %
                                 (name, cls, label))
@@ -678,7 +679,7 @@ class Object(object):
         return self.__dict__ == getattr(other, '__dict__', None)
 #     def __str__(self):
 #         if not self.__verbose__: return object.__str__(self)
-#         items = ["%s = %s" % (k,repr(v)) for k,v in self.__dict__.iteritems()]
+#         items = ["%s = %s" % (k,repr(v)) for k,v in iteritems(self.__dict__)]
 #         return "%s(%s)" % (self.__class__.__name__, ', '.join(items))        #str(self.__dict__)
 #     __repr__ = __str__
     
@@ -706,7 +707,7 @@ class Object(object):
         else:
             def nocopy(k, v): return isgenerator(v)
         
-        for k, v in self.__getstate__().iteritems():
+        for k, v in iteritems(self.__getstate__()):
             setattr(result, k, v if nocopy(k, v) else deepcopy(v, memo))
 
         return result
@@ -848,9 +849,15 @@ def hashmd5(s, n = 4):
     """Stable cross-platform hash function for strings. Will always return the same output for a given input (suitable for DB storage),
     in contrast to the standard hash() function whose implementation varies between platforms and can change in the future. 
     Calculates MD5 digest and returns the first 'n' bytes (2*n hex digits) converted to an unsigned n-byte long integer, 1 <= n <= 16.
-    >>> hashmd5("Ala ma kota", 3), hashmd5("Ala ma kota", 16)
-    (9508390, 192853063964719202713279980030747913607L)
+    >>> hashmd5("Ala ma kota", 3), hashmd5("Ala ma kota", 7)
+    (9508390, 40838224789264552)
+    
+    This function works also for Unicode strings and should return the same value on Python 2 & 3,
+    however on Python 2, doctests cannot handle unicode properly and return a different value during test:
+    > > > hashmd5(u"ąśężźćółńĄŚĘŻŹĆÓŁŃ") == 886848614
+    True
     """
+    s = s.encode('utf-8')
     return int(hashlib.md5(s).hexdigest()[:2*n], 16)
 
 
@@ -1470,7 +1477,7 @@ class Logger2(logging.Logger):
     def _rewrite(self, d, known = ['exc_info','extra']):
         "move unknown (extra) parameters from 'd' level to d['extra'] level"
         extra = {}
-        for k in list(d.iterkeys()):
+        for k in list(iterkeys(d)):
             if k not in known:
                 extra[k] = d[k]
                 del d[k]

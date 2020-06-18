@@ -41,13 +41,19 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public 
 You should have received a copy of the GNU General Public License along with Nifty. If not, see <http://www.gnu.org/licenses/>.
 '''
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
+from six import PY2, PY3, iteritems, iterkeys, with_metaclass
+from six.moves import xrange
 import sys, heapq, math, random, numpy as np, jsonpickle, csv, itertools, threading
 from copy import copy, deepcopy
 from time import time, sleep
-from Queue import Queue
-from itertools import islice, izip
+from six.moves.queue import Queue
+from itertools import islice
 from collections import OrderedDict
+from io import IOBase
+
+if PY3:
+    file = IOBase
 
 # nifty; whenever possible, use relative imports to allow embedding of the library inside higher-level packages;
 # only when executed as a standalone file, for unit tests, do an absolute import
@@ -112,10 +118,10 @@ class Data(object):
         
         if value is not None: self.value = value
         if meta:
-            for k, v in izip(self.__metadata__, meta):
+            for k, v in zip(self.__metadata__, meta):
                 setattr(self, k, v)
         if kwmeta:
-            for k, v in kwmeta.iteritems():
+            for k, v in iteritems(kwmeta):
                 setattr(self, k, v)
     
     def get(self):
@@ -124,7 +130,7 @@ class Data(object):
         """
         keys = self.__metadata__
         if keys is None:
-            keys = [k for k in self.__dict__.iterkeys() if k != 'value'].sort()
+            keys = [k for k in iterkeys(self.__dict__) if k != 'value'].sort()
         return (self.value,) + tuple(getattr(self, k) for k in keys)
     
     def meta(self):
@@ -137,7 +143,7 @@ class Data(object):
     def derived(origin, value):
         "Create a Data item with a new 'value'and all metadata copied from a previous Data item, 'origin'."
         data = Data(value)
-        for meta in origin.__dict__.iterkeys():
+        for meta in iterkeys(origin.__dict__):
             v = getattr(origin, meta)
             setattr(data, meta, v)
         return data
@@ -172,10 +178,10 @@ class DataTuple(object):
 
     def set(self, *args, **kwargs):
         if args:
-            for k, v in izip(self.__attrs__, args):
+            for k, v in zip(self.__attrs__, args):
                 setattr(self, k, v)
         if kwargs:
-            for k, v in kwargs.iteritems():
+            for k, v in iteritems(kwargs):
                 setattr(self, k, v)
 
     def __getitem__(self, pos):
@@ -346,10 +352,10 @@ class __Cell__(__Object__):
         super(__Cell__, cls).__init__(cls, *args)
         cls.label('__knobs__')
         cls.label('__inner__')
-        #print cls, 'knobs:', cls.__knobs__
+        #print(cls, 'knobs:', cls.__knobs__)
 
 
-class Cell(Object):
+class Cell(with_metaclass(__Cell__, Object)):
     """Element of a data processing network. 
     Typically most cells are Pipes and can appear in vertical (pipelines) as well as horizontal (nesting) relationships with other cells.
     Sometimes, there can be cells that are not pipes - they participate only in vertical relationships 
@@ -395,7 +401,7 @@ class Cell(Object):
     You can serialize a cell by calling, for instance: dast.dump(cell, afile).
     
     """
-    __metaclass__ = __Cell__
+    # __metaclass__ = __Cell__
 
     __knobs__  = []         # names of attributes that serve as knobs of a given class; list, string, or class __knobs__: ...
     __inner__ = []
@@ -438,9 +444,9 @@ class Cell(Object):
         if len(args) > len(self.__knobs__): 
             raise Exception("More unnamed arguments than knobs passed to _setUnnamedKnobs() of %s", self)
         knobs = dict(zip(self.__knobs__, args))
-        #print self, knobs
+        #print(self, knobs)
         self.setKnobs(knobs)
-        #print self.__dict__
+        #print(self.__dict__)
         return knobs.keys()
 
     def copy(self, deep = True):
@@ -457,7 +463,7 @@ class Cell(Object):
         (lists/dicts) of pipes/knobs can be modified afterwards without affecting original ones."""
         res = copy(self)
         d = res.__dict__
-        for k, v in d.iteritems():
+        for k, v in iteritems(d):
             d[k] = copy(v)
         return res
         
@@ -480,17 +486,17 @@ class Cell(Object):
         if kwargs:
             knobs = knobs.copy()
             knobs.update(kwargs)
-        #print id(self), self, '...'
-        #print "  setKnobs:", knobs
+        #print(id(self), self, '...')
+        #print("  setKnobs:", knobs)
         for cell in self.inner(): cell.setKnobs(knobs, strict)          # walk the tree of all inner cells first
         if not self.__knobs__ and not strict: return
-        for address, value in knobs.iteritems():
+        for address, value in iteritems(knobs):
             attr = self.findAttr(address)
             if attr is None:
                 if strict: raise Exception("Knob '%s' not present in '%s'" % (name, classname(self, full=True)))
             else:
                 setattr(self, attr, value)
-        #print "  getKnobs:", self.getKnobs()
+        #print("  getKnobs:", self.getKnobs())
     
     def findAttr(self, addr):
         """Find attribute name in 'self' that corresponds to a given knob. None if the knob doesn't belong to self 
@@ -631,7 +637,7 @@ class Pipe(Cell):
             for item in self.iter(): 
                 self.yielded += 1
                 yield item
-        except GeneratorExit, ex:                       # closing the iterator is a legal way to break iteration
+        except GeneratorExit as ex:                       # closing the iterator is a legal way to break iteration
             self._epilog()
             raise
         self._epilog()
@@ -843,10 +849,10 @@ class Transform(_Functional):
                 # if res is not False:
                 #     self.yielded += 1
                 #     yield item if res is None else res
-        except GeneratorExit, ex:
+        except GeneratorExit as ex:
             self._epilog()
             raise
-        #except Exception, ex:
+        #except Exception as ex:
         #    self._sealStackTrace()
         #    raise
         self._epilog()
@@ -879,7 +885,7 @@ class Monitor(_Functional):
 #         """'outfiles' can be: None or '' (=stdout), or a <file>, or a filename, or a list of <file>s or filenames 
 #         (None, '' and 'stdout' allowed). 'stdout', 'stderr', 'stdin' are special names, mapped to sys.* file objects."""
 #         self.outfiles = outfiles if islist(outfiles) else [outfiles]
-#         #print self, self.outfiles
+#         #print(self, self.outfiles)
 #         super(Monitor, self).__init__(*args, **knobs)
 
     def __getstate__(self):
@@ -915,7 +921,7 @@ class Monitor(_Functional):
                 self.yielded += 1           # unlike in Transform, we don't expect any returned result from monitor()
                 yield item                  # however, watch out for bugs: monitor() can implicitly modify internals of 'item' unless 'item' is immutable
         
-        except GeneratorExit, ex:
+        except GeneratorExit as ex:
             self._epilog()
             raise
         self._epilog()
@@ -967,7 +973,7 @@ class Filter(_Functional):
                     self.yielded += 1
                     yield item        # unlike in Transform, we expect only True/False from accept/process(), not an actual data object
         
-        except GeneratorExit, ex:
+        except GeneratorExit as ex:
             self._epilog()
             raise
         self._epilog()
@@ -1009,7 +1015,7 @@ class Generator(_Functional):
                 self.yielded += 1
                 yield item
         
-        except GeneratorExit, ex:
+        except GeneratorExit as ex:
             self._epilog()
             raise
         self._epilog()
@@ -1409,21 +1415,21 @@ class Print(Monitor):
 #         self.func = func
 #         self.index = count
 #         if subset: self.subset = subset
-#         #print "created Print() instance, message '%s'" % self.message
+#         #print("created Print() instance, message '%s'" % self.message)
 
     def monitor(self, item):
-        #print "Print.monitor()", self.subset, self.index
+        #print("Print.monitor()", self.subset, self.index)
         if self.step and self.count % self.step != 0: return
         with self.printlock:
-            if self.index: print >>self.out, self.count,
+            if self.index: print(self.count, file = self.out, end = '')
             self.print1(item)
         
     def print1(self, item):
-        #print "Print.print1()"
-        if self.static: print >>self.out, self.message
+        #print("Print.print1()")
+        if self.static: print(self.message, file = self.out)
         else:
             if self.func is not None: item = self.func(item)
-            print >>self.out, self.message % item
+            print(self.message % item, file = self.out)
 
 def PrintSubset(subset, func = None, count = True, outfile = None, disp = True):
     "A shorthand for Print with 'subset' argument. Differs from Print only in the order of __init__ arguments."
@@ -1475,7 +1481,7 @@ class Progress(Monitor):
     def monitor(self, _):
         if self.count >= self.next:
             with self.printlock:
-                print self.message % (self.count * 100. / self.total)
+                print(self.message % (self.count * 100. / self.total))
             self.next = self.count + self.step
     
 class Total(Monitor):
@@ -1489,7 +1495,7 @@ class Total(Monitor):
         except: self.msgTotal += " %d"                   # append format character if missing
     def monitor(self, item): pass
     def close(self):
-        with self.printlock: print self.msgTotal % self.count
+        with self.printlock: print(self.msgTotal % self.count)
 
 class Time(Monitor):
     "Measure time since the beginning of data iteration. If 'message' is present, print the total time at the end, embedded in 'message'."
@@ -1506,7 +1512,7 @@ class Time(Monitor):
     def close(self):
         self.elapsed = self.current()
         if self.msgTime: 
-            with self.printlock: print self.msgTime % self.elapsed
+            with self.printlock: print(self.msgTime % self.elapsed)
     
 class Report(Total, Time):
     "'Total' and 'Time' combined."
@@ -1517,9 +1523,9 @@ class Report(Total, Time):
     def close(self):
         self.elapsed = self.current()
         with self.printlock:
-            if self.header: print self.header
-            if self.msgTotal: print self.msgTotal % self.count
-            if self.msgTime: print self.msgTime % self.elapsed
+            if self.header: print(self.header)
+            if self.msgTotal: print(self.msgTotal % self.count)
+            if self.msgTime: print(self.msgTime % self.elapsed)
 
 
 class Metric(Monitor):
@@ -1595,9 +1601,9 @@ class Mean(Metric):
         if self.size:
             mean = _s(self.mean(), "%.4f")
             dev = _s(self.deviation(), "%.2f")
-            print >>self.out, header + "%s +%s /%d" % (mean, dev, self.size)
+            print(header + "%s +%s /%d" % (mean, dev, self.size), file = self.out)
         else:
-            print >>self.out, header + "None +None /%s" % self.size
+            print(header + "None +None /%s" % self.size, file = self.out)
     
 
 # class Experiment(Monitor):
@@ -1780,7 +1786,7 @@ class Pipeline(Pipe):
 #             try:
 #                 if hasattr(pipe, 'setKnobs'): pipe.setKnobs(*self.knobs)
 #             except:
-#                 print pipe
+#                 print(pipe)
 #                 raise
 
     def setup(self):
@@ -1873,7 +1879,7 @@ class Mix(MultiSource):
             self.probs = np.array(self.probs) / float(sum(self.probs))      # normalize probabilities to unit sum
 
     def iter(self):
-        iters = map(iter, self.sources)
+        iters = list(map(iter, self.sources))
         if self.probs is not None:
             iters = np.array(iters, dtype = object)                         # convert list to numpy array for numpy's RandomState.choice()
 
@@ -1881,11 +1887,11 @@ class Mix(MultiSource):
             if self.probs is None:
                 while True:
                     src = self.rand.choice(iters)
-                    yield src.next()
+                    yield next(src)
             else:
                 while True:
                     src = self.rand.choice(iters, p = self.probs)           # numpy's RandomState accepts probability distribution
-                    yield src.next()
+                    yield next(src)
             
         except StopIteration:
             pass
@@ -1994,7 +2000,7 @@ class Wrapper(MetaPipe):
 #             try:
 #                 if hasattr(pipe, 'setKnobs'): pipe.setKnobs(knobs, strict)
 #             except:
-#                 print pipe
+#                 print(pipe)
 #                 raise
 
 
@@ -2078,7 +2084,7 @@ class Grid(MetaOptimize):
         return; yield                                       # to make this method work as a generator (only an empty one)
         
     def iterSerial(self):
-        with self.printlock: print "Grid: %d serial runs to be executed..." % self.runs
+        with self.printlock: print("Grid: %d serial runs to be executed..." % self.runs)
         #for i, value in enumerate(self.space):
         #    knobs = self.createKnobs(self.startID + i, value)
         for knobs in self.knobspace():
@@ -2090,7 +2096,7 @@ class Grid(MetaOptimize):
         No parallelism, no multi-threading, no pipe copying.
         The same pipe object is reused in all runs - watch out against interference between consecutive runs.
         """
-        with self.printlock: print "Grid, starting next serial scan for run ID=%s..." % knobs[self.runID]
+        with self.printlock: print("Grid, starting next serial scan for run ID=%s..." % knobs[self.runID])
         self.printKnobs(knobs)
         pipe = self.pipe.copy() if self.copyPipe else self.pipe
         pipe.setKnobs(knobs)
@@ -2101,7 +2107,7 @@ class Grid(MetaOptimize):
     
     def iterParallel(self):
         scans = util.divup(self.runs, self.maxThreads) if self.maxThreads else 1
-        with self.printlock: print "Grid: %d runs to be executed, in %d scan(s) over input data..." % (self.runs, scans)
+        with self.printlock: print("Grid: %d runs to be executed, in %d scan(s) over input data..." % (self.runs, scans))
         
 #         def knobsStream():
 #             "Generates knob combinations. Every combination is a list of (name,value) pairs, one pair for each knob."
@@ -2129,7 +2135,7 @@ class Grid(MetaOptimize):
 
     def scanParallel(self, knobsGroup):
         "Single scan over input data, with each item fed to a group of parallel threads."
-        with self.printlock: print "Grid, starting next parallel scan for %d runs beginning with ID=%s..." % (len(knobsGroup), knobsGroup[0]['runID'])
+        with self.printlock: print("Grid, starting next parallel scan for %d runs beginning with ID=%s..." % (len(knobsGroup), knobsGroup[0]['runID']))
         threads = self.createThreads(knobsGroup)
         duplicate = deepcopy if self.copyData else lambda x:x
 
@@ -2158,7 +2164,7 @@ class Grid(MetaOptimize):
         for _, thread in threads:           # if verbose, print stats of #items 
             self.report(thread.pipe)
         
-        with self.printlock: print "Grid, %d runs done." % (self.done + len(threads))
+        with self.printlock: print("Grid, %d runs done." % (self.done + len(threads)))
         for knobs, thread in threads:
             self.printKnobs(knobs)
             thread.end()
@@ -2166,12 +2172,12 @@ class Grid(MetaOptimize):
 
     def report(self, pipe):
         if not self.verbose: return
-        with self.printlock: print pipe.stats()
+        with self.printlock: print(pipe.stats())
         
     def printKnobs(self, knobs):
         with self.printlock:
-            print "----------------------------------------------------------------"
-            print ' '.join("%s=%s" % knob for knob in knobs.iteritems())        # space-separated list of knob values
+            print("----------------------------------------------------------------")
+            print(' '.join("%s=%s" % knob for knob in iteritems(knobs)))        # space-separated list of knob values
     
 
 class Evolution(MetaOptimize):
@@ -2250,7 +2256,7 @@ class Controller(Wrapper):
         return self.get()
 
     def put(self, item): self.feed.set(item)
-    def get(self): return self.iterator.next()
+    def get(self): return next(self.iterator)
 
     def __getitem__(self, pos):
         "Delegates self[] to self.pipe[] - useful when 'pipe' is a pipeline, to access individual pipes directly via self[i]"
@@ -2269,11 +2275,11 @@ def operator(pipe):
 
     >>> pipeline = Function(lambda x: 2*x) >> Function(lambda x: str(x).upper())
     >>> fun = operator(pipeline)
-    >>> print fun(3)
+    >>> print(fun(3))
     6
-    >>> print fun(['Ala'])
+    >>> print(fun(['Ala']))
     ['ALA', 'ALA']
-    >>> print fun.pipe[0]
+    >>> print(fun.pipe[0])
     Function <lambda>
 
     Typically the pipe is an instance of Transform. Even if not, it still must pull exactly 1 item at a time
@@ -2381,17 +2387,17 @@ def _normalize(pipes):
         if isfunction(h): return Function(h)
         if istuple(h): return Tuple(*h)
         if (iscontainer(h) or isgenerator(h)): return Collection(h)
-        if isinstance(h, (file, GenericFile, Tee)): return File(h)
+        if isinstance(h, (file, IOBase, GenericFile, Tee)): return File(h)
         if isstring(h): return None                             # strings can be inserted in a pipeline; treated as comments (ignored)
         return h
     
-    return filter(None, map(convert, enumerate(pipes)))
+    return list(filter(None, map(convert, enumerate(pipes))))
 
 
 #####################################################################################################################################################
 
 if __name__ == "__main__":
     import doctest
-    print doctest.testmod()
+    print(doctest.testmod())
 
     
