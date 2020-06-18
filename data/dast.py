@@ -172,8 +172,12 @@ import re, codecs, numpy as np
 from six import StringIO, PY2, PY3
 from datetime import datetime, date, time
 from collections import OrderedDict, defaultdict, namedtuple
-from collections.abc import Iterator
-from numba import jit
+# from numba import jit
+
+if PY2:
+    from collections import Iterator
+else:
+    from collections.abc import Iterator
 
 # nifty; whenever possible, use relative imports to allow embedding of the library inside higher-level packages;
 # only when executed as a standalone file, for unit tests, do an absolute import
