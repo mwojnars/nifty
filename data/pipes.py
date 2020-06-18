@@ -1087,10 +1087,12 @@ class Function(Transform):
         if ret is None: return item         # for monitor- or transform-like functions that don't make final 'return item'
         return ret
     def __str__(self):
-        if self.oper and hasattr(self.oper, 'func_name'):
-            return "%s %s" % (classname(self), self.oper.func_name)
-        return classname(self)
-
+        ret = classname(self)
+        if not self.oper: return ret
+        name = getattr(self.oper, '__name__', '') or getattr(self.oper, 'func_name', '')
+        if name: ret += ' ' + name
+        return ret
+    
 
 class Tuple(Function):
     """Creates a function-pipe g(x) that applies predefined functions, fun[0], fun[1], ...
