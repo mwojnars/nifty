@@ -129,19 +129,19 @@ def asobject(name, context = {}, default = RAISE):
     return default
     
 
-def runCommand(context = {}, params = None, fun = None):
+def runCommand(context = {}, params = None, fun = None, offset = 1):
     """
-    Takes from 'sys' all command-line arguments passed to the script and interprets them as a name
-    of a callable (function) from 'context' (module or dict, typically globals() of the caller), 
-    and possibly its parameters; finds the function, executes with given parameters (passed as unnamed strings) 
-    and returns its result. If the command is not present in 'context' and there are no parameters,
-    pass it to eval(), which is more general and can execute an arbitrary expression, not only a global-scope function. 
-    If 'params' list is present, use it as arguments instead of sys.argv[1:]; strings with '=' sign treated as keyword args. 
-    Note: the called function should convert internally the parameters from a string to a proper type and 
+    Take from 'sys' all command-line arguments (starting at #offset) passed to the script and interpret them as a name
+    of a callable (function) from 'context' (module or dict, typically globals() of the caller),
+    and possibly its parameters; find the function, execute with given parameters (passed as unnamed strings)
+    and return its result. If the command is not present in 'context' and there are no parameters,
+    pass it to eval(), which is more general and can execute an arbitrary expression, not only a global-scope function.
+    If 'params' list is present, use it as arguments instead of sys.argv[offset:]; strings with '=' sign treated as keyword args.
+    Note: the called function should convert internally the parameters from a string to a proper type and
     this conversion is done in a local context of the function, so it may be hard to pass variables as parameters.
     """
     if not isdict(context): context = {atr: getattr(context, atr) for atr in dir(context)}
-    if params is None: params = sys.argv[1:]                        # argv[0] is the script name, omit
+    if params is None: params = sys.argv[offset:]                        # argv[0] is the script name, omit
     
     # set function 'fun' if possible; retrieve command string 'cmd' from 'params' if needed
     cmd = None
