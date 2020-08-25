@@ -54,7 +54,7 @@ def isiterable(x):
     "True if x is *any* iterable: list, tuple, dict, set, string (!), any object with __iter__ or __getitem__ method."
     return isinstance(x, collections.Iterable) #and not isinstance(x, basestring)
 def isregex(x):
-    return isinstance(x, re._pattern_type)
+    return x is not None and (isinstance(x, getattr(re, '_pattern_type', type(None))) or isinstance(x, getattr(re, 'Pattern', type(None))))
 # def isarray(x) - defined in 'math' module
 
 def isfunction(x, funtypes = (_types.FunctionType, _types.BuiltinFunctionType, _types.MethodType, _types.BuiltinMethodType, getattr(_types, 'UnboundMethodType',_types.MethodType))):
