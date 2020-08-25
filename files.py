@@ -17,8 +17,7 @@ import os, shutil, jsonpickle
 from copy import deepcopy
 from itertools import count
 
-from util import classname, fileexists, filesize
-from data.dast import DAST
+from nifty.util import classname, fileexists, filesize
 
 
 #####################################################################################################################################################
@@ -124,7 +123,7 @@ class GenericFile(object):
         try:
             it = self._read()
             for x in it: yield x
-        except GeneratorExit, ex:                       # closing the iterator is a legal way to break the iteration
+        except GeneratorExit as ex:                       # closing the iterator is a legal way to break the iteration
             self._epilog()
             raise
         self._epilog()
@@ -158,7 +157,7 @@ class GenericFile(object):
             while size > 0:
                 res.append(self._iterator.next())
                 size -= 1
-        except StopIteration, e:
+        except StopIteration as e:
             if not res: raise
         return res
         
@@ -364,6 +363,8 @@ class JsonFile(ObjectFile):
 class DastFile(ObjectFile):
     def __init__(self, filename, mode = 'r', cls = File, flush = 0, emptylines = 0, **dastArgs):
         super(DastFile, self).__init__(filename, cls, flush, emptylines, mode = mode)
+
+        from nifty.data.dast import DAST
         self.dast = DAST(**dastArgs)
 
     def _write(self, item):
@@ -425,7 +426,7 @@ class PagedFile(GenericFile):
             first = False
         try:
             filename = self.pattern % self.pages.next()
-        except StopIteration, e:
+        except StopIteration as e:
             return self.openLast()                                      # no more pages? try once again with the 'last' name
             
 #         if self.infinite and self.last and not self.basespace.exists(filename): 
@@ -435,7 +436,7 @@ class PagedFile(GenericFile):
             self.filename = filename
             #print "=====  PAGE %s  =====" % self.page
             return True
-        except IOError, e:
+        except IOError as e:
             if self.openLast(): return True                             # try once again with the 'last' name
             if self.filename is None: raise                             # didn't manage to open ANY file yet? 'self' file doesn't exist, re-raise
             return False
@@ -450,7 +451,7 @@ class PagedFile(GenericFile):
             self.file = self.basespace.open(filename, mode = self.mode)
             self.filename = filename
             return True
-        except IOError, e:
+        except IOError as e:
             return False
 
 #####################################################################################################################################################

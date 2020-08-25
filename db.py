@@ -12,10 +12,6 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public 
 You should have received a copy of the GNU General Public License along with Nifty. If not, see <http://www.gnu.org/licenses/>.
 """
 
-import sqlite3
-import psycopg2
-
-
 #####################################################################################################################################################
 #####
 #####  DB - BASE CLASS
@@ -37,6 +33,10 @@ class DB(object):
         self.db = self.connect(*args, **kwargs)
     
     def connect(self, *args, **kwargs):
+        
+        raise NotImplementedError
+        
+    def cursor(self, *args, **kwargs):
         
         raise NotImplementedError
         
@@ -72,6 +72,7 @@ class DB(object):
 
 
     def select_one(self, query, args = []):
+        """Returns first row from a given query."""
 
         cur = self.db.cursor()
         cur.execute(query, args)
@@ -133,7 +134,7 @@ class DB(object):
         placeholders = '(%s)' % ','.join([self.PLACEHOLDER] * len(values))
 
         query = "INSERT INTO %s %s VALUES %s" % (table, attrs_list, placeholders)
-
+        
         self.execute(query, values)
         
 
@@ -190,12 +191,34 @@ class DB(object):
 #####  SQLite3
 #####
 
-class SQLite3(DB):
+class MySQL(DB):
 
+    PLACEHOLDER = '%s'
+
+    def connect(self, *args, **kwargs):
+
+        import pymysql as mysql
+        # import MySQLdb as mysql
+    
+        return mysql.connect(*args, **kwargs)
+
+    def cursor(self, *args, **kwargs):
+
+        return self.db.cursor()
+    
+
+#####################################################################################################################################################
+#####
+#####  SQLite3
+#####
+
+class SQLite3(DB):
+    
     PLACEHOLDER = '?'
 
     def connect(self, *args, **kwargs):
-        
+
+        import sqlite3
         return sqlite3.connect(*args, **kwargs)
     
     
@@ -221,7 +244,8 @@ class PostgreSQL(DB):
     PLACEHOLDER = '%s'
     
     def connect(self, *args, **kwargs):
-        
+
+        import psycopg2
         return psycopg2.connect(*args, **kwargs)
     
     

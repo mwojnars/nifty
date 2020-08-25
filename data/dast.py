@@ -142,18 +142,17 @@ Indented format:
 >>> out1
 'list 1, 2, 3, ["ala", "kot", "pies"], 5, 6\\n'
 
->>> print encode({1:'ala', 2:'kot', 3:['ala',{'i','kot'}, {'jaki':'burek',10:'as'}], 4:None}, mode = 2)
+>>> print(encode({1:'ala', 2:'kot', 3:['ala',{'i kot'}, {'jaki':'burek',10:'as'}], 4:None}, mode = 2))
 dict:
   1: "ala"
   2: "kot"
   3: list:
     "ala"
     set:
-      "i"
-      "kot"
+      "i kot"
     dict:
-      10: "as"
       "jaki": "burek"
+      10: "as"
   4: ~
 
 
@@ -169,11 +168,16 @@ You should have received a copy of the GNU General Public License along with Nif
 
 
 from __future__ import absolute_import
-import re, numpy as np
-from StringIO import StringIO
-from itertools import izip
+import re, codecs, numpy as np
+from six import StringIO, PY2, PY3
 from datetime import datetime, date, time
-from collections import OrderedDict, defaultdict, namedtuple, Iterator
+from collections import OrderedDict, defaultdict, namedtuple
+# from numba import jit
+
+if PY2:
+    from collections import Iterator
+else:
+    from collections.abc import Iterator
 
 # nifty; whenever possible, use relative imports to allow embedding of the library inside higher-level packages;
 # only when executed as a standalone file, for unit tests, do an absolute import
@@ -214,14 +218,14 @@ class Tokenizer(object):
 
     # Tokens and their corresponding regexes...
     
-    _noalpha = r'(%s)(?!\w)'                    # checks that no alpha-numeric character follows after the match (expected whitespace or special)
+    _noalpha = r'(?:%s)(?!\w)'                    # checks that no alpha-numeric character follows after the match (expected whitespace or special)
     tokens = [
         # all special chars: newline, parentheses, separators
         ('SPEC' , r'[\n\(\)\[\]\{\}:,=]'),
         
         # atomic values
+        ('INT'  ,  _noalpha % r'[+-]?\d+(?!\.)'),
         ('FLOAT',  _noalpha % (regex.float + r'|([+-]?[iI]nf)|NaN|nan')),       # any floating-point number, or Inf, or NaN
-        ('INT'  ,  _noalpha % regex.int),
         ('STR'  ,  regex.escaped_string),
         ('UNI'  ,  r'[uU]' + regex.escaped_string),                             # unicode string
         ('NONE' ,  _noalpha % r'None|null|~|-'),
@@ -233,12 +237,12 @@ class Tokenizer(object):
         ('OBJ',  r"[\w\.]+(?=\()"),        # closed object: identifier followed immediately by '('. Space before ( interpreted as open obj with a tuple arg (!)
         ('OPEN', r"[\w\.]+"),              # open object
     ]
-        
+    
+    # combined regex: detects a subsequent token of any type
     regex = '|'.join([r'(?P<%s>%s)' % pair for pair in tokens])
     regex = r'[ \t\v]*(?:%s)' % regex             # every token can have a leading whitespace
     regex = re.compile(regex)
 
-    
     @staticmethod
     def tokenize(text, line = 1, getindent = re.compile(r'[ \t]*').match, gettoken = regex.match):
         "'text' should be a single line, \n-terminated. 'line' is the current line number, counted from 1."
@@ -250,6 +254,8 @@ class Tokenizer(object):
         pos = match.end()
         yield 'INDENT', value, line, column
 
+        # for quadruple in _tokenize(text, line, pos): yield quadruple
+        
         match = gettoken(text, pos)
         while match is not None:
             token = match.lastgroup
@@ -263,7 +269,7 @@ class Tokenizer(object):
             #    line += 1
             #    indent, pos = matchIndent()                 # match and yield indentation at the beginning of the next line
             #    yield indent
-            
+
             match = gettoken(text, pos)
         
         if pos != len(text):
@@ -274,6 +280,19 @@ class Tokenizer(object):
         #yield Token('EOL', '\n', line, pos + 1)     
         yield ('EOL', '\n', line, pos + 1)          # superflous \n at the end to allow arbitrary consumption (or not) of trailing \n (the true one may be consumed by tokenizer)
 
+# @jit
+# def _tokenize(text: str, line: str, pos: int):
+#     # gettoken = Tokenizer.regex.match
+#     match = Tokenizer.regex.match(text, pos)
+#     while match is not None:
+#         token = match.lastgroup
+#         value = match.group(token)
+#         column = match.start() + 1
+#         pos = match.end()
+#         yield token, value, line, column
+#
+#         match = Tokenizer.regex.match(text, pos)
+    
 
 class Analyzer(object):
     "General concept based on: http://effbot.org/zone/simple-iterator-parser.htm"
@@ -281,19 +300,33 @@ class Analyzer(object):
     def IncorrectKey(self, token): return DAST_SyntaxError("Incorrect type of key '%s' in key=value pair, only identifiers allowed,", token)
     
     EMPTY = object()            # output token that indicates an empty line, without any objects
+
+    # for unescaping \x characters in encoded input string
+    ESCAPE_SEQUENCE_RE = re.compile(r'''
+        ( \\U........      # 8-digit hex escapes
+        | \\u....          # 4-digit hex escapes
+        | \\x..            # 2-digit hex escapes
+        | \\[0-7]{1,3}     # Octal escapes
+        | \\N\{[^}]+\}     # Unicode characters by name
+        | \\[\\'"abfnrtv]  # Single-character escapes
+        )''', re.UNICODE | re.VERBOSE)
+
+
+    def decode_escapes(s):
+        def decode_match(match):
+            return codecs.decode(match.group(0), 'unicode-escape')
     
+        return ESCAPE_SEQUENCE_RE.sub(decode_match, s)
     def __init__(self, decode):
         self.decode = decode
         self.linenum = 1        # current line number, for error messages
-        
-    # TODO: turn off assertions to speed up
         
     def parse(self, line, tokenize = Tokenizer.tokenize):
         """Parses the next line (input string must be a single line, \n-terminated). Returns a tuple: (indent, isopen, ispair, value),
         where 'value' is the final fully decoded object, except for the case when the line is open, 
         then 'value' is an intermediate tuple (typename, args, kwargs) to be extended with data from subsequent lines and then instantiated.
         """
-        self.next = next = tokenize(line, self.linenum).next
+        self.next = next = tokenize(line, self.linenum).__next__
         self.isopen = False
         
         indent = next()
@@ -305,10 +338,10 @@ class Analyzer(object):
         item = self.lineitem(next())
         
         # try reading the terminating \n, sometimes it remains in the input stream despite the item being parsed
-        try: 
+        try:
             end = next()
             if end[1] != '\n': raise DAST_SyntaxError("Too many elements in line, expected newline instead of '%s'", end)
-        except StopIteration, e: pass
+        except StopIteration as e: pass
         
         self.linenum += 1
         return (indent, self.isopen) + item
@@ -324,27 +357,53 @@ class Analyzer(object):
         val2 = self.value(self.next())
         return True, (val1, val2)
     
+    if PY2:
+        @staticmethod
+        def _unescape(text, utf8):
+            s = text.decode("string-escape")
+            if utf8: return s.decode("utf-8")
+            return s
+    else:
+        @staticmethod
+        def _decode_match(match):
+            return codecs.decode(match.group(0), 'unicode-escape')
+        @staticmethod
+        def _unescape(text, utf8):
+            return Analyzer.ESCAPE_SEQUENCE_RE.sub(Analyzer._decode_match, text)
+            
+    # _value_decoders = {
+    #     'S': (lambda val: Analyzer._unescape(val[1:-1], False)),
+    #     'U': (lambda val: Analyzer._unescape(val[2:-1], True)),
+    #     'I': (lambda val: int(val, 0)),
+    #     'F': (lambda val: float(val)),
+    #     'K': (lambda val: val),
+    #     'N': (lambda val: None),
+    #     'B': (lambda val: val[0] in 'tT'),
+    # }
+    
     def value(self, token):
         "Parses an object (atomic or composite value, but NOT a pair) that starts with 'token' at the current position."
         name, val = token[:2]
-        n = name[0]
         
         # atomic value
+        n = name[0]
         if n in 'SUIFKNB':
-            if n == 'S' and name == 'STR':
-                return val[1:-1].decode("string-escape")
-            if n == 'U' and name == 'UNI':
-                return val[2:-1].decode("string-escape").decode("utf-8")
-            if n == 'I' and name == 'INT':
+            if name == 'STR':
+                return Analyzer._unescape(val[1:-1], False)
+                # return val[1:-1].decode("string-escape")
+            if name == 'INT':
                 return int(val, 0)
-            if n == 'F' and name == 'FLOAT':
+            if name == 'FLOAT':
                 return float(val)
-            if n == 'K' and name == 'KEY':
+            if name == 'KEY':
                 return val
-            if n == 'N' and name == 'NONE':
+            if name == 'NONE':
                 return None
-            if n == 'B' and name == 'BOOL':
+            if name == 'BOOL':
                 return val[0] in 'tT'
+            if name == 'UNI':
+                return Analyzer._unescape(val[2:-1], True)
+                # return val[2:-1].decode("string-escape").decode("utf-8")
         
         # collection
         if val in '([{':
@@ -360,6 +419,11 @@ class Analyzer(object):
                 if not vals: return dict(pairs)
                 if pairs: raise DAST_SyntaxError("mixed atomic values and key-value pairs inside {...} expression (%s)", token)
                 return set(vals)
+        
+        # # atomic value
+        # decode = Analyzer._value_decoders.get(name[0])
+        # if decode is not None:
+        #     return decode(val)
         
         # closed object
         if name == 'OBJ':
@@ -488,8 +552,8 @@ class Encoder(object):
 
     def _str(self, s, mode, level, asunicode = False):
         if asunicode:
-			self._write('u')														# prefix for unicode strings
-			s = s.encode("utf-8")
+            self._write('u')											# prefix for unicode strings
+            s = s.encode("utf-8")
         if mode == 0: self._write('"' + encode_basestring(s) + '"')
         else:
             s = encode_basestring(s) #encode_basestring_multiline(s)
@@ -497,8 +561,8 @@ class Encoder(object):
             self._write('"' + s + '"')
     
     def _unicode(self, *args):
-		self._str(*args, asunicode = True)
-    
+        self._str(*args, asunicode = True)
+
     def _type(self, t, m, l):
         name = t.__module__ + "." + t.__name__
         self._generic_object(m, l, "type", args0 = (name,))
@@ -592,6 +656,7 @@ class Encoder(object):
             
             trans = getattr(x, "__transient__", None)           # remove attributes declared as transient
             if trans:
+                assert isinstance(trans, list)
                 state = state.copy()
                 for attr in trans: state.pop(attr, None)
         
@@ -652,7 +717,7 @@ class Encoder(object):
         "Encode list of pairs given as a dictionary 'd', in mode 0, without boundaries: k1:v1, k2:v2, ..."
         lsep, dsep = self.listsep, self.dictsep
         first = True
-        for k, v in d.iteritems():
+        for k, v in d.items():
             if not first: self._write(lsep)
             self._encode(k)
             self._write(dsep)
@@ -666,7 +731,7 @@ class Encoder(object):
         """
         sep = self.dictsep
         indent = self.indent * level
-        for key, val in d.iteritems():
+        for key, val in d.items():
             self._write('\n' + indent)
             self._encode(key)
             self._write(sep)
@@ -678,7 +743,7 @@ class Encoder(object):
         if not d: return
         lsep, dsep = self.listsep, self.keysep0
         first = True
-        for k, v in d.iteritems():
+        for k, v in d.items():
             if not first: self._write(lsep)
             self._write(k)
             self._write(dsep)
@@ -691,7 +756,7 @@ class Encoder(object):
         if not d: return
         sep = self.keysep2
         indent = self.indent * level
-        for key, val in d.iteritems():
+        for key, val in d.items():
             self._write('\n' + indent)
             self._write(key)
             self._write(sep)
@@ -726,14 +791,20 @@ class Encoder(object):
 
 
     # encoders for standard types
-    encoders = { int:_int, long:_int, float:_float, bool:_bool, str:_str, unicode:_unicode, type(None):_none, 
+    encoders = { int:_int, float:_float, bool:_bool, str:_str, type(None):_none,
                  datetime:_datetime, date:_date, time:_time,
                  type:_type, list:_list, tuple:_tuple, set:_set, 
                  dict:_dict, OrderedDict:_dict, defaultdict:_defaultdict,
                  np.float16:_float, np.float32:_float, np.float64:_float, getattr(np, 'float128', np.float):_float,
                  np.ndarray:_array,
                 }
-
+    
+    # Python 2 types:
+    try:
+        encoders[long] = _int
+        encoders[unicode] = _unicode
+    except:
+        pass
 
 ########################################################################################################################################################
 ###
@@ -780,7 +851,7 @@ class Decoder(object):
         
         # replace names of classes/functions, present as values in 'decoders', with actual class/func objects;
         # rewrite values in 'decoders' to include info whether it's a class or just a function
-        for name, dec in decs.iteritems():
+        for name, dec in decs.items():
             if isstring(dec): decs[name] = dec = _import(dec)
             isclass = isinstance(dec, type)
             decs[name] = (dec, isclass)                     # now every value in 'decoders' is a pair: (decoder, isclass)
@@ -801,14 +872,14 @@ class Decoder(object):
     def move(self):
         "Load next line to the buffer."
         try:
-            line = self.input.next()
-        except StopIteration, e:
+            line = next(self.input)
+        except StopIteration as e:
             self.line = None
             return
-        #print '--', line
+        #print('--', line)
         self.linenum += 1
         self.line = self.parser.parse(line)                 # a tuple: (indent, isopen, ispair, value)
-        #print '++', self.line
+        #print('++', self.line)
 
     def hasnext(self, indent):
         "Check if the buffered line (next to be parsed) exists AND is indented MORE than 'indent' (part of a block with header's indentation of 'indent')."
@@ -898,8 +969,6 @@ def _import(path):
 
     >>> _import('nifty.util.Object')
     <class 'nifty.util.Object'>
-    >>> _import('__builtin__.int')()
-    0
     """
     if '.' not in path:
         mod, name = '__main__', path
@@ -907,9 +976,9 @@ def _import(path):
     else:
         mod, name = path.rsplit('.', 1)
     module = __import__(mod, fromlist = [mod])
-    #print mod, name
-    #print module
-    #print module.__dict__
+    #print(mod, name)
+    #print(module)
+    #print(module.__dict__)
     return getattr(module, name)
 
 
@@ -987,8 +1056,8 @@ class DAST(object):
     def decode1(self, input):
         "Decode only the 1st object, ignore the rest. Exception if no object present."
         try:
-            return self.decode(input).next()
-        except StopIteration, e:
+            return next(self.decode(input))
+        except StopIteration as e:
             raise Exception("No object decoded")
 
     
@@ -1001,12 +1070,13 @@ dast = DAST()
 
 def dump(obj, **kwargs):  return dast.dump(obj, **kwargs)
 def load(input):          return dast.load(input)
+def loads(input):         return dast.decode1(input)
 
 def encode(obj, **kwargs):  return dast.encode(obj, **kwargs)
 def decode(input):          return dast.decode(input)
 def decode1(input):         return dast.decode1(input)
 
-def printdast(obj, **kwargs): print encode(obj, **kwargs)
+def printdast(obj, **kwargs): print(encode(obj, **kwargs))
 
 
 #####################################################################################################################################################
@@ -1093,8 +1163,8 @@ FLOAT_REPR = repr
 #####################################################################################################################################################
 
 if __name__ == "__main__":
-    import doctest
-    print doctest.testmod()
+    # import doctest
+    # print(doctest.testmod())
 
     class RichText(Object):
         def __init__(self, text):
@@ -1107,7 +1177,7 @@ if __name__ == "__main__":
             self.date = dt
             
     class User(Object):
-        __transient__ = "generator"
+        __transient__ = ["generator"]
         def __init__(self):
             comm1 = Comment("Ala ma kota", datetime(2013,1,20,10,10,10))
             comm2 = Comment("Ala ma kota", datetime(2013,2,20,10,10,10))
@@ -1121,16 +1191,16 @@ if __name__ == "__main__":
     Point = namedtuple("Point", "x y") 
     
     
-    def test1(x, verbose = False, **kwargs):
+    def test1(x, verbose = True, **kwargs):
         "Test that consists of encoding 'x' and then decoding back from the resulting code."
-        if verbose: print "input:   ", x
+        if verbose: print("input:   ", x)
         y = encode(x, **kwargs)
         if verbose: 
-            print "encoded: ",
-            if '\n' in y: print
-        print y
+            print("encoded: ",)
+            if '\n' in y: print()
+        print(y)
         z = decode1(y)
-        if verbose: print "decoded: ", z
+        if verbose: print("decoded: ", z)
     
         # for comparing x and z, we first must remove transient attributes if present in x
         trans = getattr(x, '__transient__', [])
@@ -1140,14 +1210,14 @@ if __name__ == "__main__":
         same = (x == z)
         if isinstance(same, np.ndarray): same = np.all(same)
         if verbose: 
-            print "OK" if same else "DIFFERENT"
-            print
+            print("OK" if same else "DIFFERENT")
+            print()
         if not same:
-            print "decoded:", z
+            print("decoded:", z)
             raise Exception("test1, decoded object differs from the original one")
     
     def test(x):
-        print
+        print()
         test1(x, mode=0)
         test1(x, mode=1)
         test1(x, mode=2)
@@ -1160,7 +1230,6 @@ if __name__ == "__main__":
 
 
     ### testing...
-    
     test("ala ma kota")
     test(u"żźąłćę “ĄŻÓĘŁ“ 'SuÁrez'")
     test([True, 8.23, "x y z \n abc"])
@@ -1172,14 +1241,31 @@ if __name__ == "__main__":
     test(np.array([[]]))
     test(np.array([[3, 4], [2, 1], [8, 9]]))
     test([int, float, dict, defaultdict])       # standard types
-    test(Point(2,3))                            # instance of <namedtuple>
+    # test(Point(2,3))                            # instance of <namedtuple>
     test(defaultdict(int, {3:'x', 'ala ma':'kota'}))
 
-    test(x for x in range(5))                   # generator object... how to handle?
+    # test(x for x in range(5))                   # generator object... how to handle?
     test(Class)                                 # user-defined type with custom (inherited) __metaclass__
 
-    print "\ndone"
+    print("Timeit:")
     
     #__main__.Comment(date = datetime "2013-04-20 10:10:10", text = __main__.RichText(content = "Ala ma kota"))
 
-
+    import json
+    from timeit import timeit
+    
+    data = {"title": "Ala ma kota Sierściucha i psa Kłapoucha.", "value": 100000,
+            "struct": [123, 4567854, 98765400, None, list(range(20))],
+            "fulltext": "some text some text some text some text some text some text some text some text",
+            "another_value": 23.046}
+    
+    dump_dast = dast.dump(data, mode=0)
+    dump_json = json.dumps(data)
+    setup = "from __main__ import dump_dast, dump_json, loads, json"
+    
+    for _ in range(100000):
+        loads(dump_dast)
+    
+    # print("DAST load:", timeit('loads(dump_dast)', setup, number = 10000))
+    # print("JSON load:", timeit('json.loads(dump_json)', setup, number = 10000))
+    print("\ndone")
