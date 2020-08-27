@@ -772,19 +772,19 @@ class Stack(object):
     greater array as a regular numpy vector or array. All data values are cast onto a predefined `dtype` (float by default).
     
     >>> stack = Stack()
-    >>> stack.add(-5)
-    >>> stack.add(3.1)
+    >>> stack.append(-5)
+    >>> stack.append(3.1)
     >>> stack.get()
     array([-5. ,  3.1])
     
     >>> stack = Stack((3,), maxsize = 200)
-    >>> stack.add([1,2,3])
-    >>> stack.add([5,6,7])
+    >>> stack.append([1,2,3])
+    >>> stack.append([5,6,7])
     >>> stack.get()
     array([[1., 2., 3.],
            [5., 6., 7.]])
 
-    >>> for _ in range(100): stack.add([10,10,10])
+    >>> for _ in range(100): stack.append([10,10,10])
     >>> stack.get().sum()
     3024.0
     """
