@@ -793,7 +793,8 @@ class Stack(object):
     
     data = None             # the preallocated greater array; new items are added along the 1st dimension
     size = None             # the current no. of items in `data`
-    
+    maxsize = None          # maximum `size` allowed in this Stack object
+
     def __init__(self, shape = (), dtype = float, like = None, init = None, size = None, maxsize = None):
         if init is not None:
             self.data = init.copy()
@@ -814,7 +815,7 @@ class Stack(object):
         self.size = 0
         self.maxsize = maxsize
         
-    def add(self, item):
+    def append(self, item):
         
         # do we have empty space in `data` where to insert another item? if not, perform resizing
         if self.size >= self.data.shape[0]:
@@ -824,21 +825,36 @@ class Stack(object):
         self.data[self.size, ...] = item
         self.size += 1
 
-    def _resize(self):
+    def append_all(self, items):
+
+        extend = len(items)
+        if not extend: return
+        if self.size + extend > self.data.shape[0]:
+            self._resize(extend)
+
+        self.data[self.size : self.size + extend, ...] = items
+        self.size += extend
+        
+    def _resize(self, extend = 1):
         
         data, size = self.data, self.size
+        requested  = size + extend
+        new_size   = max(requested, int(math.ceil(size * self.GROWTH_RATE)))
         
-        new_size = int(math.ceil(size * self.GROWTH_RATE))
         if self.maxsize:
-            if size >= self.maxsize: raise Exception("Can't resize the Stack beyond its maximum size (%s)" % self.maxsize)
             new_size = min(new_size, self.maxsize)
-        assert new_size > size == data.shape[0]
+            if new_size < requested: raise Exception("Can't resize the Stack beyond its maximum size (%s)" % self.maxsize)
+        assert new_size >= requested >= data.shape[0]
         
         extended = (new_size,) + data.shape[1:]
-        new_data = np.zeros(extended, data.dtype)
-        new_data[:size,...] = data
-        
-        self.data = new_data
+        newdata  = self.data.resize(extended, refcheck = False)     # resize() may work in place (with a standard np.array) or return a new array (with a derived array type)
+        if newdata is not None:
+            self.data = newdata
+        # self.data = np.resize(self.data, extended)
+
+        # new_data = np.zeros(extended, data.dtype)
+        # new_data[:size,...] = data
+        # self.data = new_data
         
     def get(self):
         
@@ -846,13 +862,15 @@ class Stack(object):
     
     def __getitem__(self, pos):
         
-        if pos > self.size: raise IndexError("Index %s is out of bounds of the Stack (size %s)" % (pos, self.size))
-        return self.data[pos,...]
+        return self.data[:self.size,...][pos]
+        # if pos > self.size: raise IndexError("Index %s is out of bounds of the Stack (size %s)" % (pos, self.size))
+        # return self.data[pos,...]
         
     def __setitem__(self, pos, value):
     
-        if pos > self.size: raise IndexError("Index %s is out of bounds of the Stack (size %s)" % (pos, self.size))
-        self.data[pos,...] = value
+        self.data[:self.size,...][pos] = value
+        # if pos > self.size: raise IndexError("Index %s is out of bounds of the Stack (size %s)" % (pos, self.size))
+        # self.data[pos,...] = value
         
     def __len__(self):
         
