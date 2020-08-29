@@ -15,7 +15,7 @@ from __future__ import absolute_import
 import random, bisect, json, copy, numbers, math, numpy as np
 import numpy.linalg as linalg
 from numpy import sum, mean, zeros, sqrt, pi, exp, isnan, isinf, arctan
-from collections import OrderedDict
+from collections import OrderedDict, namedtuple
 
 
 if __name__ != "__main__":
@@ -877,6 +877,336 @@ class Stack(object):
         return self.size
     
 
+#####################################################################################################################################################
+#####
+#####  NAMEDARRAY
+#####
+
+class namedarray(np.ndarray):
+    """
+    namedarray is a Numpy's ndarray that keeps its column names internally, similar to Pandas,
+    but works around performance issues of Pandas being even 20x slower than Numpy in mathematical operations.
+    namedarray class provides fast computation without compromising readability of the code.
+    
+    namedarray performs approx. 7x faster than Pandas' DataFrame, thanks to the robust underlying
+    implementation of matrices and vectors as provided by Numpy.
+    As such, namedarray can be used as a replacement for Numpy's 2D arrays in the applications
+    where column names must be stored and tracked across mathematical operations, so as to guarantee
+    high code readability and maintainability.
+    namedarray is to Numpy's ndarray like collections.namedtuple is to tuple.
+    
+    Being based on Numpy's ndarray, namedarray is restricted to a single data type (dtype)
+    for all columns of the array, unlike Pandas' DataFrames where this restriction is not present.
+    If your application requires the use of different dtypes for columns, or some other advanced functionality
+    of Pandas (e.g., the groupby() method), Pandas' DataFrame may still be a better choice than namedarray.
+    
+    A namedarray has either 1 or 2 dimensions. A 1-dimensional namedarray is interpreted as a row vector.
+    namedarray can be used with all Numpy's operators and methods, similar to a standard array (ndarray),
+    but additionally it keeps and transfers to result arrays the list of column names,
+    and provides some syntactic extensions to be more suitable as a replacement for Pandas' DataFrames.
+    Technically, a namedarray is always a *view* on an underlying standard Numpy's ndarray (self.base);
+    a namedarray never keeps array data by itself.
+    
+    New syntax provided by namedarray:
+    - arr = namedarray(x)
+    - arr[:,'COL1'] or arr['COL1']         -- columns can be accessed by name
+    - arr.COL1                             -- columns can be accessed like a property
+    New methods for (partial) compatibility with Pandas:
+    - arr.empty (property)
+    - arr.iloc (property)        -- returns self, so the effect is the same as using "arr" alone
+    - arr.median()
+    - arr.itertuples(), requires index=False
+
+    TESTS:
+    
+    >>> A = namedarray([[1,2,3],[-5.0,0.1,-10]], names = ['x','y','z'])
+    >>> A
+    namedarray([[  1. ,   2. ,   3. ],
+                [ -5. ,   0.1, -10. ]])
+    >>> A.x
+    namedarray([ 1., -5.])
+    >>> A[:,'x'], A['x']
+    (namedarray([ 1., -5.]), namedarray([ 1., -5.]))
+    >>> A[1:].x, A[1].x
+    (namedarray([-5.]), -5.0)
+    >>> A.x[:]
+    namedarray([ 1., -5.])
+    >>> A.y[0], A.y[:-1], A.z[-1]
+    (2.0, namedarray([2.]), -10.0)
+    >>> A.x[1:][:1]
+    namedarray([-5.])
+    >>> A[1,:2].y, A[1,'y']
+    (0.1, 0.1)
+    
+    >>> A + A               # TODO: checking if names are compatible in both arrays (?)
+    namedarray([[  2. ,   4. ,   6. ],
+                [-10. ,   0.2, -20. ]])
+    >>> (A+A).names.tolist()
+    ['x', 'y', 'z']
+    >>> B = A**2 / A * 2
+    >>> B
+    namedarray([[  2. ,   4. ,   6. ],
+                [-10. ,   0.2, -20. ]])
+    >>> B.names.tolist()
+    ['x', 'y', 'z']
+    >>> abs(A)
+    namedarray([[ 1. ,  2. ,  3. ],
+                [ 5. ,  0.1, 10. ]])
+    >>> abs(A).names.tolist()
+    ['x', 'y', 'z']
+    >>> A.min(), A.max(), A.x.min(), A.y.max(), A.z.std()
+    (-10.0, 3.0, -5.0, 2.0, 6.5)
+    >>> A.median(), A.x.median()
+    (0.55, -2.0)
+    >>> A.extended_with('a').a
+    namedarray([0., 0.])
+    >>> A.extended_with(a = [8,9], b = A.x * 2)
+    namedarray([[  1. ,   2. ,   3. ,   8. ,   2. ],
+                [ -5. ,   0.1, -10. ,   9. , -10. ]])
+    >>> A.z = A.z * 3
+    >>> A.z
+    namedarray([  9., -30.])
+    """
+    pandas_compatible = True
+    
+    names   = None         # column names, as a numpy array of strings to allow indexing by lists
+    columns = None         # dict of names and their column indices in the underlying numpy array: {name: column}
+    
+    def __new__(cls, input_array, names = None, pandas_compatible = True):
+        if input_array is NotImplemented: raise Exception("input_array is NotImplemented")
+        obj = np.asarray(input_array).view(cls)
+        assert not isinstance(obj.base, namedarray)
+        # if isinstance(input_array, namedarray):
+        #     obj.init_like(input_array)
+        # else:
+        obj.pandas_compatible = pandas_compatible
+        if names is not None:
+            if not isinstance(names, list): raise Exception("'names' must be a list")
+            if not all(isinstance(n, str) and n for n in names): raise Exception("all names must be non-empty strings")
+            if not obj.ndim in (1, 2): raise Exception("namedarray must have 1 or 2 dimensions")
+            obj._set_names(names)
+        return obj
+    
+    def init_like(self, other, only_params = False):
+        self.pandas_compatible = other.pandas_compatible
+        if not only_params:
+            self._set_names(other.names, other.columns)
+        return self
+    
+    def _set_names(self, names, columns = None):
+        if names is None: return
+        self.names = np.array(names)
+        self.columns = {name: column for column, name in enumerate(names)} if columns is None else columns
+        if len(names) != len(self.columns): raise Exception("names of columns are not unique")
+        if len(names) != self.shape[-1]: raise Exception("the no. of names is different than the no. of columns")
+        
+    @staticmethod
+    def from_pandas(frame):
+        return namedarray(frame.values, names = frame.columns.to_list())
+        
+    def asarray(self):
+        assert not isinstance(self.base, namedarray)
+        return self.base
+    
+    def copy(self, order = 'K'):
+        # dup = np.array(self, order = order, dtype = self.dtype)
+        assert not isinstance(self.base, namedarray)
+        dup = self.base.copy()
+        return namedarray(dup, names = list(self.names), pandas_compatible = self.pandas_compatible)
+        
+    def resize(self, new_shape, refcheck = True):
+        """
+        This returns a COPY of the array, unlike the base class resize()
+        which works in place and returns None. `refcheck` is ignored.
+        Calling a base class resize() on a namedarray instance raises a ValueError:
+        "cannot resize this array: it does not own its data".
+        """
+        new = np.resize(self, new_shape)        # this does NOT preserve the array type (namedarray)
+        return namedarray(new, names = list(self.names), pandas_compatible = self.pandas_compatible)
+
+    def __array_finalize__(self, src_array):
+        """
+        For details on implementing __array_finalize__() see:
+        https://numpy.org/doc/stable/user/basics.subclassing.html
+        """
+        if not isinstance(src_array, namedarray): return
+        # if hasattr(self, 'names'): return
+        # if getattr(self, 'names', None) is not None: return
+        
+        # copy config parameters
+        self.pandas_compatible = src_array.pandas_compatible
+        
+        # only propagate names/columns when the no. of columns hasn't changed
+        # (warning: this does NOT mean that the meaning of columns hasn't changed either)
+        if self.shape[-1] == src_array.shape[-1]:
+            names = getattr(src_array, 'names', None)
+            columns = getattr(src_array, 'columns', None)
+            self._set_names(names, columns)
+
+    def __array_ufunc__(self, ufunc, method, *inputs, out = None, **kwargs):
+        # print(f'in __array_ufunc__{ufunc, method, *inputs, kwargs}')
+        
+        # convert input/output namedarrays to nd.array
+        args = tuple(x.asarray() if isinstance(x, namedarray) else x for x in inputs)
+        if out:
+            out = tuple(x.asarray() if isinstance(x, namedarray) else x for x in out)
+            kwargs['out'] = out
+            
+        results = super(namedarray, self).__array_ufunc__(ufunc, method, *args, **kwargs)
+        # print('results:', type(results), results)
+        
+        if results is NotImplemented: return results
+        
+        # if ufunc.nout == 1:
+        #     results = (results,)
+        # if isinstance(results[0], np.ndarray):
+        
+        first = results[0] if ufunc.nout > 1 else results
+        
+        # convert the result back to namedarray; this should work for multi-output results, as well,
+        # in this case the 1st array is converted back
+        if isinstance(first, np.ndarray):
+        
+            if not isinstance(first, namedarray):
+                first = namedarray(first)
+            first.init_like(self)
+            
+            results = first if ufunc.nout == 1 else (first,) + results[1:]
+
+        return results
+    
+
+    def __getattr__(self, attr):
+        if self.columns and attr in self.columns:
+            column = self.columns[attr]
+            return self[column] if self.ndim <= 1 else self[...,column]
+        raise AttributeError(attr)
+    
+    def __getitem__(self, key, _full_slice = slice(None)):
+        # print('key:', keys, type(keys))
+        
+        key, column = self._decode_key(key)
+        ret = self.base.__getitem__(key) #if self.base is not None else super(namedarray, self).__getitem__(key)
+        # ret = super(namedarray, self).__getitem__(key)
+        
+        if not isinstance(ret, np.ndarray):
+            return ret
+        
+        if not isinstance(ret, namedarray):
+            ret = namedarray(ret).init_like(self, only_params = True)
+            
+        # column dimension gets reduced, so the result is a vertical vector? don't assign names anymore
+        if isinstance(column, int):
+            return ret
+            # return np.array(ret)
+        
+        if self.names is not None:                          # self.names are None for a vertical vector
+            if isinstance(column, slice) and column == _full_slice:
+                # full slice of the column dimension? names stay the same, no need for recalculation
+                ret._set_names(self.names, self.columns)
+            else:
+                ret._set_names(self.names[column])
+                
+        return ret
+
+    def __setitem__(self, key, value):
+        """"""
+        key, column = self._decode_key(key)
+        super(namedarray, self).__setitem__(key, value)
+
+    def _decode_key(self, key, _full_slice = slice(None)):
+        """
+        Normalization and decoding of index key for __getitem__ and __setitem__, with conversion
+        of column names (strings) to numeric indexes.
+        # :param create: if True and a given column name is missing in `self`, it gets created
+        #                and is filled out with zeros through numpy's zeros_like();
+        #                WARNING: this operation involves full array copy!
+        """
+        ndim = self.ndim
+        if self.pandas_compatible and isinstance(key, str):
+            # if create and key not in self.columns: self._add_column(key)
+            key = (_full_slice,) * (ndim - 1) + (self.columns[key],)
+            
+        if not isinstance(key, tuple): key = (key,)
+        if len(key) < ndim:
+            key = key + (_full_slice,) * (ndim - len(key))
+            
+        # column index is either of: an integer, slice, ellipsis (...), newaxis, array, string, sequence of strings
+        col_dim = ndim - 1
+        column  = key[col_dim]
+
+        # convert column name(s) in `key` to numeric index(es)
+        if isinstance(column, str):
+            column = self.columns[column]
+            key = key[:col_dim] + (column,) + key[col_dim+1:]
+            
+        return key, column
+    
+    def assign(self, **columns):
+        """
+        Assign new and/or existing columns to a namedarray, similar to DataFrame.assign() in Pandas.
+        Creates and returns a NEW namedarray. The original array remains unchanged.
+        """
+        create = [col for col in columns if col not in self.columns]
+        new = self.extended_with(create)
+        for name, values in columns.items():
+            new[...,name] = values
+        return new
+    
+    def extended_with(self, *names, **columns):
+        """
+        Add new columns and return as a NEW namedarray. The current array (self) remains unchanged.
+        New columns as given in `names` are filled with zeros.
+        For `columns`, the columns are assigned the values of corresponding `columns` arguments.
+        """
+        if len(names) == 1: names = names[0]
+        if isinstance(names, str): names = names.split()
+
+        names = list(self.names) + list(names) + list(columns.keys())
+        cols  = self.shape[-1]
+        shape = self.shape[:-1] + (len(names), )
+        new   = namedarray(np.zeros(shape, dtype = self.dtype), names = names, pandas_compatible = self.pandas_compatible)
+        new[...,:cols] = self
+        for name, values in columns.items():
+            new[...,name] = values
+        return new
+        
+        # if self.names is None: raise Exception(f"cannot add columns to a namedarray whose names=None")
+        # cols  = self.shape[-1]
+        # shape = self.shape[:-1] + (cols + 1, )
+        # new   = np.zeros(shape, dtype = self.dtype)
+        # new[...,:cols] = np.array(self)
+        # self.base = new
+        # self._set_names(list(self.names) + [name])
+    
+    ###  Extra properties and methods, for partial compatibility with Pandas  ###
+    
+    @property
+    def empty(self):
+        """For compatibility with Pandas."""
+        return self.size == 0
+        
+    @property
+    def iloc(self):
+        """For compatibility with Pandas."""
+        return self
+        
+    def median(self, *a, **kw):
+        return np.median(self.asarray(), *a, **kw)
+        
+    def itertuples(self, index = True, name = 'Pandas', strict = False):
+        assert index == False
+        assert self.ndim == 2
+        if strict:
+            assert self.names is not None
+            t = namedtuple(name, self.names)
+            for row in self:
+                yield t(*row)
+        else:
+            for row in self:
+                yield row
+
+    
 #####################################################################################################################################################
 
 if __name__ == "__main__":
