@@ -128,6 +128,9 @@ def asobject(name, context = {}, default = RAISE):
     if default is RAISE: raise Exception("Object can't be found: '%s'" % name)
     return default
     
+def asdict(**items):
+    """Shorthand to create a dictionary using a `key=value` syntax instead of the standard `'key':value`."""
+    return items
 
 def runCommand(context = {}, params = None, fun = None, offset = 1):
     """
