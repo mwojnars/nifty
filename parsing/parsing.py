@@ -214,7 +214,7 @@ class Tree(object):
             """
             Like init(), but doesn't take arguments. Can be overriden in subclasses to perform
             custom initialization of a node after standard rewriting and enrichment.
-            In new code, setup() should be overriden instead of init(...), with Tree._init_deprecated = False.
+            In new code, setup() should be overriden instead of init(...), with Tree._use_init = False.
             """
             
         def _setup_all(self):
