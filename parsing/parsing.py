@@ -196,6 +196,20 @@ class Tree(object):
         sibling_prev = None                 # older sibling (before this node) AFTER rewriting
         sibling_next = None                 # younger sibling (after this node) AFTER rewriting
         
+        @property
+        def line(self):
+            """
+            Line number in `fulltext` where this node's match begins.
+            NOTE: this method scans all fulltext up to self.pos, which can be costly.
+            """
+            prefix = self.fulltext[:self.pos[0]]
+            return prefix.count('\n') + 1
+
+        @property
+        def column(self):
+            prefix = self.fulltext[:self.pos[0]]
+            return len(prefix) - prefix.rfind('\n')
+
         def __init__(self, tree, astnode): 
             self.tree = tree
             self.astnode = astnode
