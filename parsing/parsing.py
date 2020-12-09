@@ -72,7 +72,7 @@ class ParserError(Exception):
         if node:
             self.node, self.pos, self.text = node, node.pos, node.text(self.MAXLEN)
         if self.pos:                                            # calculate the line number and column of self.pos, if possible
-            prefix = node.fulltext[:self.pos[0]]
+            prefix = node.fulltext[:self.pos[1]]
             self.line = prefix.count('\n') + 1
             self.column = len(prefix) - prefix.rfind('\n')
         msg = self.make_msg(msg) or msg
