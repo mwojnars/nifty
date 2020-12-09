@@ -218,13 +218,23 @@ def subclasses(cls, include_self=False):
 ###   SEQUENCES & STREAMS
 ###
 
-def unique(seq, order = False):
-    "List of elements of 'seq' with duplicates removed. If order=True, preserves original order (from: http://stackoverflow.com/a/480227/1202674)."
+def unique(seq):
+    """List of elements of a sequence 'seq' with duplicates removed, order preserved. (from: http://stackoverflow.com/a/480227/1202674)"""
     if not seq: return []
-    #if not order: return list(set(seq))
     seen = set()
     seen_add = seen.add
     return [x for x in seq if x not in seen and not seen_add(x)]
+
+def duplicates(seq):
+    """Set of duplicates found in a sequence `seq`."""
+    seen = set()
+    seen_add = seen.add
+    return set(x for x in seq if x in seen or seen_add(x))
+
+def duplicate(seq):
+    """Any duplicate in a sequence `seq`; or None if no duplicates are present."""
+    dups = duplicates(seq)
+    return dups.pop() if dups else None
 
 def flatten(*seq):
     """List of all atomic elements of 'seq' (strings treated as atomic) 
