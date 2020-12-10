@@ -16,14 +16,10 @@ from __future__ import absolute_import
 import os, sys, glob, types as _types, copy, re, numbers, json, time, datetime, calendar, itertools
 import logging, random, math, collections, unicodedata, heapq, threading, inspect, hashlib
 from six import PY2, PY3, class_types, iterkeys, iteritems
+from six.moves import builtins, StringIO
 
-try:                                        # Python 2
-    import __builtin__ as builtins
-    from StringIO import StringIO
-
-except ImportError:                         # Python 3
-    import builtins, io
-    from io import StringIO
+if PY3:
+    import io
     from functools import reduce
     
     basestring = str
@@ -595,7 +591,7 @@ class __Labelled__(type):
         baseitems = [getattr(base, label, []) for base in cls.__bases__]        # get lists defined in base classes
         baseitems = reduce(lambda x,y:x+y, baseitems)                           # combine into one list
         items = getattr(cls, label)
-        combined = unique(items + baseitems, order = True)                      # add cls's items at the BEGINNING and uniqify
+        combined = unique(items + baseitems)                                    # add cls's items at the BEGINNING and uniqify
         setattr(cls, label, combined)
 
     def _getattrs(outer, cls): #@NoSelf
@@ -613,7 +609,7 @@ class __Labelled__(type):
         tokens = generate_tokens(StringIO(src).readline)
         tokens = [(t[1], t[4]) for t in tokens if t[0] == token.NAME]               # pairs (name, line) for all NAME tokens
         attrs = [name for (name,line) in tokens if line.strip().startswith(name)]   # only take names that start the line
-        attrs = unique(attrs, order = True)                                         # remove duplicates
+        attrs = unique(attrs)                                                       # remove duplicates
         
         attrdict = getattrs(cls)
         attrs = [name for name in attrs if name in attrdict]        # remove names that don't appear in 'attrdict'
