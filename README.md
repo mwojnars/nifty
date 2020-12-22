@@ -40,7 +40,7 @@ Machine Learning classes in [nifty.learn](https://github.com/mwojnars/nifty/blob
 
 **Data Pipes**. Architecture for scalable pipeline-oriented processing of unbounded data streams, in [nifty.data.pipes](https://github.com/mwojnars/nifty/blob/master/data/pipes.py). A "data pipeline" comprises an arbitrary number of "data cells" connected linearly and/or with branching; each cell is autonomous in pulling data from source(s) and performing any type of stream processing: data access, generation, buffering, filtering, pre-processing, post-processing, monitoring, reporting, model training etc. Data Pipes provide support for hyper-parameterization ("knobs"); creating higher-level meta-cells (e.g., for meta-optimization); and for multi-threading across parallel branches of a processing network.
 
-Data storage and object serialization with a new **DAST** format, in [nifty.data.dast](https://github.com/mwojnars/nifty/blob/master/data/dast.py).
+New format for data storage and object serialization, **DAST**, in [nifty.data.dast](https://github.com/mwojnars/nifty/blob/master/data/dast.py). Similar in spirit and simplicity to YAML, but allows transparent serialization of *any python object*, including custom classes and nested collections. Supports stream-based data access: reading/writing objects one by one, not only as a complete batch, which simplifies processing of large volumes of data.
 
 Web scraping tools in [nifty.redex](https://github.com/mwojnars/nifty/blob/master/redex/redex.py):
 - **Redex** patterns - a new language for extracting data from any markup document. Similar in spirit and structure to regular expressions (regex), but better suited to searching in large tagged documents. Bridges the gap between regex and XPaths as used in web scraping.
