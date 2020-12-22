@@ -28,6 +28,8 @@ Text processing routines in [nifty.text](https://github.com/mwojnars/nifty/blob/
 - **Bag-of-words** model with **TF-IDF** weights: *WordsModel*
 - **N-grams**: *ngrams*
 
+Multiple Sequence Alignment (MSA) of any Unicode strings for advanced text processing and NLP, in [nifty.algo.alignment](https://github.com/mwojnars/nifty/blob/master/algo/alignment.py): class **FuzzyString**, function **align_multiple**(). These are fast routines based on my custom algorithm of iteratively improving a *fuzzy consensus* string, where every character is a *probability distribution* over a full charset rather than a single crisp char. This MSA routine can be used to detect fuzzy matchings of a search phrase in a larger text; and statistically analyse deviations between multiple fuzzy matches.
+
 Math classes in [nifty.math](https://github.com/mwojnars/nifty/blob/master/math.py):
 
 - **namedarray**: a subclass of *numpy.ndarray* that implements *named columns* for 2D numpy arrays - something similar to Pandas, but fully compatible with numpy API (unlike Pandas) and providing fast processing, approx. *7x faster* than Pandas' DataFrame.
