@@ -28,7 +28,7 @@ Text processing routines in [nifty.text](https://github.com/mwojnars/nifty/blob/
 - **Bag-of-words** model with **TF-IDF** weights: *WordsModel*
 - **N-grams**: *ngrams*
 
-Multiple Sequence Alignment (MSA) of any Unicode strings for advanced text processing and NLP, in [nifty.algo.alignment](https://github.com/mwojnars/nifty/blob/master/algo/alignment.py): class **FuzzyString**, function **align_multiple**(). These are fast routines based on my custom algorithm of iteratively improving a *fuzzy consensus* string, where every character is a *probability distribution* over a full charset rather than a single crisp char. This MSA routine can be used to detect fuzzy matchings of a search phrase in a larger text; and statistically analyse deviations between multiple fuzzy matches.
+Multiple Sequence Alignment (MSA) of any Unicode strings for advanced text processing and NLP, in [nifty.algo.alignment](https://github.com/mwojnars/nifty/blob/master/algo/alignment.py): class **FuzzyString**, function **align_multiple**(). These are fast routines based on my custom algorithm of iteratively improving a *fuzzy consensus* string, where every position in a string is a *probability distribution* over a full charset rather than a single crisp char. This MSA routine can be used to detect fuzzy matchings of a search phrase in a larger text; and statistically analyse deviations between multiple fuzzy matches.
 
 Math classes in [nifty.math](https://github.com/mwojnars/nifty/blob/master/math.py):
 
@@ -46,7 +46,7 @@ New format for data storage and object serialization, **DAST**, in [nifty.data.d
 
 Web access and web scraping tools in [nifty.web](https://github.com/mwojnars/nifty/blob/master/web.py) and [nifty.redex](https://github.com/mwojnars/nifty/blob/master/redex/redex.py):
 - A framework for building web clients in a form of pipelines (**WebClient**) of individual handlers (**WebHandler**), each handler transforming a Request and/or acting to a Response in its own specific way and adding new functionality to the client independently of other handlers.
-- **Redex** patterns - a new language for extracting data from any markup document. Similar in spirit and structure to regular expressions (regex), but better suited to searching in large tagged documents. Bridges the gap between regex and XPaths as used in web scraping.
+- **Redex** patterns - a new language for extracting data from any markup document. Similar in spirit to regular expressions (regex), but better suited to searching in large tagged documents. Bridges the gap between regex and XPaths as used in web scraping.
   Combines consistency and compactness of regexes (single pattern matches all document and extracts multiple variables at once)
   with strength and precision of XPaths: redex pattern is defined in a form much simpler than regexes 
   and can span multiple fragments of the document, providing precise *context* where each fragment is allowed to match.
