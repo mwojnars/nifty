@@ -36,6 +36,12 @@ Math classes in [nifty.math](https://github.com/mwojnars/nifty/blob/master/math.
 - **Stack** class: a wrapper around any numpy array that allows incremental addition of items (values, rows, subarrays, ...) and provides automatic reallocation when the contents grows larger than the underlying array.
 - **Distribution** and its subclasses (Interval, Range, Choice, Switch, ...): a framework for defining custom composite probability distributions in a hierarchical way, and sampling from such distributions.
 
+Machine Learning classes in [nifty.learn](https://github.com/mwojnars/nifty/blob/master/learn.py), compatible with Scikit-Learn API, e.g., **OneHotFrame** for trainable auto-detection and transformation of columns in a data set that need one-hot encoding for Scikit estimators - much easier to use than standard Scikit tools for this purpose, handles encoding of unknown symbols and can ignore infrequent ones.
+
+**Data Pipes**. Architecture for scalable pipeline-oriented processing of unbounded data streams, in [nifty.data.pipes](https://github.com/mwojnars/nifty/blob/master/data/pipes.py). A "data pipeline" comprises an arbitrary number of "data cells" connected linearly and/or with branching; each cell is autonomous in pulling data from source(s) and performing any type of stream processing: data access, generation, buffering, filtering, pre-processing, post-processing, monitoring, reporting, model training etc. Data Pipes provide support for hyper-parameterization ("knobs"); creating higher-level meta-cells (e.g., for meta-optimization); and for multi-threading across parallel branches of a processing network.
+
+Data storage and object serialization with a new **DAST** format, in [nifty.data.dast](https://github.com/mwojnars/nifty/blob/master/data/dast.py).
+
 Web scraping tools in [nifty.redex](https://github.com/mwojnars/nifty/blob/master/redex/redex.py):
 - **Redex** patterns - a new language for extracting data from any markup document. Similar in spirit and structure to regular expressions (regex), but better suited to searching in large tagged documents. Bridges the gap between regex and XPaths as used in web scraping.
   Combines consistency and compactness of regexes (single pattern matches all document and extracts multiple variables at once)
@@ -44,13 +50,10 @@ Web scraping tools in [nifty.redex](https://github.com/mwojnars/nifty/blob/maste
 - **parsing** of basic data types from human-readable formats used in web pages: *pdate*, *pdatetime*, *pint*, *pfloat*, *pdecimal*, *percent*
 - **url** absolutization & unquoting: *url*, *url_unquote*
 
-**Data Pipes**. Architecture for scalable pipeline-oriented processing of unbounded Big Data streams, in [nifty.data.pipes](https://github.com/mwojnars/nifty/blob/master/data/pipes.py). A "data pipeline" comprises an arbitrary number of "data cells" connected linearly and/or with branching; each cell is autonomous in pulling data from source(s) and performing any type of stream processing: data access, generation, buffering, filtering, pre-processing, post-processing, monitoring, reporting, model training etc. Data Pipes provide support for hyper-parameterization ("knobs"); creating higher-level meta-cells (e.g., for meta-optimization); and for multi-threading across parallel branches of a processing network.
+For more information, check pydocs and comments in the code, or post questions in [Discussions](https://github.com/mwojnars/nifty/discussions).
 
-Data storage and object serialization with a new **DAST** format, in [nifty.data.dast](https://github.com/mwojnars/nifty/blob/master/data/dast.py).
 
-For more information, check pydocs and comments in the source code. Other modules to be documented in the near future.
-
-Nifty includes code of [Waxeye](http://waxeye.org/), a PEG parser generator (MIT license) used to generate parser for [Redex](https://github.com/mwojnars/nifty/blob/master/redex/redex.py).
+Nifty includes code of [Waxeye](http://waxeye.org/), a PEG parser generator (MIT license) used in [Redex](https://github.com/mwojnars/nifty/blob/master/redex/redex.py).
 
 Use cases
 ---------
