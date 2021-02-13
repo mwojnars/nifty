@@ -876,6 +876,10 @@ class Stack(object):
         
         return self.size
     
+    def clear(self):
+        """Remove all items but keep the shape and dtype unchanged."""
+        self.size = 0
+    
 
 #####################################################################################################################################################
 #####
@@ -963,7 +967,7 @@ class namedarray(np.ndarray):
     >>> A.extended_with(a = [8,9], b = A.x * 2)
     namedarray([[  1. ,   2. ,   3. ,   8. ,   2. ],
                 [ -5. ,   0.1, -10. ,   9. , -10. ]])
-    >>> A.z = A.z * 3
+    >>> A['z'] = A.z * 3
     >>> A.z
     namedarray([  9., -30.])
     """
@@ -1179,6 +1183,10 @@ class namedarray(np.ndarray):
         # self.base = new
         # self._set_names(list(self.names) + [name])
     
+    def astype(self, *a, **kw):
+        arr = self.base.astype(*a, **kw)
+        return namedarray(arr, names = list(self.names), pandas_compatible = self.pandas_compatible)
+        
     ###  Extra properties and methods, for partial compatibility with Pandas  ###
     
     @property
