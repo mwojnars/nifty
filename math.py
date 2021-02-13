@@ -66,6 +66,14 @@ def round_down(num, divisor):
     return num - (num % divisor)
 
 
+def array_unzip(rows):
+    """
+    Convert a list of tuples (rows) of equal length into a tuple of numpy arrays (columns) containing
+    original objects stacked along the 1st dimension. Similar to unzipping tuples back into original sequences.
+    """
+    return tuple(map(np.stack, zip(*rows)))
+
+
 ########################################################################################################################
 ###
 ###   RANDOM NUMBERS and PROBABILITY DISTRIBUTIONS
