@@ -329,6 +329,10 @@ def printdict(d, sep = ' = ', indent = ' ', end = '\n'):
     text = ''.join(line % item for item in iteritems(d))
     print(text)
 
+def reversedict(d):
+    """Given a dict of {key: value} pairs, create a reverse mapping {value: key}. Uniqueness of values is NOT checked!"""
+    return {value: key for key, value in d.items()}
+
 def list2str(l, sep = " ", f = str):
     "Convert all items of list 'l' into strings by mapping them through function 'f' and joining by separator 'sep'. 'f' can also be a format string."
     if isstring(f): f = lambda x: f % x
