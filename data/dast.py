@@ -316,7 +316,8 @@ class Analyzer(object):
         def decode_match(match):
             return codecs.decode(match.group(0), 'unicode-escape')
     
-        return ESCAPE_SEQUENCE_RE.sub(decode_match, s)
+        return Analyzer.ESCAPE_SEQUENCE_RE.sub(decode_match, s)
+    
     def __init__(self, decode):
         self.decode = decode
         self.linenum = 1        # current line number, for error messages
@@ -1263,9 +1264,10 @@ if __name__ == "__main__":
     dump_json = json.dumps(data)
     setup = "from __main__ import dump_dast, dump_json, loads, json"
     
-    for _ in range(100000):
-        loads(dump_dast)
+    # for _ in range(100000):
+    #     loads(dump_dast)
     
     # print("DAST load:", timeit('loads(dump_dast)', setup, number = 10000))
     # print("JSON load:", timeit('json.loads(dump_json)', setup, number = 10000))
+    
     print("\ndone")
