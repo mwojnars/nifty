@@ -16,16 +16,21 @@ You should have received a copy of the GNU General Public License along with Nif
 '''
 
 from __future__ import absolute_import
+from __future__ import print_function
 import os, sys, subprocess, threading
 #os.environ['http_proxy'] = ''                       # to fix urllib2 problem:  urllib2.URLError: <urlopen error [Errno -2] Name or service not known> 
 
-import urllib2, urlparse, random, time, socket, json, re
+import random, time, socket, json, re
 from collections import namedtuple, deque
 from copy import deepcopy
 from datetime import datetime
-from urllib2 import HTTPError, URLError
-from cookielib import CookieJar
 from socket import timeout as Timeout
+
+import six
+import six.moves.urllib.request as _request, six.moves.urllib.parse as _parse
+from six.moves.urllib.error import HTTPError, URLError
+from six.moves.http_cookiejar import CookieJar
+from six.moves import range
 #from lxml.html.clean import Cleaner        -- might be good for HTML sanitization (no scritps, styles, frames, ...), but not for general HTML tag filering 
 
 if __name__ != "__main__":
@@ -61,10 +66,10 @@ def urljoin(base, url, allow_fragments=True, empty=False):
     (2) if empty=False (default!), every empty or None fragment yields None as a result instead of 'base'; incompatible with HTML standard, but convenient in crawling
     """
     if islist(url):
-        if empty: return [urlparse.urljoin(base, u, allow_fragments) for u in url]
-        else:     return [urlparse.urljoin(base, u, allow_fragments) if u else None for u in url]
-    if empty: return urlparse.urljoin(base, url, allow_fragments)
-    else:     return urlparse.urljoin(base, url, allow_fragments) if url else None
+        if empty: return [_parse.urljoin(base, u, allow_fragments) for u in url]
+        else:     return [_parse.urljoin(base, u, allow_fragments) if u else None for u in url]
+    if empty: return _parse.urljoin(base, url, allow_fragments)
+    else:     return _parse.urljoin(base, url, allow_fragments) if url else None
     
 class ShortURL(object):
     """Encodes integers (IDs of objects in DB) as short strings: something like base-XX encoding of a number, with XX ~= 60.
@@ -172,9 +177,9 @@ Mozilla/5.0 (Windows NT 6.0; rv:13.0) Gecko/20100101 Firefox/13.0.1
 def webpage_simple(url):
     "Get HTML page from the web (simple variant)"
     url = fix_url(url)
-    return readsocket(urllib2.urlopen(url))
+    return readsocket(_request.urlopen(url))
 
-def webpage(url, timeout = None, identity = None, agent = 0, referer = None, header = None, opener = urllib2.build_opener()): #mechanize.Browser()):
+def webpage(url, timeout = None, identity = None, agent = 0, referer = None, header = None, opener = _request.build_opener()): #mechanize.Browser()):
     """
     Get HTML page from the web. Headers are set to enable robust scraping.
     Follows redirects, but there is no way for the client to detect this.
@@ -196,7 +201,7 @@ def webpage(url, timeout = None, identity = None, agent = 0, referer = None, hea
         header['Referer'] = referer
     
     # download page
-    req = urllib2.Request(url, None, header)
+    req = _request.Request(url, None, header)
     if timeout:
         stream = opener.open(req, timeout = timeout)
     else:
@@ -241,12 +246,12 @@ def checkMyIP(web = None, test = 1):
 ###  REQUEST, RESPONSE, WEBHANDLER - base classes
 ###
 
-class Request(urllib2.Request):
+class Request(_request.Request):
     """ When setting headers (self.headers from base class), all keys are capitalized by urllib2 (!) to avoid duplicates.
     To assign individual items in the header, use add_header() instead of manual modification of self.headers!
     """
     def __init__(self, url, data = None, headers = {}, timeout = None):
-        urllib2.Request.__init__(self, url = url, data = data, headers = headers)
+        _request.Request.__init__(self, url = url, data = data, headers = headers)
         self.url = url
         self.timeout = timeout
 
@@ -273,7 +278,7 @@ class Response():
     def __deepcopy__(self, memo):
         "Custom implementation of deepcopy(). Makes shallow copy of self.resp and deep copy of all other properties."
         dup = Response()
-        for key, val in self.__dict__.iteritems():
+        for key, val in six.iteritems(self.__dict__):
             if key == 'resp': dup.resp = val
             else: setattr(dup, key, deepcopy(val, memo))
         return dup    
@@ -304,7 +309,7 @@ class WebHandler(Object):
     @classmethod
     def chain(cls, listOfHandlers):
         "Connects given handlers into a chain using their .next fields. Automatically filters out None items. The list can contain nested sublists (will be flattened). Returns head of the chain"
-        listOfHandlers = filter(None, util.flatten(listOfHandlers))
+        listOfHandlers = [_f for _f in util.flatten(listOfHandlers) if _f]
         if not listOfHandlers: return None
         for i in range(len(listOfHandlers) - 1):
             prev, next = listOfHandlers[i:i+2]
@@ -355,7 +360,7 @@ class StandardClient(WebHandler):
     "Returns a web page using standard urllib2 access. Custom urllib2 handlers can be added upon initialization"
     def __init__(self, addHandlers = [], cj = None):
         "cj - a cookiejar if cookies handled"
-        self.opener = urllib2.build_opener(*addHandlers)
+        self.opener = _request.build_opener(*addHandlers)
         self.added = [h.__class__.__name__ for h in addHandlers]
         self.cj = cj  # we need to keep CookieJar in order to clean cookies
     def handle(self, req):
@@ -367,7 +372,7 @@ class StandardClient(WebHandler):
                 stream = self.opener.open(req, timeout = req.timeout)
             else:
                 stream = self.opener.open(req)
-        except HTTPError, e:
+        except HTTPError as e:
             e.msg += ", " + req.url
             raise
         try:
@@ -417,7 +422,7 @@ class RetryOnError(WebHandler):
             try:
                 _req = deepcopy(req)                    # we may need original 'req' again in the future, thus copying
                 return self.next.handle(_req)
-            except self.exception, e:
+            except self.exception as e:
                 for x in self.exclude:
                     if isinstance(e,x): raise
                 if isinstance(e, HTTPError):
@@ -453,7 +458,7 @@ class RetryCustom(WebHandler):
                 attempt += 1
                 _req = deepcopy(req)                    # we may need original 'req' again in the future, thus copying
                 return self.next.handle(_req)
-            except Exception, e:
+            except Exception as e:
                 delay = self.test(e, attempt)
                 if not delay: raise
                 delay *= mnoise(1.1)
@@ -760,7 +765,7 @@ class WebClient(Object):
         # unfortunately cj is required for cleaning cookies
         cj = CookieJar()
         if cookies:
-            urllib2hand = [urllib2.HTTPCookieProcessor(cj)]
+            urllib2hand = [_request.HTTPCookieProcessor(cj)]
         else:
             urllib2hand = []
         self.logger = logger
@@ -777,10 +782,10 @@ class WebClient(Object):
         if retryOnError:   self._retryOnError = H.RetryOnError(retryOnError)
         if retryOnTimeout: self._retryOnTimeout = H.RetryOnTimeout(retryOnTimeout)
         if retryCustom:    self.setRetryCustom(retryCustom)
-        if tor:         self._tor = True; urllib2hand.append(urllib2.ProxyHandler({'http': '127.0.0.1:8118'}))
+        if tor:         self._tor = True; urllib2hand.append(_request.ProxyHandler({'http': '127.0.0.1:8118'}))
         if proxyAddr and not tor: # either tor, or proxy, not both, tor is cheaper so has priority
             self._proxy = True
-            handler = urllib2.ProxyHandler({'http': proxyAddr,
+            handler = _request.ProxyHandler({'http': proxyAddr,
                                             'https': proxyAddr})
             # TODO maybe some checking correctness of proxy string?
             urllib2hand.append(handler)
@@ -1161,7 +1166,7 @@ class XDoc(object):
 
 def monkeyPatch():
     # copy methods and properties to XPathSelector (monkey patching):
-    methods = filter(lambda k: not k.startswith('__'), XDoc.__dict__.keys())        # all properties with standard names (no __*__)
+    methods = [k for k in list(XDoc.__dict__.keys()) if not k.startswith('__')]        # all properties with standard names (no __*__)
     methods += "__unicode__ __str__ __contains__ __getitem__".split()               # additionally these special names
     for name in methods:
         method = getattr(XDoc, name)            # here, MUST use getattr not __dict__[name] - they give different results!!! <unbound method> vs <function>!
@@ -1273,5 +1278,5 @@ tree = lxml.html.fromstring(dom.toxml())
 
 if __name__ == "__main__":
     import doctest
-    print doctest.testmod()
+    print(doctest.testmod())
     
