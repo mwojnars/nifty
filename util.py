@@ -17,6 +17,7 @@ import os, sys, glob, types as _types, copy, re, numbers, json, time, datetime, 
 import logging, random, math, collections, unicodedata, heapq, threading, inspect, hashlib
 from six import PY2, PY3, class_types, iterkeys, iteritems
 from six.moves import builtins, StringIO
+import six
 
 if PY3:
     import io
@@ -752,8 +753,10 @@ def escape(s):
 def ascii(text):
     """ASCII-fication of a given unicode 'text': national characters replaced with their non-accented ASCII analogs. 
     See http://stackoverflow.com/a/1383721/1202674, function bu(), for possible improvements."""
-    if isinstance(text, str): text = text.decode("UTF-8")
-    return unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore')
+    if isinstance(text, six.binary_type):       # checks for byte string in both Py2 and Py3
+        text = text.decode("UTF-8")
+    result = unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore')
+    return result.decode('ASCII') if six.PY3 else result
 
 def prefix(sep, string):
     "Adds a prefix 'sep' to 'string', but only if 'string' is non-empty and not None. Otherwise empty string."
