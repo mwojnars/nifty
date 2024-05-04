@@ -13,10 +13,13 @@ You should have received a copy of the GNU General Public License along with Nif
 '''
 
 from __future__ import absolute_import
+from __future__ import print_function
+
 import os, sys, glob, types as _types, copy, re, numbers, json, time, datetime, calendar, itertools
 import logging, random, math, collections, unicodedata, heapq, threading, inspect, hashlib
+
 from six import PY2, PY3, class_types, iterkeys, iteritems
-from six.moves import builtins, StringIO
+from six.moves import builtins, StringIO, map, range, zip
 import six
 
 if PY3:
@@ -370,7 +373,7 @@ def dict2obj(d, cls, obj = None):
 def class2dict(cls, exclude = "__", methods = False):
     """Retrieves all attributes of a class, possibly except methods if methods=False (default), and returns as a dict.
     Similar to getattrs() called with names=None, but detects inherited class attributes, too."""
-    names = filter(lambda n: not n.startswith(exclude), dir(cls))
+    names = [n for n in dir(cls) if not n.startswith(exclude)]
     if methods: return {n: getattr(cls, n) for n in names}
     d = {}
     for n in names: 
@@ -419,8 +422,8 @@ def getattrs(obj, names = None, exclude = "__", default = None, missing = True, 
             return d
         
         # proceed to a slower but fully correct approach: getattr() ...
-        if exclude is None: names = obj.__dict__.keys()
-        else: names = filter(lambda n: not n.startswith(exclude), obj.__dict__.keys())
+        if exclude is None: names = list(obj.__dict__.keys())
+        else: names = [n for n in list(obj.__dict__.keys()) if not n.startswith(exclude)]
     
     if isstring(names):                                                             # retrieving an explicit list of attributes?
         if ' ' not in names: return {names: getattr(obj, names)}                    # a single name given
@@ -442,7 +445,7 @@ def setattrs(obj, d, values = None):
     #obj.__dict__.update(d)
     if values:
         if not islist(values): values = [values] * len(d)
-        pairs = zip(d,values)
+        pairs = list(zip(d,values))
     else:
         pairs = iteritems(d)
     for k,v in pairs:
@@ -547,7 +550,7 @@ def sizeof(obj):
        and adding up the results. Does NOT handle circular object references!
     """
     size = sys.getsizeof(obj)
-    if isinstance(obj, dict): return size + sum(map(sizeof, obj.keys())) + sum(map(sizeof, obj.values()))
+    if isinstance(obj, dict): return size + sum(map(sizeof, list(obj.keys()))) + sum(map(sizeof, list(obj.values())))
     if isinstance(obj, (list, tuple, set, frozenset)): return size + sum(map(sizeof, obj))
     return size
 
@@ -654,7 +657,7 @@ class __Object__(__Labelled__):
         cls.label('__shared__')                     # declare '__shared__' as a label and set up the list of labelled attributes, cls.__shared__
 
 
-class Object(object):
+class Object(six.with_metaclass(__Object__, object)):
     """For easy creation of objects that can have assigned any attributes, unlike <object> instances. For example: 
          obj = Object(); obj.x = 21
          obj = Object(x = 21, y = 'ala')
@@ -681,7 +684,6 @@ class Object(object):
          and invokes cls.label('labelName') in __init__. New labels will be automatically provided with 
          conversions and inheritance, like __transient__ is.
     """
-    __metaclass__ = __Object__
     __transient__ = []                      # list of names of attributes to be excluded from serialization and (deep-)copying
     __shared__    = []                      # list of names of attributes that should be shallow-copied (shared between copies) in deepcopy
 #     __verbose__   = True                    # in __str__, shall we print recursively all properties of the object? if False, standard __str__ is used
@@ -794,7 +796,7 @@ jsonprint = printjson = jsonPrint = printJson
 class JsonReversibleEncoder(json.JSONEncoder):      ###  DRAFT
     def default(self, obj):
         self.classesHandled = {}
-        if isinstance(obj, self.classesHandled.values()):
+        if isinstance(obj, list(self.classesHandled.values())):
             key = '__%s__' % obj.__class__.__name__
             d = {'/cls': classname(obj, full=True)}
             d.update(obj.__dict__)
@@ -1418,7 +1420,7 @@ class Logger(object):
         if args and args[0] and isstring(args[0]):              # print leading newlines before the actual message
             args = list(args)
             while args[0].startswith('\n'):
-                print >>self.out
+                print(file=self.out)
                 args[0] = args[0][1:]
             if not args[0]: args = args[1:]
         msg = ' '.join(unicode(arg) for arg in args)
