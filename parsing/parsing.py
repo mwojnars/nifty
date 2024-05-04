@@ -40,11 +40,12 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public 
 You should have received a copy of the GNU General Public License along with Nifty. If not, see <http://www.gnu.org/licenses/>.
 '''
 
+from __future__ import absolute_import
 import copy
 from ..util import isstring, escape, flatten
 
 try:
-    import waxeye           # you can use this object in client code when you need to access internal Waxeye objects
+    from . import waxeye           # you can use this object in client code when you need to access internal Waxeye objects
 except:
     pass
 
