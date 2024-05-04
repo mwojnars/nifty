@@ -225,7 +225,7 @@ def regexEscape(s):
     can be included in regex pattern as a static string that matches occurences of 's'.
     The output of this function is prettier than produced by re.escape() - here we escape only true special chars,
     while re.escape() escapes ALL non-alphanumeric characters, so its output is long and rather ugly."""
-    s = s.encode('unicode_escape')          # encode non-printable characters
+    s = s.encode('unicode_escape').decode('ascii')      # encode non-printable characters
     escape = r".^$*+?{}()[]|"               # no backslash \, it's handled in encode() above
     s = ''.join('\\' + c if c in escape else c for c in s)
     return s
