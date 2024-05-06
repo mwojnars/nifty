@@ -1008,6 +1008,7 @@ def xpath_escape(s):
 
 def xdoc(text, mode = "html"):
     "Wrap up the 'text' in a XPathSelector object of appropriate type (xml/html). If 'text' is already an X, return unchanged."
+    assert isinstance(text, six.string_types)
     if isinstance(text, XPathSelector): return text
     return XmlXPathSelector(text=text) if mode.lower() == 'xml' else HtmlXPathSelector(text=text)
 
