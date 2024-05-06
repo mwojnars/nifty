@@ -987,8 +987,10 @@ try:                                                                            
     except: from scrapy import Selector         # older
     
     class _Selector(Selector):
-        def __str__(self): return self.get()
-        def __unicode__(self): return self.get()
+        def __str__(self):
+            s = self.get()
+            return s if isinstance(s, six.string_types) else s.decode('utf-8')
+        __unicode__ = __str__
     
     HtmlXPathSelector = XmlXPathSelector = XPathSelector   =   _Selector
     OLD_SCRAPY = False
