@@ -1151,9 +1151,11 @@ class XDoc(object):
 #     def __unicode__(self):
 #         "'print xnode' will print FULL original html/xml code of the node"
 #         return self.extract()
+    
     @staticmethod
     def __str__(self):
-        return self.extract().encode('utf-8')       # no HTML() wrapper, use only for print out not data storage
+        return self.extract() if six.PY3 else self.extract().encode('utf-8')       # no HTML() wrapper, use only for print out not data storage
+    
     @staticmethod
     def __contains__(self, s):
         "Checks for occurence of a given plain text in the document (tags stripped out). Shorthand for 's in x.text()'."
