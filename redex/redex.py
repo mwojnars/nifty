@@ -1009,7 +1009,14 @@ class Redex(six.with_metaclass(MetaPattern, object)):
             doc = doc.node(path)
         
         if not isinstance(doc, six.string_types):                 # convert the doc to str/unicode from an object
-            doc = self.strtype(doc)
+            try:
+                doc = self.strtype(doc)
+            except:
+                print("Error when converting `doc` to string:", type(doc))
+                print("doc:", doc)
+                print("doc.__str__:", doc.__str__)
+                print()
+                raise
         doc = doc.lstrip()                                  # remove leading whitespace
         #doc = self.strtype(doc).lstrip()                   # convert the doc to a string and remove leading whitespace
         
