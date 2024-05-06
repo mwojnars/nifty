@@ -1013,7 +1013,6 @@ class Redex(six.with_metaclass(MetaPattern, object)):
                 doc = self.strtype(doc)
             except:
                 print("Error when converting `doc` to string:", type(doc))
-                print("doc:", doc)
                 print("doc.__str__:", doc.__str__)
                 print()
                 raise
