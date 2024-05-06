@@ -983,8 +983,14 @@ try:                                                                            
     from scrapy.selector.unified import SelectorList as XPathSelectorList
     try: from scrapy.selector import Selector   # newer
     except: from scrapy import Selector         # older
-    HtmlXPathSelector = XmlXPathSelector = XPathSelector   =   Selector
+    
+    class _Selector(Selector):
+        def __str__(self): return self.get()
+        def __unicode__(self): return self.get()
+    
+    HtmlXPathSelector = XmlXPathSelector = XPathSelector   =   _Selector
     OLD_SCRAPY = False
+    
 except ImportError:                                                             # older versions of Scrapy; TODO: drop entirely
     from scrapy.selector.list import XPathSelectorList
     from scrapy.selector import HtmlXPathSelector, XmlXPathSelector, XPathSelector
