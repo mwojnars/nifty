@@ -422,7 +422,8 @@ class RetryOnError(WebHandler):
             try:
                 _req = deepcopy(req)                    # we may need original 'req' again in the future, thus copying
                 return self.next.handle(_req)
-            except self.exception as e:
+            except Exception as e:
+                if not isinstance(e, self.exception): raise
                 for x in self.exclude:
                     if isinstance(e,x): raise
                 if isinstance(e, HTTPError):
