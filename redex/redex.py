@@ -766,7 +766,7 @@ class Redex(six.with_metaclass(MetaPattern, object)):
         # decode compact notation of keys in 'convert': split multi-name keys, resolve wildcard keys
         self.convert = util.splitkeys(self.convert)
         self.variables = list(self.semantics.variables.keys())
-        for name, conv in self.convert.items():
+        for name, conv in list(self.convert.items()):
             if issubclass(conv, Redex): raise Exception("A Redex class used as a converter: %s. Use an instance instead: %s()." % ((conv.__name__,)*2))
             if '*' not in name: continue
             pat = name.replace('*', '.*') + "$"
