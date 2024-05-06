@@ -133,7 +133,7 @@ def readsocket(sock):
         if cont: content.append(cont)
         else: 
             sock.close()
-            return ''.join(content)
+            return b''.join(content).decode('utf-8') if six.PY3 else ''.join(content)
         
 
 # list from: http://techblog.willshouse.com/2012/01/03/most-common-user-agents/
