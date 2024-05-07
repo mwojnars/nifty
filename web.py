@@ -20,11 +20,12 @@ from __future__ import print_function
 import os, sys, subprocess, threading
 #os.environ['http_proxy'] = ''                       # to fix urllib2 problem:  urllib2.URLError: <urlopen error [Errno -2] Name or service not known> 
 
-import random, time, socket, json, re
+import random, time, socket, json, re, gzip
 from collections import namedtuple, deque
 from copy import deepcopy
 from datetime import datetime
 from socket import timeout as Timeout
+from io import BytesIO
 
 import six
 import six.moves.urllib.request as _request, six.moves.urllib.parse as _parse
@@ -127,13 +128,24 @@ def readsocket(sock):
     """Reads ALL contents from the socket. Workaround for the known problem of library sockets (also in urllib2): 
     that read() may sometimes return only a part of the contents and it must be called again and again, until empty result, to read everything. 
     Should always be used in place of .read(). Closes the socket at the end."""
-    content = []
+
+    content = b'' if six.PY3 else ''
     while True:
-        cont = sock.read()
-        if cont: content.append(cont)
-        else: 
-            sock.close()
-            return b''.join(content).decode('utf-8') if six.PY3 else ''.join(content)
+        part = sock.read()
+        if not part: break
+        content += part
+    
+    if sock.info().get('Content-Encoding') == 'gzip':           # data is compressed? decompress it
+        buf = BytesIO(content)
+        with gzip.open(buf, 'rt') as f:  # 'rt' mode for text reading
+            content = f.read()
+
+    elif six.PY3:
+        content = content.decode('utf-8')
+        # content = b''.join(parts).decode('utf-8') if six.PY3 else ''.join(parts)
+        
+    sock.close()
+    return content
         
 
 # list from: http://techblog.willshouse.com/2012/01/03/most-common-user-agents/
