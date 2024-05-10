@@ -877,10 +877,10 @@ class WebClient(Object):
     open = response                         #@ReservedAssignment
 
     def get(self, url = None):
-        """Main method for downloading pages. Calls response() and returns all contents of the page as string (without metadata). 
+        """Main method for downloading pages. Calls response() and returns all contents of the page as a string or binary (without metadata).
         If url=None, loads and returns the contents of the last accessed URL - which typically was only opened with open() or response(), but not fully loaded."""
         content = self.response(url).read()
-        assert isinstance(content, six.string_types)
+        assert isinstance(content, (six.binary_type, six.text_type))
         return content
     #open = get                              # TODO: change open() API to only initiate the connection but not read the data
     
