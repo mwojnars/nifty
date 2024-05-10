@@ -915,7 +915,7 @@ class WebClient(Object):
         "Clear history"
         self._history.reset()
 
-    def publicIP(self, api = "http://icanhazip.com"):
+    def publicIP(self, api = "http://ipinfo.io/ip"): #"http://icanhazip.com"):
         """Connects with a public API that returns our current public IP number. Returns this number in text form, 
         as received from the API, only stripped of spaces. Skips all handlers, uses only the last one: self._client."""
         req = Request(fix_url(api))
