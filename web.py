@@ -888,7 +888,8 @@ class WebClient(Object):
         "Download a page and save in file. The file will be overriden if exists. If url=None, the last accessed page is downloaded (or just saved if already retrieved)."
         # TODO: transform to stream not batch download, to handle pages of arbitrary size
         page = self.get(url)
-        with open(filename, 'wt') as f:
+        mode = 'wb' if isinstance(page, six.binary_type) else 'wt'
+        with open(filename, mode) as f:
             f.write(page)
     
     def url(self):
