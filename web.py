@@ -20,7 +20,7 @@ from __future__ import print_function
 import os, sys, subprocess, threading
 #os.environ['http_proxy'] = ''                       # to fix urllib2 problem:  urllib2.URLError: <urlopen error [Errno -2] Name or service not known> 
 
-import random, time, socket, json, re, gzip
+import random, time, socket, json, re, gzip, codecs
 from collections import namedtuple, deque
 from copy import deepcopy
 from datetime import datetime
@@ -628,7 +628,7 @@ class Cache(WebHandler):
 
         created = os.path.getmtime(filename)
         if now() - created > self.refresh: return None, None        # we have a copy, but time to refresh (don't delete instantly for safety, if web access fails)
-        with open(filename) as f:
+        with codecs.open(filename, 'r', 'utf-8') as f:
             time = util.filedatetime(filename)
             return f.read(), time
         
@@ -664,13 +664,13 @@ class Cache(WebHandler):
         content = resp.content
         if not isinstance(content, six.text_type): return resp          # don't cache binary data (e.g., PDFs)
         
-        with open(filename, 'wt') as f:
+        with codecs.open(filename, 'w', 'utf-8') as f:
             f.write(content)
         
         # redirection occured? create a .redirect file under original URL to indicate this fact
         if url != req.url:
             filename = self._url2file(req.url, 'redirect')
-            with open(filename, 'wt') as f:
+            with codecs.open(filename, 'w', 'utf-8') as f:
                 f.write(url)                                                    # .redirect file contains only the target URL in plain text form
         
         self.log.info("Cache, downloaded from web: " + req.url + (" -> " + url if url != req.url else ""))
