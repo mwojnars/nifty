@@ -662,7 +662,7 @@ class Cache(WebHandler):
         url = resp.url
         filename = self._url2file(url)
         content = resp.content
-        if isinstance(content, six.binary_type): return resp            # don't cache binary data (e.g., PDFs)
+        if not isinstance(content, six.text_type): return resp          # don't cache binary data (e.g., PDFs)
         
         with open(filename, 'wt') as f:
             f.write(content)
