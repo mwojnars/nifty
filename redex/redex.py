@@ -483,6 +483,7 @@ import re, regex as re2 #@UnresolvedImport
 import copy, six.moves.urllib.request, six.moves.urllib.parse, six.moves.urllib.error
 from collections import namedtuple
 from datetime import datetime
+import datetime as dt
 import six
 
 # nifty; whenever possible, use relative imports to allow embedding of the library inside higher-level packages;
@@ -1162,6 +1163,9 @@ def url_unquote(s, baseurl = None):
 
 def pdate(s):
     "Parse date string 's' and return as a datetime.date object (class date in module datetime). Try several different formats. None if no format works."
+    if not s: return None
+    if isinstance(s, dt.date): return s
+    
     def check(*formats):
         for f in formats:
             try: return datetime.strptime(s, f).date()
