@@ -135,16 +135,28 @@ def readsocket(sock):
         if not part: break
         content += part
     
-    if sock.info().get('Content-Encoding') == 'gzip':           # data is compressed? decompress it
-        buf = BytesIO(content)
-        with gzip.open(buf, 'rt') as f:  # 'rt' mode for text reading
-            content = f.read()
-
-    elif six.PY3:
-        content = content.decode('utf-8')
-        # content = b''.join(parts).decode('utf-8') if six.PY3 else ''.join(parts)
-        
+    headers = sock.info()
+    content_type = headers.get('Content-Type', '').lower()
+    content_encoding = headers.get('Content-Encoding', '').lower()
+    charset = content_type.split('charset=')[-1].strip() if 'charset=' in content_type else None
     sock.close()
+    
+    # determine if the content type is textual or binary
+    textual_types = r'^(text/|application/(json|xml|javascript|csv|rtf|sql|x-www-form-urlencoded))'
+    is_textual = bool(re.match(textual_types, content_type)) or not content_type
+    
+    if content_encoding == 'gzip':                                  # data is compressed? decompress it
+        buf = BytesIO(content)
+        with gzip.open(buf, 'rb') as f:
+            content = f.read()
+            
+    if is_textual and isinstance(content, six.binary_type):         # convert binary content to a string
+        try:
+            content = content.decode(charset or 'utf-8')
+        except UnicodeDecodeError:
+            pass
+            # content = content.decode('utf-8', errors='replace')  # fallback to utf-8 with replacement on errors
+        
     return content
         
 
@@ -649,8 +661,11 @@ class Cache(WebHandler):
         resp = self.next.handle(req)
         url = resp.url
         filename = self._url2file(url)
+        content = resp.content
+        if isinstance(content, six.binary_type): return resp            # don't cache binary data (e.g., PDFs)
+        
         with open(filename, 'wt') as f:
-            f.write(resp.content)
+            f.write(content)
         
         # redirection occured? create a .redirect file under original URL to indicate this fact
         if url != req.url:
