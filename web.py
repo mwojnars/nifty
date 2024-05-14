@@ -419,7 +419,7 @@ class Timeout(WebHandler):
 class RetryOnError(WebHandler):
     """In case of an exception of a given class retries the request a given number of times, only then forwards to the caller.
     Default exception class: Exception. Default excludes: 'timeout', HTTPError 403 (Forbidden), HTTPError 404 (Not Found)"""
-    def __init__(self, attempts = 3, delay = 5, exception = Exception, exclude = [Timeout, 403, 404]):
+    def __init__(self, attempts = 1, delay = 3, exception = Exception, exclude = [Timeout, 403, 404]):
         self.attempts = attempts
         self.delay = delay
         self.exception = exception
