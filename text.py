@@ -14,10 +14,10 @@ You should have received a copy of the GNU General Public License along with Nif
 '''
 
 from __future__ import absolute_import
-import re, math
+import re, math, six
 from collections import defaultdict
 from array import array
-from six.moves import reduce
+from six.moves import reduce, filter, range
 from six.moves.html_parser import HTMLParser
 
 try:                                                # Python 2
@@ -225,7 +225,7 @@ def regexEscape(s):
     can be included in regex pattern as a static string that matches occurences of 's'.
     The output of this function is prettier than produced by re.escape() - here we escape only true special chars,
     while re.escape() escapes ALL non-alphanumeric characters, so its output is long and rather ugly."""
-    s = s.encode('unicode_escape')          # encode non-printable characters
+    s = s.encode('unicode_escape').decode('ascii')      # encode non-printable characters
     escape = r".^$*+?{}()[]|"               # no backslash \, it's handled in encode() above
     s = ''.join('\\' + c if c in escape else c for c in s)
     return s
@@ -376,7 +376,7 @@ def extract_text(data, stoplist, trim = -1, sep = '\n'):
 
     text = ""
     if isinstance(data, dict):
-        for k, v in data.iteritems():
+        for k, v in data.items():
             if k in stoplist: continue
             s = extract_text(v, stoplist, trim, '\t')
             if s: text += s + sep
@@ -586,7 +586,7 @@ def ngrams(text, N = 4):
             text = fill + text + fill
     ngrams = []
 
-    for i in xrange(len(text) - N + 1):
+    for i in range(len(text) - N + 1):
         ngrams.append(text[i:i+N])
 
     return ngrams
@@ -653,7 +653,7 @@ class WordsModelUnderTraining(WordsModel):
         # transform counts into real-valued weights
         weights = {}
         #delta = self.nDocs / 100.0     # with this delta, weights will range between 1.0 and <100.0
-        for word, count in self.counts.iteritems():
+        for word, count in self.counts.items():
             # for efficiency ignore rare terms (lots of them! ~60% in long texts)
             # - they'll have a default weight assigned anyway
             if count > 1:
@@ -690,16 +690,16 @@ class WordsModelUnderTraining(WordsModel):
         def vectorize(doc, model):
             vec = count(doc)
             if self.isTraining:
-                model.addDoc(vec.keys())
+                model.addDoc(list(vec.keys()))
                 return vec  # no need for further processing of 'vec' when training
-            for word in vec.iterkeys():
+            for word in vec.keys():
                 vec[word] *= model.get(word)
             return vec
 
         def cosine(v1, v2):
             "Both v1 and v2 are variable-length dictionaries of tf-idf frequencies"
             dot = norm1 = norm2 = 0.0
-            for word in set(v1.keys() + v2.keys()):
+            for word in set(list(v1.keys()) + list(v2.keys())):
                 f1 = v1.get(word, 0.0)
                 f2 = v2.get(word, 0.0)
                 dot += f1 * f2

@@ -477,10 +477,14 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public 
 You should have received a copy of the GNU General Public License along with Nifty. If not, see <http://www.gnu.org/licenses/>.
 """
 
+from __future__ import absolute_import
+from __future__ import print_function
 import re, regex as re2 #@UnresolvedImport
-import copy, urllib
+import copy, six.moves.urllib.request, six.moves.urllib.parse, six.moves.urllib.error
 from collections import namedtuple
 from datetime import datetime
+import datetime as dt
+import six
 
 # nifty; whenever possible, use relative imports to allow embedding of the library inside higher-level packages;
 # only when executed as a standalone file, for unit tests, do an absolute import
@@ -497,7 +501,7 @@ else:
     from nifty.web import urljoin, xdoc
     import nifty.parsing.parsing as parsing
 
-import redex_parser
+from . import redex_parser
 
 
 ########################################################################################################################################################
@@ -701,7 +705,7 @@ class MetaPattern(type):
         raise NotImplemented()
     
 
-class Redex(object):
+class Redex(six.with_metaclass(MetaPattern, object)):
     """
     Redex pattern.
     
@@ -722,7 +726,6 @@ class Redex(object):
     >>> print p.match1('<A href="http://google.com"></A>')
     http://google.com
     """
-    __metaclass__ = MetaPattern     # responsible for executing unit tests defined at class level in subclasses
     MISSING = object()              # in internal unit tests, a token that indicates that true test outcome (goal) is undefined
     
     # input parameters
@@ -734,7 +737,7 @@ class Redex(object):
     tolower   = False   # shall all item names be converted to lowercase at the end of parsing?
     html      = True    # shall match() perform HTML entity decoding and normalization of spaces in extracted items? done before extractors/converters. May produce <unicode>!
     mapping   = {}      # mapping of item names, for easier integration with other parts of the application (currently unused!)
-    strtype   = unicode # what type of string to cast the document onto before parsing; this determines also the type of returned result strings
+    strtype   = six.text_type # what type of string to cast the document onto before parsing; this determines also the type of returned result strings
     dicttype  = ObjDict # what type of dictionary to return; ObjDict allows .xxx access to values in addition to standard ['xxx']
     model     = None    # class to be used as a wrapper for the dictionary of matched fields passed in kwargs: __init__(**items) 
     verbose   = False   # if True, Pattern.__init__ will print out debug information
@@ -752,7 +755,7 @@ class Redex(object):
     # TODO: implement error detection: binary search for the smallest element of the pattern that causes it to break on a given input string
 
     def __init__(self, pattern = None, **kwargs):
-        if self.verbose: print classname(self)
+        if self.verbose: print(classname(self))
         
         if pattern is not None: self.pattern = pattern
         if self.pattern is None: self.pattern = self.__class__.__doc__          # subclasses can define patterns in pydocs, for convenience
@@ -763,8 +766,8 @@ class Redex(object):
 
         # decode compact notation of keys in 'convert': split multi-name keys, resolve wildcard keys
         self.convert = util.splitkeys(self.convert)
-        self.variables = self.semantics.variables.keys()
-        for name, conv in self.convert.items():
+        self.variables = list(self.semantics.variables.keys())
+        for name, conv in list(self.convert.items()):
             if issubclass(conv, Redex): raise Exception("A Redex class used as a converter: %s. Use an instance instead: %s()." % ((conv.__name__,)*2))
             if '*' not in name: continue
             pat = name.replace('*', '.*') + "$"
@@ -773,8 +776,8 @@ class Redex(object):
             del self.convert[name]
         
         if self.verbose: 
-            print " variables:", self.variables
-            print " regex:", self.regex.pattern
+            print(" variables:", self.variables)
+            print(" regex:", self.regex.pattern)
         
     def __call__(self, doc):
         """A redex object can be called like a function, which is equivalent to calling .match(), but note that 
@@ -796,8 +799,8 @@ class Redex(object):
             flags = re2.DOTALL | re2.VERSION1 | (re2.IGNORECASE if not self.case else 0)
             self.regex = re2.compile(regex, flags)
         except:
-            print "exception raised when compiling regex:"
-            print regex
+            print("exception raised when compiling regex:")
+            print(regex)
             raise
         
     def testAll(self, tests):
@@ -837,7 +840,7 @@ class Redex(object):
         def issubdict(d1, d2):
             "Are all keys and values from d1 also present in d2? None values in d1 treated as no values at all"
             if not isdict(d1): return False
-            for k,v in d1.iteritems():
+            for k,v in six.iteritems(d1):
                 if k not in d2 or (v != None and v != d2[k]): return False
             return True
         
@@ -847,45 +850,45 @@ class Redex(object):
         # is OK?
         if out == goal: return True
         
-        print "%s.test%s," % (classname(self), testID),
+        print("%s.test%s," % (classname(self), testID), end=' ')
         
         # if no goal provided, print all extracted data, in a form suitable for inclusion in the code: strings as list, other values as dict, on new line
         if goal is self.MISSING:
-            print "output:"
+            print("output:")
             if out: 
-                textItems = ["%s %s" % item for item in out.iteritems() if isstring(item[1])]
-                objItems  = {key:val for key,val in out.iteritems() if not isstring(val)}
+                textItems = ["%s %s" % item for item in six.iteritems(out) if isstring(item[1])]
+                objItems  = {key:val for key,val in six.iteritems(out) if not isstring(val)}
                 lines = []
                 if textItems: lines.append(" " + str(textItems)[1:-1])
                 if objItems:  lines.append(" " + str(objItems))
-                print ", \\\n".join(lines)
+                print(", \\\n".join(lines))
             else:
-                print "", out
+                print("", out)
             return
         
         # not OK...
-        print "incorrect result of the matching:"
+        print("incorrect result of the matching:")
         #print "- Document to search in:"
         #print text
         #print "- Match pattern, its regex and extractors/converters:"
         #print self.pattern
         #print self.regex.pattern
         #print self.extract, self.convert
-        print "expected output:"
+        print("expected output:")
         util.printJson(goal)
         #print goal
-        print "actual output:"
+        print("actual output:")
         util.printJson(out)
         #print out
         
         # which values are different?
         if out is None or goal is None: return False
-        print "differences:"
-        for k in util.unique(goal.keys() + out.keys()):
-            if k in goal and k not in out: print " %s - missing field" % k
-            elif k not in goal and k in out: print " %s - unexpected field" % k
-            elif goal[k] != out[k]: print " %s - incorrect value" % k
-        print
+        print("differences:")
+        for k in util.unique(list(goal.keys()) + list(out.keys())):
+            if k in goal and k not in out: print(" %s - missing field" % k)
+            elif k not in goal and k in out: print(" %s - unexpected field" % k)
+            elif goal[k] != out[k]: print(" %s - incorrect value" % k)
+        print()
         
         return False
 
@@ -914,7 +917,7 @@ class Redex(object):
             
             # flatten singleton lists of non-repeated variables AND of groups defined inside raw regexes {~regex} rather than via {VAR ...}
             var = self.semantics.variables
-            for name, val in items.iteritems():
+            for name, val in six.iteritems(items):
                 if not var[name].repeated: items[name] = val[0] if val else None
                 
         return items, match.end()
@@ -950,17 +953,17 @@ class Redex(object):
             # can be incorrect, because entity decoding should be accompanied by tag stripping  
             if self.html:
                 var = self.semantics.variables
-                for name, val in items.iteritems():
+                for name, val in six.iteritems(items):
                     if val and not var[name].longfill: items[name] = rawtext(val)
             
             # run standalone per-item extractors
-            for name, fun in self.extract.iteritems():
+            for name, fun in six.iteritems(self.extract):
                 val = items.get(name)
                 arg = val if val != None else doc
                 items[name] = fun(arg)
             
             # perform type casting / convertions and absolutization of URLs
-            for name, fun in self.convert.iteritems():
+            for name, fun in six.iteritems(self.convert):
                 val = items.get(name)
                 if val is None: continue
                 if islist(val): items[name] = convertAll(val, fun)
@@ -982,7 +985,7 @@ class Redex(object):
             
             return items
         
-        except Exception, ex:
+        except Exception as ex:
             # append name of this class to the error message, for easier tracking down of the problem
             if hasattr(ex, 'args') and hasattr(ex, 'message') and istuple(ex.args) and isstring(ex.message) and ex.args[0] == ex.message:
                 prefix = classname(self, False) + " > "
@@ -1006,7 +1009,7 @@ class Redex(object):
             if isstring(doc): doc = xdoc(doc)
             doc = doc.node(path)
         
-        if not isinstance(doc, basestring):                 # convert the doc to str/unicode from an object
+        if not isinstance(doc, six.string_types):                 # convert the doc to str/unicode from an object
             doc = self.strtype(doc)
         doc = doc.lstrip()                                  # remove leading whitespace
         #doc = self.strtype(doc).lstrip()                   # convert the doc to a string and remove leading whitespace
@@ -1028,7 +1031,7 @@ class Redex(object):
         vals = self.match(*args, **kwargs)
         if isstring(vals) or vals is None: return vals
         if len(vals) != 1: raise Exception("Pattern.match1: pattern contains too many variables (%d), should only contain one" % len(vals), self.variables, vals)
-        return vals.values()[0]
+        return list(vals.values())[0]
         
     
     def matchAll(self, doc, path = None, **kwargs):
@@ -1044,7 +1047,7 @@ class Redex(object):
         
     def _matchAllRegex(self, doc, **kwargs):
         data = []; pos = 0
-        udoc = self.strtype(doc) if not isinstance(doc, basestring) else doc                # convert the doc to str/unicode from an object        
+        udoc = self.strtype(doc) if not isinstance(doc, six.string_types) else doc                # convert the doc to str/unicode from an object        
         while True:
             items, pos = self._matchRaw(udoc, pos)
             if items is None: return data
@@ -1106,7 +1109,7 @@ class PatternSum(MultiPattern):
                     self.failed = pat
                     return None
                 continue
-            for key, val in res.iteritems():
+            for key, val in six.iteritems(res):
                 if val in (None,[]) and key in items: continue           # don't override existing values with Nones or []
                 items[key] = val
         return items        
@@ -1154,12 +1157,15 @@ def url_unquote(s, baseurl = None):
     Use ALWAYS when extracting portions of text (IDs, names) from href anchors - 
     the portions which won't be used as URLs themselves and MUST be properly unquoted,
     which should be done on entire URL, before the portion is extracted."""
-    s = urllib.unquote(s)
+    s = six.moves.urllib.parse.unquote(s)
     if baseurl is None: return s
     return urljoin(baseurl, s)
 
 def pdate(s):
     "Parse date string 's' and return as a datetime.date object (class date in module datetime). Try several different formats. None if no format works."
+    if not s: return None
+    if isinstance(s, dt.date): return s
+    
     def check(*formats):
         for f in formats:
             try: return datetime.strptime(s, f).date()
@@ -1212,5 +1218,5 @@ def percent(s):
 
 if __name__ == "__main__":
     import doctest
-    print doctest.testmod()
+    print(doctest.testmod())
     

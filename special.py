@@ -12,10 +12,12 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public 
 You should have received a copy of the GNU General Public License along with Nifty. If not, see <http://www.gnu.org/licenses/>.
 '''
 
+from __future__ import absolute_import
 import os, collections, json, re, datetime
 
-from util import jsondump, getattrs, isfunction
-from web import isxdoc, noscript
+from .util import jsondump, getattrs, isfunction
+from .web import isxdoc, noscript
+import six
 
 
 ########################################################################################################################################################
@@ -205,8 +207,8 @@ class RichException(Snapshot, Exception):
         def makefile(self, html):
             self.nfiles += 1
             fname = self.path + "exception_%d.html" % self.nfiles
-            with open(fname, 'wt') as f:
-                if isinstance(html, unicode): html = html.encode("utf-8")
+            with open(fname, 'wb') as f:
+                if isinstance(html, six.text_type): html = html.encode("utf-8")
                 f.write(html)
             return fname
 

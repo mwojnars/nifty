@@ -198,8 +198,6 @@ class MySQL(DB):
     def connect(self, *args, **kwargs):
 
         import pymysql as mysql
-        # import MySQLdb as mysql
-    
         return mysql.connect(*args, **kwargs)
 
     def cursor(self, *args, **kwargs):

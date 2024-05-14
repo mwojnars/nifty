@@ -16,16 +16,22 @@ You should have received a copy of the GNU General Public License along with Nif
 '''
 
 from __future__ import absolute_import
+from __future__ import print_function
 import os, sys, subprocess, threading
 #os.environ['http_proxy'] = ''                       # to fix urllib2 problem:  urllib2.URLError: <urlopen error [Errno -2] Name or service not known> 
 
-import urllib2, urlparse, random, time, socket, json, re
+import random, time, socket, json, re, gzip, codecs
 from collections import namedtuple, deque
 from copy import deepcopy
 from datetime import datetime
-from urllib2 import HTTPError, URLError
-from cookielib import CookieJar
 from socket import timeout as Timeout
+from io import BytesIO
+
+import six
+import six.moves.urllib.request as _request, six.moves.urllib.parse as _parse
+from six.moves.urllib.error import HTTPError, URLError
+from six.moves.http_cookiejar import CookieJar
+from six.moves import range
 #from lxml.html.clean import Cleaner        -- might be good for HTML sanitization (no scritps, styles, frames, ...), but not for general HTML tag filering 
 
 if __name__ != "__main__":
@@ -61,10 +67,10 @@ def urljoin(base, url, allow_fragments=True, empty=False):
     (2) if empty=False (default!), every empty or None fragment yields None as a result instead of 'base'; incompatible with HTML standard, but convenient in crawling
     """
     if islist(url):
-        if empty: return [urlparse.urljoin(base, u, allow_fragments) for u in url]
-        else:     return [urlparse.urljoin(base, u, allow_fragments) if u else None for u in url]
-    if empty: return urlparse.urljoin(base, url, allow_fragments)
-    else:     return urlparse.urljoin(base, url, allow_fragments) if url else None
+        if empty: return [_parse.urljoin(base, u, allow_fragments) for u in url]
+        else:     return [_parse.urljoin(base, u, allow_fragments) if u else None for u in url]
+    if empty: return _parse.urljoin(base, url, allow_fragments)
+    else:     return _parse.urljoin(base, url, allow_fragments) if url else None
     
 class ShortURL(object):
     """Encodes integers (IDs of objects in DB) as short strings: something like base-XX encoding of a number, with XX ~= 60.
@@ -122,59 +128,66 @@ def readsocket(sock):
     """Reads ALL contents from the socket. Workaround for the known problem of library sockets (also in urllib2): 
     that read() may sometimes return only a part of the contents and it must be called again and again, until empty result, to read everything. 
     Should always be used in place of .read(). Closes the socket at the end."""
-    content = []
+
+    content = b'' if six.PY3 else ''
     while True:
-        cont = sock.read()
-        if cont: content.append(cont)
-        else: 
-            sock.close()
-            return ''.join(content)
+        part = sock.read()
+        if not part: break
+        content += part
+    
+    headers = sock.info()
+    content_type = headers.get('Content-Type', '').lower()
+    content_encoding = headers.get('Content-Encoding', '').lower()
+    charset = content_type.split('charset=')[-1].strip() if 'charset=' in content_type else None
+    sock.close()
+    
+    # determine if the content type is textual or binary
+    textual_types = r'^(text/|application/(json|xml|javascript|csv|rtf|sql|x-www-form-urlencoded))'
+    is_textual = bool(re.match(textual_types, content_type)) or not content_type
+    
+    if content_encoding == 'gzip':                                  # data is compressed? decompress it
+        buf = BytesIO(content)
+        with gzip.open(buf, 'rb') as f:
+            content = f.read()
+            
+    if is_textual and isinstance(content, six.binary_type):         # convert binary content to a string
+        try:
+            content = content.decode(charset or 'utf-8')
+        except UnicodeDecodeError:
+            pass
+            # content = content.decode('utf-8', errors='replace')  # fallback to utf-8 with replacement on errors
+        
+    return content
         
 
 # list from: http://techblog.willshouse.com/2012/01/03/most-common-user-agents/
 common_user_agents = \
 """
-Mozilla/5.0 (Windows NT 6.1; WOW64; rv:13.0) Gecko/20100101 Firefox/13.0.1
-Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/536.11 (KHTML, like Gecko) Chrome/20.0.1132.47 Safari/536.11
-Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/536.11 (KHTML, like Gecko) Chrome/20.0.1132.57 Safari/536.11
-Mozilla/5.0 (Windows NT 5.1; rv:13.0) Gecko/20100101 Firefox/13.0.1
-Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/536.5 (KHTML, like Gecko) Chrome/19.0.1084.56 Safari/536.5
-Mozilla/5.0 (Windows NT 6.1; rv:13.0) Gecko/20100101 Firefox/13.0.1
-Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; WOW64; Trident/5.0)
-Mozilla/5.0 (Windows NT 6.1) AppleWebKit/536.11 (KHTML, like Gecko) Chrome/20.0.1132.47 Safari/536.11
-Mozilla/5.0 (Windows NT 5.1) AppleWebKit/536.11 (KHTML, like Gecko) Chrome/20.0.1132.47 Safari/536.11
-Mozilla/5.0 (Windows NT 6.1) AppleWebKit/536.11 (KHTML, like Gecko) Chrome/20.0.1132.57 Safari/536.11
-Mozilla/5.0 (Windows NT 6.1) AppleWebKit/536.5 (KHTML, like Gecko) Chrome/19.0.1084.56 Safari/536.5
-Mozilla/5.0 (Windows NT 5.1) AppleWebKit/536.11 (KHTML, like Gecko) Chrome/20.0.1132.57 Safari/536.11
-Mozilla/4.0 (compatible; MSIE 6.0; MSIE 5.5; Windows NT 5.0) Opera 7.02 Bork-edition [en]
-Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.9.2) Gecko/20100115 Firefox/3.6
-Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; SV1; FunWebProducts; .NET CLR 1.1.4322; PeoplePal 6.2)
-Mozilla/5.0 (Windows NT 6.1; WOW64; rv:14.0) Gecko/20100101 Firefox/14.0.1
-Mozilla/5.0 (Windows NT 6.1; WOW64; rv:5.0) Gecko/20100101 Firefox/5.0
-Mozilla/5.0 (Windows NT 5.1) AppleWebKit/536.5 (KHTML, like Gecko) Chrome/19.0.1084.56 Safari/536.5
-Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; SV1; .NET CLR 2.0.50727)
-Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; Trident/4.0; .NET CLR 1.1.4322)
-Mozilla/5.0 (Windows NT 5.1; rv:5.0.1) Gecko/20100101 Firefox/5.0.1
-Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; Trident/4.0; .NET CLR 2.0.50727; .NET CLR 3.0.4506.2152; .NET CLR 3.5.30729)
-Mozilla/5.0 (Windows NT 6.1; rv:5.0) Gecko/20100101 Firefox/5.02
-Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.0; Trident/4.0; Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; SV1) ; .NET CLR 3.5.30729)
-Mozilla/5.0 (Windows NT 6.0) AppleWebKit/535.1 (KHTML, like Gecko) Chrome/13.0.782.112 Safari/535.1
-Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/535.1 (KHTML, like Gecko) Chrome/13.0.782.112 Safari/535.1
-Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:13.0) Gecko/20100101 Firefox/13.0.1
-Mozilla/5.0 (Windows NT 6.1; rv:2.0b7pre) Gecko/20100921 Firefox/4.0b7pre
-Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; Trident/5.0)
-Mozilla/5.0 (Windows NT 6.1; WOW64; rv:12.0) Gecko/20100101 Firefox/12.0
-Mozilla/5.0 (X11; Ubuntu; Linux i686; rv:13.0) Gecko/20100101 Firefox/13.0.1
-Mozilla/5.0 (Windows NT 6.0; rv:13.0) Gecko/20100101 Firefox/13.0.1
+Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36
+Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36
+Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0
+Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0
+Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36
+Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36
+Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:125.0) Gecko/20100101 Firefox/125.0
+Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36
+Mozilla/5.0 (X11; Linux x86_64; rv:125.0) Gecko/20100101 Firefox/125.0
+Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0
+Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15
+Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:125.0) Gecko/20100101 Firefox/125.0
+Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36
+Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36
+Mozilla/5.0 (Windows NT 10.0; rv:125.0) Gecko/20100101 Firefox/125.0
+Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 OPR/109.0.0.0
 """.strip().split("\n")
 
 
 def webpage_simple(url):
     "Get HTML page from the web (simple variant)"
     url = fix_url(url)
-    return readsocket(urllib2.urlopen(url))
+    return readsocket(_request.urlopen(url))
 
-def webpage(url, timeout = None, identity = None, agent = 0, referer = None, header = None, opener = urllib2.build_opener()): #mechanize.Browser()):
+def webpage(url, timeout = None, identity = None, agent = 0, referer = None, header = None, opener = _request.build_opener()): #mechanize.Browser()):
     """
     Get HTML page from the web. Headers are set to enable robust scraping.
     Follows redirects, but there is no way for the client to detect this.
@@ -196,7 +209,7 @@ def webpage(url, timeout = None, identity = None, agent = 0, referer = None, hea
         header['Referer'] = referer
     
     # download page
-    req = urllib2.Request(url, None, header)
+    req = _request.Request(url, None, header)
     if timeout:
         stream = opener.open(req, timeout = timeout)
     else:
@@ -241,12 +254,12 @@ def checkMyIP(web = None, test = 1):
 ###  REQUEST, RESPONSE, WEBHANDLER - base classes
 ###
 
-class Request(urllib2.Request):
+class Request(_request.Request):
     """ When setting headers (self.headers from base class), all keys are capitalized by urllib2 (!) to avoid duplicates.
     To assign individual items in the header, use add_header() instead of manual modification of self.headers!
     """
     def __init__(self, url, data = None, headers = {}, timeout = None):
-        urllib2.Request.__init__(self, url = url, data = data, headers = headers)
+        _request.Request.__init__(self, url = url, data = data, headers = headers)
         self.url = url
         self.timeout = timeout
 
@@ -273,7 +286,7 @@ class Response():
     def __deepcopy__(self, memo):
         "Custom implementation of deepcopy(). Makes shallow copy of self.resp and deep copy of all other properties."
         dup = Response()
-        for key, val in self.__dict__.iteritems():
+        for key, val in six.iteritems(self.__dict__):
             if key == 'resp': dup.resp = val
             else: setattr(dup, key, deepcopy(val, memo))
         return dup    
@@ -304,7 +317,7 @@ class WebHandler(Object):
     @classmethod
     def chain(cls, listOfHandlers):
         "Connects given handlers into a chain using their .next fields. Automatically filters out None items. The list can contain nested sublists (will be flattened). Returns head of the chain"
-        listOfHandlers = filter(None, util.flatten(listOfHandlers))
+        listOfHandlers = [_f for _f in util.flatten(listOfHandlers) if _f]
         if not listOfHandlers: return None
         for i in range(len(listOfHandlers) - 1):
             prev, next = listOfHandlers[i:i+2]
@@ -355,7 +368,7 @@ class StandardClient(WebHandler):
     "Returns a web page using standard urllib2 access. Custom urllib2 handlers can be added upon initialization"
     def __init__(self, addHandlers = [], cj = None):
         "cj - a cookiejar if cookies handled"
-        self.opener = urllib2.build_opener(*addHandlers)
+        self.opener = _request.build_opener(*addHandlers)
         self.added = [h.__class__.__name__ for h in addHandlers]
         self.cj = cj  # we need to keep CookieJar in order to clean cookies
     def handle(self, req):
@@ -367,7 +380,7 @@ class StandardClient(WebHandler):
                 stream = self.opener.open(req, timeout = req.timeout)
             else:
                 stream = self.opener.open(req)
-        except HTTPError, e:
+        except HTTPError as e:
             e.msg += ", " + req.url
             raise
         try:
@@ -417,7 +430,8 @@ class RetryOnError(WebHandler):
             try:
                 _req = deepcopy(req)                    # we may need original 'req' again in the future, thus copying
                 return self.next.handle(_req)
-            except self.exception, e:
+            except Exception as e:
+                if not isinstance(e, self.exception): raise
                 for x in self.exclude:
                     if isinstance(e,x): raise
                 if isinstance(e, HTTPError):
@@ -453,7 +467,7 @@ class RetryCustom(WebHandler):
                 attempt += 1
                 _req = deepcopy(req)                    # we may need original 'req' again in the future, thus copying
                 return self.next.handle(_req)
-            except Exception, e:
+            except Exception as e:
                 delay = self.test(e, attempt)
                 if not delay: raise
                 delay *= mnoise(1.1)
@@ -614,7 +628,7 @@ class Cache(WebHandler):
 
         created = os.path.getmtime(filename)
         if now() - created > self.refresh: return None, None        # we have a copy, but time to refresh (don't delete instantly for safety, if web access fails)
-        with open(filename) as f:
+        with codecs.open(filename, 'r', 'utf-8') as f:
             time = util.filedatetime(filename)
             return f.read(), time
         
@@ -647,13 +661,16 @@ class Cache(WebHandler):
         resp = self.next.handle(req)
         url = resp.url
         filename = self._url2file(url)
-        with open(filename, 'wt') as f:
-            f.write(resp.content)
+        content = resp.content
+        if not isinstance(content, six.text_type): return resp          # don't cache binary data (e.g., PDFs)
+        
+        with codecs.open(filename, 'w', 'utf-8') as f:
+            f.write(content)
         
         # redirection occured? create a .redirect file under original URL to indicate this fact
         if url != req.url:
             filename = self._url2file(req.url, 'redirect')
-            with open(filename, 'wt') as f:
+            with codecs.open(filename, 'w', 'utf-8') as f:
                 f.write(url)                                                    # .redirect file contains only the target URL in plain text form
         
         self.log.info("Cache, downloaded from web: " + req.url + (" -> " + url if url != req.url else ""))
@@ -760,7 +777,7 @@ class WebClient(Object):
         # unfortunately cj is required for cleaning cookies
         cj = CookieJar()
         if cookies:
-            urllib2hand = [urllib2.HTTPCookieProcessor(cj)]
+            urllib2hand = [_request.HTTPCookieProcessor(cj)]
         else:
             urllib2hand = []
         self.logger = logger
@@ -777,10 +794,10 @@ class WebClient(Object):
         if retryOnError:   self._retryOnError = H.RetryOnError(retryOnError)
         if retryOnTimeout: self._retryOnTimeout = H.RetryOnTimeout(retryOnTimeout)
         if retryCustom:    self.setRetryCustom(retryCustom)
-        if tor:         self._tor = True; urllib2hand.append(urllib2.ProxyHandler({'http': '127.0.0.1:8118'}))
+        if tor:         self._tor = True; urllib2hand.append(_request.ProxyHandler({'http': '127.0.0.1:8118'}))
         if proxyAddr and not tor: # either tor, or proxy, not both, tor is cheaper so has priority
             self._proxy = True
-            handler = urllib2.ProxyHandler({'http': proxyAddr,
+            handler = _request.ProxyHandler({'http': proxyAddr,
                                             'https': proxyAddr})
             # TODO maybe some checking correctness of proxy string?
             urllib2hand.append(handler)
@@ -860,16 +877,19 @@ class WebClient(Object):
     open = response                         #@ReservedAssignment
 
     def get(self, url = None):
-        """Main method for downloading pages. Calls response() and returns all contents of the page as string (without metadata). 
+        """Main method for downloading pages. Calls response() and returns all contents of the page as a string or binary (without metadata).
         If url=None, loads and returns the contents of the last accessed URL - which typically was only opened with open() or response(), but not fully loaded."""
-        return self.response(url).read()
+        content = self.response(url).read()
+        assert isinstance(content, (six.binary_type, six.text_type))
+        return content
     #open = get                              # TODO: change open() API to only initiate the connection but not read the data
     
     def download(self, filename, url = None):
         "Download a page and save in file. The file will be overriden if exists. If url=None, the last accessed page is downloaded (or just saved if already retrieved)."
         # TODO: transform to stream not batch download, to handle pages of arbitrary size
         page = self.get(url)
-        with open(filename, 'wt') as f:
+        mode = 'wb' if isinstance(page, six.binary_type) else 'wt'
+        with open(filename, mode) as f:
             f.write(page)
     
     def url(self):
@@ -993,8 +1013,10 @@ try:                                                                            
     from scrapy.selector.unified import SelectorList as XPathSelectorList
     try: from scrapy.selector import Selector   # newer
     except: from scrapy import Selector         # older
+
     HtmlXPathSelector = XmlXPathSelector = XPathSelector   =   Selector
     OLD_SCRAPY = False
+    
 except ImportError:                                                             # older versions of Scrapy; TODO: drop entirely
     from scrapy.selector.list import XPathSelectorList
     from scrapy.selector import HtmlXPathSelector, XmlXPathSelector, XPathSelector
@@ -1010,6 +1032,7 @@ def xpath_escape(s):
 
 def xdoc(text, mode = "html"):
     "Wrap up the 'text' in a XPathSelector object of appropriate type (xml/html). If 'text' is already an X, return unchanged."
+    assert isinstance(text, six.string_types)
     if isinstance(text, XPathSelector): return text
     return XmlXPathSelector(text=text) if mode.lower() == 'xml' else HtmlXPathSelector(text=text)
 
@@ -1150,9 +1173,11 @@ class XDoc(object):
 #     def __unicode__(self):
 #         "'print xnode' will print FULL original html/xml code of the node"
 #         return self.extract()
+    
     @staticmethod
     def __str__(self):
-        return self.extract().encode('utf-8')       # no HTML() wrapper, use only for print out not data storage
+        return self.extract() if six.PY3 else self.extract().encode('utf-8')       # no HTML() wrapper, use only for print out not data storage
+    
     @staticmethod
     def __contains__(self, s):
         "Checks for occurence of a given plain text in the document (tags stripped out). Shorthand for 's in x.text()'."
@@ -1161,7 +1186,7 @@ class XDoc(object):
 
 def monkeyPatch():
     # copy methods and properties to XPathSelector (monkey patching):
-    methods = filter(lambda k: not k.startswith('__'), XDoc.__dict__.keys())        # all properties with standard names (no __*__)
+    methods = [k for k in list(XDoc.__dict__.keys()) if not k.startswith('__')]        # all properties with standard names (no __*__)
     methods += "__unicode__ __str__ __contains__ __getitem__".split()               # additionally these special names
     for name in methods:
         method = getattr(XDoc, name)            # here, MUST use getattr not __dict__[name] - they give different results!!! <unbound method> vs <function>!
@@ -1273,5 +1298,5 @@ tree = lxml.html.fromstring(dom.toxml())
 
 if __name__ == "__main__":
     import doctest
-    print doctest.testmod()
+    print(doctest.testmod())
     
