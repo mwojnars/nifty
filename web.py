@@ -150,6 +150,11 @@ def readsocket(sock):
         with gzip.open(buf, 'rb') as f:
             content = f.read()
             
+    try:
+        codecs.lookup(charset)                                      # check if the charset name is valid
+    except LookupError:
+        charset = None
+        
     if is_textual and isinstance(content, six.binary_type):         # convert binary content to a string
         try:
             content = content.decode(charset or 'utf-8')
