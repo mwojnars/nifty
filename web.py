@@ -151,7 +151,7 @@ def readsocket(sock):
             content = f.read()
             
     try:
-        codecs.lookup(charset)                                      # check if the charset name is valid
+        if charset: codecs.lookup(charset)                          # check if the charset name is valid
     except LookupError:
         charset = None
         
