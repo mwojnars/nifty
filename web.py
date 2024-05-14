@@ -17,7 +17,7 @@ You should have received a copy of the GNU General Public License along with Nif
 
 from __future__ import absolute_import
 from __future__ import print_function
-import os, sys, subprocess, threading
+import os, sys, subprocess, threading, ssl
 #os.environ['http_proxy'] = ''                       # to fix urllib2 problem:  urllib2.URLError: <urlopen error [Errno -2] Name or service not known> 
 
 import random, time, socket, json, re, gzip, codecs
@@ -759,9 +759,8 @@ class WebClient(Object):
     
     
     def __init__(self, timeout = None, identity = True, referer = True, cache = None, cacheRefresh = None, tor = False, history = 5, delay = None, 
-                 retryOnTimeout = None, retryOnError = None,
-                 retryCustom = None, head = [], tail = [], logger = None,
-                 cookies = False, proxyAddr = None):
+                 retryOnTimeout = None, retryOnError = None, retryCustom = None, head = [], tail = [], logger = None,
+                 cookies = False, proxyAddr = None, ssl_verify = True):
         """
         :param identity: how to set User-Agent. Can be either: 
             None/False (no custom identity); 
@@ -773,13 +772,12 @@ class WebClient(Object):
         :param proxy: if string with proxy address (as adress:port) then connections will be proxies via this address or None
         """
         H = handlers
-        # create cookiejar, which handles cookies while requesting
-        # unfortunately cj is required for cleaning cookies
-        cj = CookieJar()
+        urllib2hand = []
+        
+        cookiejar = CookieJar()         # create cookiejar, which handles cookies while requesting; is needed for cleaning cookies
         if cookies:
-            urllib2hand = [_request.HTTPCookieProcessor(cj)]
-        else:
-            urllib2hand = []
+            urllib2hand += [_request.HTTPCookieProcessor(cookiejar)]
+
         self.logger = logger
         if isnumber(history): histLimit = max(history, 1)           # always keep at least 1 history item
         elif history is True: histLimit = None
@@ -795,15 +793,16 @@ class WebClient(Object):
         if retryOnTimeout: self._retryOnTimeout = H.RetryOnTimeout(retryOnTimeout)
         if retryCustom:    self.setRetryCustom(retryCustom)
         if tor:         self._tor = True; urllib2hand.append(_request.ProxyHandler({'http': '127.0.0.1:8118'}))
-        if proxyAddr and not tor: # either tor, or proxy, not both, tor is cheaper so has priority
+        if proxyAddr and not tor:           # either tor, or proxy, not both, tor is cheaper so has priority
             self._proxy = True
-            handler = _request.ProxyHandler({'http': proxyAddr,
-                                            'https': proxyAddr})
-            # TODO maybe some checking correctness of proxy string?
+            handler = _request.ProxyHandler({'http': proxyAddr, 'https': proxyAddr})        # TODO maybe some checking correctness of proxy string?
             urllib2hand.append(handler)
+        if not ssl_verify:
+            urllib2hand.append(_request.HTTPSHandler(context = ssl._create_unverified_context()))
+        
         self._head = head if islist(head) else [head]
         self._tail = tail if islist(tail) else [tail]
-        self._client = H.StandardClient(urllib2hand, cj)
+        self._client = H.StandardClient(urllib2hand, cookiejar)
 
         self._rebuild()                                             # connect all the handlers into a chain
 
