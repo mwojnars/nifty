@@ -810,7 +810,7 @@ class WebClient(Object):
     
     # atomic handlers that comprise the 'handlers' chain, in the same order;
     # _head and _tail are lists of custom handlers that go at the beginning or at the end of all handlers list
-    _history = _head = _cache = _useragent = _referer = _timeout = _retryCustom = _retryOnError = _retryOnTimeout = _delay = _tail = _client = None
+    _history = _head = _cache = _useragent = _referer = _timeout = _retryCustom = _retryOnError = _retryOnTimeout = _delay = _tail = None
     _tor = False            # self._tor is a read-only attr., changing it does NOT influence whether Tor is used or not, this is decided in __init__ and can't be changed
 
     handlers = None         # head (only!) of the chain of handlers
@@ -818,7 +818,7 @@ class WebClient(Object):
     
     
     def __init__(self, timeout = None, identity = True, referer = True, cache = None, cacheRefresh = None, tor = False, history = 5, delay = None, 
-                 retryOnTimeout = None, retryOnError = None, retryCustom = None, head = [], tail = [], logger = None,
+                 retryOnTimeout = None, retryOnError = None, retryCustom = None, head = None, tail = None, logger = None,
                  cookies = False, proxyAddr = None, ssl_verify = True, selenium = False):
         """
         :param identity: how to set User-Agent. Can be either: 
@@ -864,8 +864,8 @@ class WebClient(Object):
         if not ssl_verify:
             urllib2hand.append(_request.HTTPSHandler(context = ssl._create_unverified_context()))
         
-        self._head = head if islist(head) else [head]
-        self._tail = tail if islist(tail) else [tail]
+        self._head = list(head) if islist(head) else [head] if head else []
+        self._tail = list(tail) if islist(tail) else [tail] if tail else []
         
         if selenium is True:
             self._client = SeleniumClient(proxy = proxyAddr, ignore_ssl_errors = not ssl_verify, cookies = cookies)
