@@ -378,11 +378,13 @@ class StandardClient(WebHandler):
     
     def __init__(self, addHandlers = [], cj = None):
         "cj - a cookiejar if cookies handled"
+        self._id_ = _handler_id('StandardClient')
         self.opener = _request.build_opener(*addHandlers)
         self.added = [h.__class__.__name__ for h in addHandlers]
         self.cj = cj  # we need to keep CookieJar in order to clean cookies
         
     def handle(self, req):
+        print('in StandardClient.handle() #%d' % self._id_)
         assert isinstance(req, Request)
         #self.log.info("StandardClient, downloading page. Request & handlers: " + jsondump([req, self.added]))
         self.log.info("StandardClient, downloading", req.url)
@@ -405,6 +407,7 @@ class StandardClient(WebHandler):
 
 class SeleniumClient(WebHandler):
     def __init__(self, driver_path = "chromedriver", headless = True, page_delay = 3, proxy = None, ignore_ssl_errors = False, cookies = False):
+        self._id_ = _handler_id('SeleniumClient')
         self.page_delay = page_delay
         self.cookies = cookies
         
@@ -424,6 +427,7 @@ class SeleniumClient(WebHandler):
         self.driver = Chrome(options = options, executable_path = driver_path)
 
     def handle(self, req):
+        print('in SeleniumClient.handle() #%d' % self._id_)
         self.log.info("SeleniumClient, downloading", req.url)
 
         try:
@@ -797,6 +801,22 @@ class handlers(object):
 ###  WEB CLIENT
 ###
 
+_client_count = 0
+_handler_count = 0
+
+def _client_id():
+    global _client_count
+    _client_count += 1
+    print('creating WebClient #%d' % _client_count)
+    return _client_count
+
+def _handler_id(name):
+    global _client_count
+    _client_count += 1
+    print('creating WebHandler %s #%d' % (name, _client_count))
+    return _client_count
+
+
 class WebClient(Object):
     """
     >>> w1 = WebClient()
@@ -830,6 +850,8 @@ class WebClient(Object):
         :param cacheRefresh: either None, or a number (refresh == retain), or a pair (refresh, retain); typically refresh <= retain
         :param proxy: if string with proxy address (as adress:port) then connections will be proxies via this address or None
         """
+        self._id_ = _client_id()
+        
         urllib2hand = []
         
         cookiejar = CookieJar()         # create cookiejar, which handles cookies while requesting; is needed for cleaning cookies
@@ -927,16 +949,17 @@ class WebClient(Object):
                                           self._retryCustom, self._retryOnError, self._retryOnTimeout, self._delay, self._tail, self._client])
         self.setLogger(self.logger)
     
-    def response(self, url = None, data = None, headers = {}):
+    def response(self, url = None, data = None, headers = None):
         """Return current (last) response object if url=None, or make a new request like open() and return full response object. 
         The method is aware of movements along history: back(), forward(), ..."""
+        print('in WebClient.response() #%d' % self._id_)
         if not url:
             last = self._history.last()
             return last.resp if last else None
         # new request...
         self.url_now = url
         url = fix_url(url)
-        req = Request(url = url, data = data, headers = headers)
+        req = Request(url = url, data = data, headers = headers or {})
         resp = self.handlers.handle(req)
         self.url_now = None
         return resp                         # implicitly, the 'resp' object is remembered in browsing history, too
