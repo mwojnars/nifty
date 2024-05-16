@@ -330,6 +330,7 @@ class WebHandler(Object):
         if not listOfHandlers: return None
         for i in range(len(listOfHandlers) - 1):
             prev, next = listOfHandlers[i:i+2]
+            if prev.next: raise Exception("WebHandler.chain(): Handler %s already connected to %s!" % (prev, prev.next))
             prev.next = next
         return listOfHandlers[0]
     
