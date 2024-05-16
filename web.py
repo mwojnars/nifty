@@ -663,7 +663,7 @@ class Cache(WebHandler):
     def _url2file(self, url, ext = "html", pat = re.compile(r"""[/"'!?\\&=:]"""), maxlen = 100):
         "Encode URL to obtain a correct file name, preceeded by cache path"
         safeurl = pat.sub('_', url.replace('://', '_'))[:maxlen]
-        filename = safeurl + "_" + str(crc32(url))
+        filename = safeurl + "__" + str(crc32(url))
         return self.path + filename + "." + ext
     
     def _cachedFile(self, url, ext = "html", binary = False):
