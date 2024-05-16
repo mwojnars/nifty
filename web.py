@@ -660,7 +660,7 @@ class Cache(WebHandler):
                     os.remove(f)
         self.log.info("Cache, cleaning completed.")
     
-    def _url2file(self, url, ext = "html", pat = re.compile(r"""[/"'!?\\&=:]"""), maxlen = 60):
+    def _url2file(self, url, ext = "html", pat = re.compile(r"""[/"'!?\\&=:]"""), maxlen = 100):
         "Encode URL to obtain a correct file name, preceeded by cache path"
         safeurl = pat.sub('_', url.replace('://', '_'))[:maxlen]
         filename = safeurl + "_" + str(hash(url))
@@ -694,26 +694,27 @@ class Cache(WebHandler):
             content, time = self._cachedFile(url, 'bin', True)
             
         if content is None:
-            self.log.info("Cache, not found in cache: " + self._url2file(req.url, '*'))
+            self.log.info("Cache, not found in cache: " + self._url2file(url, '*'))
             return None
 
         # found in cache; return a Response() object
         resp = Response(content = content, url = url)
         resp.fromCache = True
         resp.time = time  #min(time1 or time2, time2 or time1)
-        self.log.info("Cache, loaded from cache: " + self._url2file(req.url, '*'))
+        self.log.info("Cache, loaded from cache: " + self._url2file(url, '*'))
         return resp
     
     def handle(self, req):
+        req_url = req.url
         resp = self._cachedResponse(req)                                # page in cache? return it
         if resp != None: return resp
         
         resp = self.next.handle(req)                                    # download page from the web
         
-        self.log.info("Cache, downloaded from web: " + req.url + (" -> " + resp.url if resp.url != req.url else ""))
+        self.log.info("Cache, downloaded from web: " + req_url + (" -> " + resp.url if resp.url != req_url else ""))
         
-        urls = [req.url]
-        if resp.url != req.url: urls.append(resp.url)
+        urls = [req_url]
+        if resp.url != req_url: urls.append(resp.url)
         
         content = resp.content
         binary = not isinstance(content, six.text_type)
