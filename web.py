@@ -270,23 +270,27 @@ class Request(_request.Request):
 
 class Response():
 
-    redirect = url = request = info = headers = status = time = None
+    redirect = url = request = info = headers = status = time = resp = None
     content = None                                      # string with all contents of the page, loaded in a lazy way: on explicit client's request
     fromCache = False
     
-    def __init__(self, resp = None, url = None, read = True):
+    def __init__(self, resp = None, url = None, read = True, current_url = None, headers = None, content = None):
         "resp: open file (socket) returned by urllib2 (type: urllib2.addinfourl) or None. url: optionally the original URL of the request (before any redirection)"
-        if not resp: return
-        self.resp      = resp                           # keep original urllib response
-        self.redirect  = resp.geturl()                  # if redirect happened, contains final URL (after all redirections) of the contents; None if no redirect
-        self.url       = self.redirect or url           # final URL of the contents: either the redirected URL or the original one if no redirection happened
+        self.redirect  = current_url if current_url != url else None    # if redirect happened, contains final URL (after all redirections) of the contents; None if no redirect
         self.request   = url                            # original URL of the request, before redirections
-        self.info      = resp.info()
-        self.headers   = dict(self.info)                # HTTP headers as a plain dictionary, all keys lower-case, e.g.: content-type, content-length, last-modified, server, date, ...
-        self.status    = self.code = resp.getcode()     # HTTP response status code; self.code is deprecated, use self.status instead
-        self.time      = datetime.now()                 # timestamp when the page was originally retrieved; can be overriden, e.g., by cache handler when an older version is loaded from disk 
+        self.url       = current_url or url             # final URL of the contents: either the redirected URL or the original one if no redirection happened
+        self.headers   = headers or {}
+        self.time      = datetime.now()                 # timestamp when the page was originally retrieved; can be overriden, e.g., by cache handler when an older version is loaded from disk
+        self.content   = content                        # the contents of the page, as a string or binary
 
-        if read: self.read() 
+        if resp:
+            self.resp      = resp                           # keep original urllib response
+            self.redirect  = resp.geturl()                  # if redirect happened, contains final URL (after all redirections) of the contents; None if no redirect
+            self.url       = self.redirect or url
+            self.info      = resp.info()
+            self.headers   = dict(self.info)                # HTTP headers as a plain dictionary, all keys lower-case, e.g.: content-type, content-length, last-modified, server, date, ...
+            self.status    = self.code = resp.getcode()     # HTTP response status code; self.code is deprecated, use self.status instead
+            if read: self.read()
         
     def __deepcopy__(self, memo):
         "Custom implementation of deepcopy(). Makes shallow copy of self.resp and deep copy of all other properties."
@@ -427,7 +431,7 @@ class SeleniumClient(WebHandler):
             time.sleep(self.page_delay)                             # wait for JavaScript to execute
             content = self.driver.page_source                       # capture the page source after JavaScript execution
             if not self.cookies: self.driver.delete_all_cookies()   # clear cookies if needed
-            return content
+            return Response(content = content, url = req.url, current_url = self.driver.current_url)
 
         except Exception as e:
             self.log.error("Failed to load the page: " + str(e), '-', req.url)
@@ -864,6 +868,7 @@ class WebClient(Object):
         self._tail = tail if islist(tail) else [tail]
         
         if selenium:
+            print("Using SeleniumClient, selenium=%s" % selenium)
             self._client = SeleniumClient(proxy = proxyAddr, ignore_ssl_errors = not ssl_verify, cookies = cookies)
         else:
             self._client = StandardClient(urllib2hand, cookiejar)
