@@ -867,7 +867,7 @@ class WebClient(Object):
         self._head = head if islist(head) else [head]
         self._tail = tail if islist(tail) else [tail]
         
-        if selenium:
+        if selenium is True:
             self._client = SeleniumClient(proxy = proxyAddr, ignore_ssl_errors = not ssl_verify, cookies = cookies)
         else:
             self._client = StandardClient(urllib2hand, cookiejar)
