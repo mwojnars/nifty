@@ -693,13 +693,15 @@ class Cache(WebHandler):
         if content is None:                                             # check if .bin file exists?
             content, time = self._cachedFile(url, 'bin', True)
             
-        if content is None: return None
+        if content is None:
+            self.log.info("Cache, not found in cache: " + self._url2file(req.url, '*'))
+            return None
 
         # found in cache; return a Response() object
         resp = Response(content = content, url = url)
         resp.fromCache = True
         resp.time = time  #min(time1 or time2, time2 or time1)
-        self.log.info("Cache, loaded from cache: " + req.url + (" -> " + url if url != req.url else ""))
+        self.log.info("Cache, loaded from cache: " + self._url2file(req.url, '*'))
         return resp
     
     def handle(self, req):
