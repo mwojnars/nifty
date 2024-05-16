@@ -656,49 +656,45 @@ class Cache(WebHandler):
                     os.remove(f)
         self.log.info("Cache, cleaning completed.")
     
-    def _url2file_old(self, url, ext = "html"):  
-        # Deprecated
-        safeurl = url.replace('/', '\\')
-        filename = safeurl + " " + str(hash(url))
-        return self.path + filename + "." + ext
-    
     def _url2file(self, url, ext = "html", pat = re.compile(r"""[/"'!?\\&=:]"""), maxlen = 60):
         "Encode URL to obtain a correct file name, preceeded by cache path"
         safeurl = pat.sub('_', url.replace('://', '_'))[:maxlen]
         filename = safeurl + "_" + str(hash(url))
         return self.path + filename + "." + ext
     
-    def _cachedFile(self, url, ext = "html"):
+    def _cachedFile(self, url, ext = "html", binary = False):
         "if possible, return cached copy and its file modification time, otherwise (None,None)"
         filename = self._url2file(url, ext)
         if not os.path.exists(filename):
-            filename = self._url2file_old(url, ext)
-            if not os.path.exists(filename):
-                return None, None
+            return None, None
 
         created = os.path.getmtime(filename)
         if now() - created > self.refresh: return None, None        # we have a copy, but time to refresh (don't delete instantly for safety, if web access fails)
-        with codecs.open(filename, 'r', 'utf-8') as f:
+        
+        mode = 'rb' if binary else 'r'
+        with codecs.open(filename, mode, None if binary else 'utf-8') as f:
             time = util.filedatetime(filename)
             return f.read(), time
         
     
     def _cachedResponse(self, req):
-        # is there a .redirect file?
         url = req.url
-        content, time1 = self._cachedFile(url, 'redirect')
-        if content: url = content                                       # .redirect file contains just the target URL in plain text form
         
-        # now check the actual .html file
-        content, time2 = self._cachedFile(url)
-        if content == None: return None
+        # # is there a .redirect file?
+        # content, time1 = self._cachedFile(url, 'redirect')
+        # if content: url = content                                       # .redirect file contains just the target URL in plain text form
         
+        content, time = self._cachedFile(url)                           # check if .html file exists?
+
+        if content is None:                                             # check if .bin file exists?
+            content, time = self._cachedFile(url, 'bin', True)
+            
+        if content is None: return None
+
         # found in cache; return a Response() object
-        resp = Response()
-        resp.content = content
+        resp = Response(content = content, url = url)
         resp.fromCache = True
-        resp.url = url
-        resp.time = min(time1 or time2, time2 or time1)
+        resp.time = time  #min(time1 or time2, time2 or time1)
         self.log.info("Cache, loaded from cache: " + req.url + (" -> " + url if url != req.url else ""))
         return resp
     
@@ -713,11 +709,15 @@ class Cache(WebHandler):
         urls = [req.url]
         if resp.url != req.url: urls.append(resp.url)
         
+        content = resp.content
+        binary = not isinstance(content, six.text_type)
+        
         # save the page to cache under BOTH the initial and final URL (if redirection occurred)
         for url in urls:
-            filename = self._url2file(url)
-            with codecs.open(filename, 'w', 'utf-8') as f:
-                f.write(resp.content)
+            filename = self._url2file(url, ext = 'bin' if binary else 'html')
+            mode = 'wb' if binary else 'w'
+            with codecs.open(filename, mode, None if binary else 'utf-8') as f:
+                f.write(content)
                 self.log.info("Cache, saved to cache: " + filename)
         
         # url = resp.url
