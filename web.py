@@ -811,10 +811,10 @@ def _client_id():
     return _client_count
 
 def _handler_id(name):
-    global _client_count
-    _client_count += 1
-    print('creating WebHandler %s #%d' % (name, _client_count))
-    return _client_count
+    global _handler_count
+    _handler_count += 1
+    print('creating handler %s #%d' % (name, _handler_count))
+    return _handler_count
 
 
 class WebClient(Object):
