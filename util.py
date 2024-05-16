@@ -1380,7 +1380,7 @@ class Logger(object):
         if mutex is True: mutex = Lock()
         self.mutex = mutex
         
-    def set_minlevel(self, level):
+    def set_level(self, level):
         self.minlevel = level
     
     def __setitem__(self, key, val):    self.context[key] = val
