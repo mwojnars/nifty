@@ -409,6 +409,8 @@ class StandardClient(WebHandler):
 class SeleniumClient(WebHandler):
     def __init__(self, driver_path = "chromedriver", headless = True, page_delay = 3, proxy = None, ignore_ssl_errors = False, cookies = False):
         self._id_ = _handler_id('SeleniumClient')
+        assert sys.meta_path
+        
         self.page_delay = page_delay
         self.cookies = cookies
         
@@ -443,7 +445,7 @@ class SeleniumClient(WebHandler):
             raise
 
     def __del__(self):
-        self.driver.quit()          # clean up the driver to close the browser
+        if sys.meta_path: self.driver.quit()            # clean up the driver to close the browser
 
 
 class FixURL(WebHandler):
