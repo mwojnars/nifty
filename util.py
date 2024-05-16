@@ -1379,6 +1379,9 @@ class Logger(object):
         self.stacks = collections.defaultdict(list)     # stacks of previous context values stored by push(), old value can be recovered by pop()
         if mutex is True: mutex = Lock()
         self.mutex = mutex
+        
+    def set_minlevel(self, level):
+        self.minlevel = level
     
     def __setitem__(self, key, val):    self.context[key] = val
     def __getitem__(self, key):         return self.context[key]
