@@ -814,7 +814,7 @@ class WebClient(Object):
     # atomic handlers that comprise the 'handlers' chain, in the same order;
     # _head and _tail are lists of custom handlers that go at the beginning or at the end of all handlers list
     _history = _head = _cache = _useragent = _referer = _timeout = _retryCustom = _retryOnError = _retryOnTimeout = _delay = _tail = None
-    _tor = False            # self._tor is a read-only attr., changing it does NOT influence whether Tor is used or not, this is decided in __init__ and can't be changed
+    _tor = _proxy = False   # self._tor is a read-only attr., changing it does NOT influence whether Tor is used or not, this is decided in __init__ and can't be changed
 
     handlers = None         # head (only!) of the chain of handlers
     logger   = None         # the logger that was passed down to all handlers in setLogger()
