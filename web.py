@@ -408,7 +408,7 @@ class SeleniumClient(WebHandler):
         self.page_delay = page_delay
         self.cookies = cookies
         
-        import selenium
+        from selenium.webdriver import Chrome
         from selenium.webdriver.chrome.options import Options
 
         options = Options()
@@ -421,7 +421,7 @@ class SeleniumClient(WebHandler):
             options.add_argument('--ignore-ssl-errors=yes')
             options.add_argument('--ignore-certificate-errors')
             
-        self.driver = selenium.webdriver.Chrome(options = options, executable_path = driver_path)
+        self.driver = Chrome(options = options, executable_path = driver_path)
 
     def handle(self, req):
         self.log.info("SeleniumClient, downloading", req.url)
