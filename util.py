@@ -884,6 +884,8 @@ def crc32(data):
     Calculates CRC-32 checksum of the input string, in a way compatible across all Python versions and hardware platforms.
     The returned value is an unsigned 4-byte integer in the range: [0, 2**32-1].
     """
+    if isinstance(data, six.text_type):
+        data = data.encode('utf-8')
     return binascii.crc32(data) & 0xffffffff
 
 
