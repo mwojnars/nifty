@@ -409,8 +409,6 @@ class StandardClient(WebHandler):
 class SeleniumClient(WebHandler):
     def __init__(self, driver_path = "chromedriver", headless = True, page_delay = 3, proxy = None, ignore_ssl_errors = False, cookies = False):
         self._id_ = _handler_id('SeleniumClient')
-        assert sys.meta_path
-        
         self.page_delay = page_delay
         self.cookies = cookies
         
@@ -900,9 +898,8 @@ class WebClient(Object):
         else:
             self._client = StandardClient(urllib2hand, cookiejar)
         
-        self._rebuild()                                             # connect all the handlers into a chain
-
-        self.url_now = None                 # URL being processed now (started but not finished); for debugging purposes, when exception occurs inside open()
+        self._build()                           # connect handlers into a chain
+        self.url_now = None                     # URL being processed now (started but not finished); for debugging purposes, when exception occurs inside open()
 
     def copy(self):
         return deepcopy(self)
@@ -932,7 +929,7 @@ class WebClient(Object):
             self._head = [handler] + self._head
         else:
             self._tail.append(handler)
-        self._rebuild()
+        self._build()
         return self                                         # chaining the calls is possible: return client.addHandler(...).addHandler(...)
         
     def removeHandler(self, handler):
@@ -946,13 +943,24 @@ class WebClient(Object):
             self._tail.remove(handler)
         else:
             raise ValueError("WebClient.removeHandler: handler (%s) not in list" % handler)
-        self._rebuild()
+        self._build()
         return self                                         # chaining the calls is possible: return client.removeHandler(...).removeHandler(...)
         
-    def _rebuild(self):
-        "Rearrange handlers into a chain once again."
-        self.handlers = WebHandler.chain([self._history, self._head, self._cache, self._useragent, self._referer, self._timeout, 
-                                          self._retryCustom, self._retryOnError, self._retryOnTimeout, self._delay, self._tail, self._client])
+    def _build(self):
+        """Connect handlers into a chain."""
+        handlers = ([self._history] +
+                     self._head +
+                    [self._cache, self._useragent, self._referer, self._timeout] +
+                    [self._retryCustom, self._retryOnError, self._retryOnTimeout, self._delay] +
+                     self._tail +
+                    [self._client]
+                    )
+        
+        # instantiate all handlers that are not yet instantiated;
+        # every handler can be a WebHandler object, or a (sub)class, or a construction function
+        handlers = [h() if h and not isinstance(h, WebHandler) else h for h in handlers]
+        
+        self.handlers = WebHandler.chain(handlers)
         self.setLogger(self.logger)
     
     def response(self, url = None, data = None, headers = None):
