@@ -868,7 +868,6 @@ class WebClient(Object):
         self._tail = tail if islist(tail) else [tail]
         
         if selenium:
-            print("Using SeleniumClient, selenium=%s" % selenium)
             self._client = SeleniumClient(proxy = proxyAddr, ignore_ssl_errors = not ssl_verify, cookies = cookies)
         else:
             self._client = StandardClient(urllib2hand, cookiejar)
