@@ -371,11 +371,13 @@ class WebHandler(Object):
 
 class StandardClient(WebHandler):
     "Returns a web page using standard urllib2 access. Custom urllib2 handlers can be added upon initialization"
+    
     def __init__(self, addHandlers = [], cj = None):
         "cj - a cookiejar if cookies handled"
         self.opener = _request.build_opener(*addHandlers)
         self.added = [h.__class__.__name__ for h in addHandlers]
         self.cj = cj  # we need to keep CookieJar in order to clean cookies
+        
     def handle(self, req):
         assert isinstance(req, Request)
         #self.log.info("StandardClient, downloading page. Request & handlers: " + jsondump([req, self.added]))
@@ -398,8 +400,8 @@ class StandardClient(WebHandler):
 
 
 class SeleniumClient(WebHandler):
-    def __init__(self, driver_path, headless = True, load_delay = 3, proxy = None, ignore_ssl_errors = False, cookies = False):
-        self.load_delay = load_delay
+    def __init__(self, driver_path = "chromedriver", headless = True, page_delay = 3, proxy = None, ignore_ssl_errors = False, cookies = False):
+        self.page_delay = page_delay
         self.cookies = cookies
         
         import selenium
@@ -422,7 +424,7 @@ class SeleniumClient(WebHandler):
 
         try:
             self.driver.get(req.url)                                # load the web page
-            time.sleep(self.load_delay)                             # wait for JavaScript to execute
+            time.sleep(self.page_delay)                             # wait for JavaScript to execute
             content = self.driver.page_source                       # capture the page source after JavaScript execution
             if not self.cookies: self.driver.delete_all_cookies()   # clear cookies if needed
             return content
@@ -813,7 +815,7 @@ class WebClient(Object):
     
     def __init__(self, timeout = None, identity = True, referer = True, cache = None, cacheRefresh = None, tor = False, history = 5, delay = None, 
                  retryOnTimeout = None, retryOnError = None, retryCustom = None, head = [], tail = [], logger = None,
-                 cookies = False, proxyAddr = None, ssl_verify = True):
+                 cookies = False, proxyAddr = None, ssl_verify = True, selenium = False):
         """
         :param identity: how to set User-Agent. Can be either: 
             None/False (no custom identity); 
@@ -824,7 +826,6 @@ class WebClient(Object):
         :param cacheRefresh: either None, or a number (refresh == retain), or a pair (refresh, retain); typically refresh <= retain
         :param proxy: if string with proxy address (as adress:port) then connections will be proxies via this address or None
         """
-        H = handlers
         urllib2hand = []
         
         cookiejar = CookieJar()         # create cookiejar, which handles cookies while requesting; is needed for cleaning cookies
@@ -836,14 +837,14 @@ class WebClient(Object):
         elif history is True: histLimit = None
         else: histLimit = 1
         
-        self._history = H.History(histLimit)
-        if timeout:     self._timeout = H.Timeout(timeout)
-        if identity:    self._useragent = H.UserAgent(identity if isstring(identity) else None, identity if isnumber(identity) else None)
-        if referer:     self._referer = H.Referer(self._history)
+        self._history = History(histLimit)
+        if timeout:     self._timeout = Timeout(timeout)
+        if identity:    self._useragent = UserAgent(identity if isstring(identity) else None, identity if isnumber(identity) else None)
+        if referer:     self._referer = Referer(self._history)
         if cache:       self.setCache(cache, cacheRefresh)
-        if delay:       self._delay = H.Delay(delay)
-        if retryOnError:   self._retryOnError = H.RetryOnError(retryOnError)
-        if retryOnTimeout: self._retryOnTimeout = H.RetryOnTimeout(retryOnTimeout)
+        if delay:       self._delay = Delay(delay)
+        if retryOnError:   self._retryOnError = RetryOnError(retryOnError)
+        if retryOnTimeout: self._retryOnTimeout = RetryOnTimeout(retryOnTimeout)
         if retryCustom:    self.setRetryCustom(retryCustom)
         
         if tor:                             # either tor, or proxy, not both; tor has a priority and overrides proxyAddr
@@ -861,8 +862,12 @@ class WebClient(Object):
         
         self._head = head if islist(head) else [head]
         self._tail = tail if islist(tail) else [tail]
-        self._client = H.StandardClient(urllib2hand, cookiejar)
-
+        
+        if selenium:
+            self._client = SeleniumClient(proxy = proxyAddr, ignore_ssl_errors = not ssl_verify, cookies = cookies)
+        else:
+            self._client = StandardClient(urllib2hand, cookiejar)
+        
         self._rebuild()                                             # connect all the handlers into a chain
 
         self.url_now = None                 # URL being processed now (started but not finished); for debugging purposes, when exception occurs inside open()
