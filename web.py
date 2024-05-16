@@ -35,11 +35,11 @@ from six.moves import range
 #from lxml.html.clean import Cleaner        -- might be good for HTML sanitization (no scritps, styles, frames, ...), but not for general HTML tag filering 
 
 if __name__ != "__main__":
-    from .util import islinux, isint, islist, isnumber, isstring, JsonDict, mnoise, unique, classname, noLogger, defaultLogger, Object
+    from .util import islinux, isint, islist, isnumber, isstring, JsonDict, mnoise, unique, classname, noLogger, defaultLogger, Object, crc32
     from .text import regex, xbasestring, HTML, Plain
     from . import util
 else:
-    from nifty.util import islinux, isint, islist, isnumber, isstring, JsonDict, mnoise, unique, classname, noLogger, defaultLogger, Object
+    from nifty.util import islinux, isint, islist, isnumber, isstring, JsonDict, mnoise, unique, classname, noLogger, defaultLogger, Object, crc32
     from nifty.text import regex, xbasestring, HTML, Plain
     from nifty import util
     
@@ -663,7 +663,7 @@ class Cache(WebHandler):
     def _url2file(self, url, ext = "html", pat = re.compile(r"""[/"'!?\\&=:]"""), maxlen = 100):
         "Encode URL to obtain a correct file name, preceeded by cache path"
         safeurl = pat.sub('_', url.replace('://', '_'))[:maxlen]
-        filename = safeurl + "_" + str(hash(url))
+        filename = safeurl + "_" + str(crc32(url))
         return self.path + filename + "." + ext
     
     def _cachedFile(self, url, ext = "html", binary = False):

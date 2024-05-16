@@ -16,7 +16,7 @@ from __future__ import absolute_import
 from __future__ import print_function
 
 import os, sys, glob, types as _types, copy, re, numbers, json, time, datetime, calendar, itertools
-import logging, random, math, collections, unicodedata, heapq, threading, inspect, hashlib
+import logging, random, math, collections, unicodedata, heapq, threading, inspect, hashlib, binascii
 
 from six import PY2, PY3, class_types, iterkeys, iteritems
 from six.moves import builtins, StringIO, map, range, zip
@@ -861,7 +861,7 @@ def printdast(obj, **kwargs):
     print(dast.encode(obj, **kwargs))
 
 
-### Hashing
+### Hashes & checksums
 
 def hashmd5(s, n = 4):
     """Stable cross-platform hash function for strings. Will always return the same output for a given input (suitable for DB storage),
@@ -877,6 +877,14 @@ def hashmd5(s, n = 4):
     """
     s = s.encode('utf-8')
     return int(hashlib.md5(s).hexdigest()[:2*n], 16)
+
+
+def crc32(data):
+    """
+    Calculates CRC-32 checksum of the input string, in a way compatible across all Python versions and hardware platforms.
+    The returned value is an unsigned 4-byte integer in the range: [0, 2**32-1].
+    """
+    return binascii.crc32(data) & 0xffffffff
 
 
 #####################################################################################################################################################
