@@ -395,7 +395,49 @@ class StandardClient(WebHandler):
         except KeyError:
             pass  # if there was no cookie, KeyError is risen, skip
         return Response(stream, req.url)
-    
+
+
+# from selenium import webdriver
+# from selenium.webdriver.chrome.options import Options
+# from selenium.webdriver.common.by import By
+# import time
+# import logging
+#
+#
+# class SeleniumClient(WebHandler):
+#     def __init__(self, driver_path, headless = True):
+#         options = Options()
+#         options.headless = headless
+#         self.driver = webdriver.Chrome(options = options, executable_path = driver_path)
+#
+#     def handle(self, req):
+#         self.log.info("SeleniumClient, downloading", req.url)
+#
+#         try:
+#             # Load the web page
+#             self.driver.get(req.url)
+#
+#             # Wait for JavaScript to execute
+#             time.sleep(5)  # Adjust time as necessary
+#
+#             # Capture the page source after JavaScript execution
+#             page_source = self.driver.page_source
+#
+#             # Handle cookies (clear cookies to simulate stateless behavior like StandardClient)
+#             self.driver.delete_all_cookies()
+#
+#             # Return the page source as response
+#             return page_source
+#
+#         except Exception as e:
+#             self.log.error("Failed to load the page: " + str(e))
+#             raise
+#
+#     def __del__(self):
+#         # Clean up the driver to close the browser
+#         self.driver.quit()
+
+
 class FixURL(WebHandler):
     def handle(self, req):
         req.url = fix_url(req.url)
@@ -658,27 +700,36 @@ class Cache(WebHandler):
         return resp
     
     def handle(self, req):
-        # page in cache?
-        resp = self._cachedResponse(req)
+        resp = self._cachedResponse(req)                                # page in cache? return it
         if resp != None: return resp
         
-        # download page and save in cache under final URL 
-        resp = self.next.handle(req)
-        url = resp.url
-        filename = self._url2file(url)
-        content = resp.content
-        if not isinstance(content, six.text_type): return resp          # don't cache binary data (e.g., PDFs)
+        resp = self.next.handle(req)                                    # download page from the web
         
-        with codecs.open(filename, 'w', 'utf-8') as f:
-            f.write(content)
+        self.log.info("Cache, downloaded from web: " + req.url + (" -> " + resp.url if resp.url != req.url else ""))
         
-        # redirection occured? create a .redirect file under original URL to indicate this fact
-        if url != req.url:
-            filename = self._url2file(req.url, 'redirect')
+        urls = [req.url]
+        if resp.url != req.url: urls.append(resp.url)
+        
+        # save the page to cache under BOTH the initial and final URL (if redirection occurred)
+        for url in urls:
+            filename = self._url2file(url)
             with codecs.open(filename, 'w', 'utf-8') as f:
-                f.write(url)                                                    # .redirect file contains only the target URL in plain text form
+                f.write(resp.content)
+                self.log.info("Cache, saved to cache: " + filename)
         
-        self.log.info("Cache, downloaded from web: " + req.url + (" -> " + url if url != req.url else ""))
+        # url = resp.url
+        # filename = self._url2file(url)
+        # content = resp.content
+        # if not isinstance(content, six.text_type): return resp          # don't cache binary data (e.g., PDFs)
+        #
+        # with codecs.open(filename, 'w', 'utf-8') as f:
+        #     f.write(content)
+        #
+        # # redirection occured? create a .redirect file under original URL to indicate this fact
+        # if url != req.url:
+        #     filename = self._url2file(req.url, 'redirect')
+        #     with codecs.open(filename, 'w', 'utf-8') as f:
+        #         f.write(url)                                                    # .redirect file contains only the target URL in plain text form
         
         lastClean = self.state['lastClean']
         if not lastClean or (now() - lastClean) > self.clean:                   # remove old files from the cache before proceeding
