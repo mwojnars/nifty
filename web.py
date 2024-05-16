@@ -397,45 +397,42 @@ class StandardClient(WebHandler):
         return Response(stream, req.url)
 
 
-# from selenium import webdriver
-# from selenium.webdriver.chrome.options import Options
-# from selenium.webdriver.common.by import By
-# import time
-# import logging
-#
-#
-# class SeleniumClient(WebHandler):
-#     def __init__(self, driver_path, headless = True):
-#         options = Options()
-#         options.headless = headless
-#         self.driver = webdriver.Chrome(options = options, executable_path = driver_path)
-#
-#     def handle(self, req):
-#         self.log.info("SeleniumClient, downloading", req.url)
-#
-#         try:
-#             # Load the web page
-#             self.driver.get(req.url)
-#
-#             # Wait for JavaScript to execute
-#             time.sleep(5)  # Adjust time as necessary
-#
-#             # Capture the page source after JavaScript execution
-#             page_source = self.driver.page_source
-#
-#             # Handle cookies (clear cookies to simulate stateless behavior like StandardClient)
-#             self.driver.delete_all_cookies()
-#
-#             # Return the page source as response
-#             return page_source
-#
-#         except Exception as e:
-#             self.log.error("Failed to load the page: " + str(e))
-#             raise
-#
-#     def __del__(self):
-#         # Clean up the driver to close the browser
-#         self.driver.quit()
+class SeleniumClient(WebHandler):
+    def __init__(self, driver_path, headless = True, load_delay = 3, proxy = None, ignore_ssl_errors = False, cookies = False):
+        self.load_delay = load_delay
+        self.cookies = cookies
+        
+        import selenium
+        from selenium.webdriver.chrome.options import Options
+
+        options = Options()
+        options.headless = headless
+
+        if proxy:                                                           # configure proxy settings
+            options.add_argument('--proxy-server=%s' % proxy)
+
+        if ignore_ssl_errors:                                               # configure to ignore SSL errors
+            options.add_argument('--ignore-ssl-errors=yes')
+            options.add_argument('--ignore-certificate-errors')
+            
+        self.driver = selenium.webdriver.Chrome(options = options, executable_path = driver_path)
+
+    def handle(self, req):
+        self.log.info("SeleniumClient, downloading", req.url)
+
+        try:
+            self.driver.get(req.url)                                # load the web page
+            time.sleep(self.load_delay)                             # wait for JavaScript to execute
+            content = self.driver.page_source                       # capture the page source after JavaScript execution
+            if not self.cookies: self.driver.delete_all_cookies()   # clear cookies if needed
+            return content
+
+        except Exception as e:
+            self.log.error("Failed to load the page: " + str(e), '-', req.url)
+            raise
+
+    def __del__(self):
+        self.driver.quit()          # clean up the driver to close the browser
 
 
 class FixURL(WebHandler):
@@ -848,11 +845,17 @@ class WebClient(Object):
         if retryOnError:   self._retryOnError = H.RetryOnError(retryOnError)
         if retryOnTimeout: self._retryOnTimeout = H.RetryOnTimeout(retryOnTimeout)
         if retryCustom:    self.setRetryCustom(retryCustom)
-        if tor:         self._tor = True; urllib2hand.append(_request.ProxyHandler({'http': '127.0.0.1:8118'}))
-        if proxyAddr and not tor:           # either tor, or proxy, not both, tor is cheaper so has priority
-            self._proxy = True
+        
+        if tor:                             # either tor, or proxy, not both; tor has a priority and overrides proxyAddr
+            self._tor = True
+            proxyAddr = '127.0.0.1:8118'
+            #urllib2hand.append(_request.ProxyHandler({'http': '127.0.0.1:8118'}))
+        
+        if proxyAddr:
+            self._proxy = not tor
             handler = _request.ProxyHandler({'http': proxyAddr, 'https': proxyAddr})        # TODO maybe some checking correctness of proxy string?
             urllib2hand.append(handler)
+            
         if not ssl_verify:
             urllib2hand.append(_request.HTTPSHandler(context = ssl._create_unverified_context()))
         
