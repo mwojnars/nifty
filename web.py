@@ -377,15 +377,12 @@ class WebHandler(Object):
 class StandardClient(WebHandler):
     "Returns a web page using standard urllib2 access. Custom urllib2 handlers can be added upon initialization"
     
-    def __init__(self, addHandlers = [], cj = None):
-        "cj - a cookiejar if cookies handled"
+    def __init__(self, addHandlers = [], cookiejar = None):
         self.opener = _request.build_opener(*addHandlers)
-        self.added = [h.__class__.__name__ for h in addHandlers]
-        self.cj = cj  # we need to keep CookieJar in order to clean cookies
+        self.cookiejar = cookiejar                            # we need to keep CookieJar in order to clean cookies
         
     def handle(self, req):
         assert isinstance(req, Request)
-        #self.log.info("StandardClient, downloading page. Request & handlers: " + jsondump([req, self.added]))
         self.log.info("StandardClient, downloading", req.url)
         try:
             if req.timeout:
@@ -396,9 +393,8 @@ class StandardClient(WebHandler):
             e.msg += ", " + req.url
             raise
         try:
-            # clean cookies between requests, this is not a browser, it does
-            # not need to remember them
-            self.cj.clear()
+            # clean cookies between requests, this is not a browser, it does not need to remember them
+            self.cookiejar.clear()
         except KeyError:
             pass  # if there was no cookie, KeyError is risen, skip
         return Response(stream, req.url)
