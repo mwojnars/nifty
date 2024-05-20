@@ -88,7 +88,7 @@ def islinux():
 RAISE = object()            # a token used in as*() functions to indicate that exceptions should be re-raised
 
 def asbool(s, default = RAISE):
-    if s in (None, "None"): return s
+    if s in (None, "None"): return None
     if isstring(s): s = s.lower()
     if s in [False, 0, 0.0, "0", "", "false", "no", "n"]: return False
     if s in [True, 1, 1.0, "1", "true", "yes", "y"]: return True
