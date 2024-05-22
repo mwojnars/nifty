@@ -1391,7 +1391,7 @@ class Logger(object):
         self.mutex = mutex
         
     def set_level(self, level):
-        self.minlevel = level
+        self.minlevel = self.levels[level] if isstring(level) else level
     
     def __setitem__(self, key, val):    self.context[key] = val
     def __getitem__(self, key):         return self.context[key]
