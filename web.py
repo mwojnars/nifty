@@ -263,6 +263,9 @@ class Request(_request.Request):
     """ When setting headers (self.headers from base class), all keys are capitalized by urllib2 (!) to avoid duplicates.
     To assign individual items in the header, use add_header() instead of manual modification of self.headers!
     """
+    
+    # proxy = None        # proxy server to be used for this request, as a string: 'http://proxy:port'
+    
     def __init__(self, url, data = None, headers = {}, timeout = None):
         _request.Request.__init__(self, url = url, data = data, headers = headers)
         self.url = url
@@ -385,6 +388,14 @@ class StandardClient(WebHandler):
         assert isinstance(req, Request)
         self.log.info("StandardClient, downloading", req.url)
 
+        # handlers = list(self.handlers)
+        # if req.proxy:
+        #     protocols = {'http': req.proxy, 'https': req.proxy} if isstring(req.proxy) else req.proxy
+        #     proxy_handler = _request.ProxyHandler(protocols)
+        #     handlers.append(proxy_handler)
+        #     del req.proxy
+        # opener = _request.build_opener(*handlers)
+        
         opener = _request.build_opener(*self.handlers)
 
         try:
@@ -636,7 +647,7 @@ class Cache(WebHandler):
         if self.state['lastClean'] and (now() - self.state['lastClean']) < self.clean: return
         self.state['lastClean'] = now()
         self.state.sync()
-        self.log.warn("Cache, cleaning of the cache started in a separate thread...")
+        self.log.debug("Cache, cleaning of the cache started in a separate thread...")
         
         if islinux():                                           # on Linux, use faster shell command (find) to find and remove old files, in one step
             retain = self.retain / (24*60*60) + 1               # retension time in days, for 'find' command
@@ -645,14 +656,14 @@ class Cache(WebHandler):
             MAX_CLEAN = 10000                                   # for performance reasons, if there are many files in cache check only a random subset of MAX_CLEAN ones for removal
             _now = now()
             files = os.listdir(self.path)
-            self.log.info("Cache, cleaning, got file list...")
+            self.log.debug("Cache, cleaning, got file list...")
             if len(files) > MAX_CLEAN: files = random.sample(files, MAX_CLEAN)
             for f in files:
                 f = self.path + f
                 created = os.path.getmtime(f)
                 if (_now - created) > self.retain:
                     os.remove(f)
-        self.log.info("Cache, cleaning completed.")
+        self.log.debug("Cache, cleaning completed.")
     
     def _url2file(self, url, ext = "html", pat = re.compile(r"""[/"'!?\\&=:]"""), maxlen = 100):
         "Encode URL to obtain a correct file name, preceeded by cache path"
@@ -688,14 +699,14 @@ class Cache(WebHandler):
             content, time = self._cachedFile(url, 'bin', True)
             
         if content is None:
-            self.log.info("Cache, not found in cache: " + self._url2file(url, '*'))
+            self.log.debug("Cache, not found in cache: " + self._url2file(url, '*'))
             return None
 
         # found in cache; return a Response() object
         resp = Response(content = content, url = url)
         resp.fromCache = True
         resp.time = time  #min(time1 or time2, time2 or time1)
-        self.log.info("Cache, loaded from cache: " + self._url2file(url, '*'))
+        self.log.debug("Cache, loaded from cache: " + self._url2file(url, '*'))
         return resp
     
     def handle(self, req):
@@ -705,7 +716,7 @@ class Cache(WebHandler):
         
         resp = self.next.handle(req)                                    # download page from the web
         
-        self.log.info("Cache, downloaded from web: " + req_url + (" -> " + resp.url if resp.url != req_url else ""))
+        self.log.debug("Cache, downloaded from web: " + req_url + (" -> " + resp.url if resp.url != req_url else ""))
         
         urls = [req_url]
         if resp.url != req_url: urls.append(resp.url)
@@ -719,7 +730,7 @@ class Cache(WebHandler):
             mode = 'wb' if binary else 'w'
             with codecs.open(filename, mode, None if binary else 'utf-8') as f:
                 f.write(content)
-                self.log.info("Cache, saved to cache: " + filename)
+                self.log.debug("Cache, saved to cache: " + filename)
         
         # url = resp.url
         # filename = self._url2file(url)
