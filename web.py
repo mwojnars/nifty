@@ -386,7 +386,7 @@ class StandardClient(WebHandler):
         
     def handle(self, req):
         assert isinstance(req, Request)
-        self.log.info("StandardClient, downloading", req.url)
+        self.log.debug("StandardClient, downloading", req.url)
 
         # handlers = list(self.handlers)
         # if req.proxy:
@@ -434,7 +434,7 @@ class SeleniumClient(WebHandler):
         self.driver = Chrome(options = options, executable_path = driver_path)
 
     def handle(self, req):
-        self.log.info("SeleniumClient, downloading", req.url)
+        self.log.debug("SeleniumClient, downloading", req.url)
         try:
             self.driver.get(req.url)                                # load the web page
             time.sleep(self.page_delay)                             # wait for JavaScript to execute
