@@ -1419,7 +1419,7 @@ class Logger(object):
     def message(self, *args, **kwargs):
         "Returns True if the message was actually printed, or False if level was too low."
         if self.minlevel is not None: 
-            level = kwargs.get('level')
+            level = kwargs.get('level', 'INFO')
             if level is None: return False
             if isstring(level): level = self.levels[level]      # convert level name to number
             if level < self.minlevel: return False
