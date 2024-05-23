@@ -1415,6 +1415,7 @@ class Logger(object):
             with self.mutex:
                 self.out.write(msg)
         else: self.out.write(msg)
+        self.out.flush()
         
     def message(self, *args, **kwargs):
         "Returns True if the message was actually printed, or False if level was too low."
