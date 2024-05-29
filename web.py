@@ -623,7 +623,7 @@ class Cache(WebHandler):
     DEFAULT_PATH = ".webcache/"            # default folder where cached pages are stored (will be created if doesn't exist)
     STATE_FILE   = ".state.json"
     
-    def __init__(self, path = DEFAULT_PATH, refresh = 1.0, retain = 30):
+    def __init__(self, path = DEFAULT_PATH, refresh = 1.0, retain = 3.0):
         """refresh: how often pages in cache should be refreshed, in days; default: 1 day
            retain: for how long pages should be kept in cache even after refresh period (for safety); default: 30 days; 
                    not less than 'refresh' (increased up to 'refresh' if necessary)
