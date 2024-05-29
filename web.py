@@ -637,7 +637,7 @@ class Cache(WebHandler):
         if not refresh: refresh = 1.0
         self.refresh = refresh * 24*60*60                       # refresh copies after this time, in seconds
         self.retain = max(retain, refresh) * 24*60*60           # keep copies in cache for this long, in seconds
-        self.clean = self.refresh / 10.0                        # how often to clean the cache: on every startup + 50 times over 'refresh' period
+        self.clean = self.refresh / 10.0                        # how often to clean the cache: on every startup + 10 times during 'refresh' period
         self.clean = max(self.clean, 60*60)                     # ...but not more often than every hour
         
         self.state = JsonDict(path + self.STATE_FILE, indent = 4)
@@ -650,7 +650,7 @@ class Cache(WebHandler):
         self.log.debug("Cache, cleaning of the cache started in a separate thread...")
         
         if islinux():                                           # on Linux, use faster shell command (find) to find and remove old files, in one step
-            retain = self.retain / (24*60*60) + 1               # retension time in days, for 'find' command
+            retain = self.retain // (24*60*60)                  # retension time in days for 'find' command; `find` may actually add +1 day to this, see "man find"
             subprocess.call("find '%s' -maxdepth 1 -type f -mtime +%d -exec rm '{}' \;" % (self.path, retain), shell=True)
         else:
             MAX_CLEAN = 10000                                   # for performance reasons, if there are many files in cache check only a random subset of MAX_CLEAN ones for removal
