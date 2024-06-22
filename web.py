@@ -414,15 +414,17 @@ class StandardClient(WebHandler):
 
 
 class SeleniumClient(WebHandler):
-    def __init__(self, driver_path = "chromedriver", headless = True, page_delay = 3, proxy = None, ignore_ssl_errors = False, cookies = False):
+    def __init__(self, driver_path = "/usr/bin/chromedriver", headless = True, page_delay = 3, proxy = None, ignore_ssl_errors = False, cookies = False):
         self.page_delay = page_delay
         self.cookies = cookies
         
         from selenium.webdriver import Chrome
         from selenium.webdriver.chrome.options import Options
+        # from selenium.webdriver.chrome.service import Service
 
         options = Options()
         options.headless = headless
+        options.add_argument('--headless')
 
         if proxy:                                                           # configure proxy settings
             options.add_argument('--proxy-server=%s' % proxy)
@@ -431,7 +433,7 @@ class SeleniumClient(WebHandler):
             options.add_argument('--ignore-ssl-errors=yes')
             options.add_argument('--ignore-certificate-errors')
             
-        self.driver = Chrome(options = options, executable_path = driver_path)
+        self.driver = Chrome(options = options, executable_path = driver_path)  #service = Service(driver_path)
 
     def handle(self, req):
         self.log.debug("SeleniumClient, downloading", req.url)
