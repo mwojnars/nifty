@@ -881,12 +881,43 @@ def hashmd5(s, n = 4):
 
 def crc32(data):
     """
-    Calculates CRC-32 checksum of the input string, in a way compatible across all Python versions and hardware platforms.
+    Calculates CRC-32 checksum of the input string, in a way that is portable and stable across all hardware platforms.
     The returned value is an unsigned 4-byte integer in the range: [0, 2**32-1].
     """
     if isinstance(data, six.text_type):
         data = data.encode('utf-8')
     return binascii.crc32(data) & 0xffffffff
+
+
+
+_crc64_ecma_table = None
+
+def _crc64_ecma_init_table():
+    table = []
+    poly = 0x42F0E1EBA9EA3693
+    for i in range(256):
+        crc = i << 56
+        for _ in range(8):
+            crc = ((crc << 1) ^ poly) & 0xFFFFFFFFFFFFFFFF if (crc & (1 << 63)) else (crc << 1) & 0xFFFFFFFFFFFFFFFF
+        table.append(crc)
+    return table
+
+def crc64_ecma(data):
+    """
+    CRC-64/ECMA-182. Returns unsigned 64-bit int.
+    """
+    global _crc64_ecma_table
+    if _crc64_ecma_table is None:
+        _crc64_ecma_table = _crc64_ecma_init_table()
+    if isinstance(data, six.text_type):
+        data = data.encode('utf-8')
+    crc = 0x0000000000000000
+    for b in data:
+        crc = _crc64_ecma_table[((crc >> 56) ^ b) & 0xFF] ^ ((crc << 8) & 0xFFFFFFFFFFFFFFFF)
+    return crc & 0xFFFFFFFFFFFFFFFF
+
+
+crc64 = crc64_ecma      # alias
 
 
 #####################################################################################################################################################
