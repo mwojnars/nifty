@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
+r"""
 Flexible context-based pattern matching in HTML/XML/markup/plaintext documents.
 
 Redex Pattern is a new type of tool for extracting data from any markup document. 
@@ -591,7 +591,7 @@ class Tree(BaseTree):
         "Must-space. Matches 1 or more spaces."
         def compile(self): return r'\s+'                                                            #@ReservedAssignment
     class xspaceX(space):
-        """In-tag filler (space on steroids): like xdot2 matches any sequence of chars except <>, 
+        r"""In-tag filler (space on steroids): like xdot2 matches any sequence of chars except <>, 
         if only the 1st and last char are in-tag separators: one of ['"\s=].
         Alternatively, matches a regular sequence of 0+ spaces, like xspace0.
         """
@@ -706,7 +706,7 @@ class MetaPattern(type):
     
 
 class Redex(six.with_metaclass(MetaPattern, object)):
-    """
+    r"""
     Redex pattern.
     
     >>> p = Pattern("  {* ... {A}}{B}  ")

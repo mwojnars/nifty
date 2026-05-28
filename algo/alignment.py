@@ -254,11 +254,11 @@ class FuzzyString(object):
             # merge modes and convert to {repmin,repmax} pair
             repmin = repmax = 0
             for mode in mode_group:
-                repmin += int(mode is not '?')
+                repmin += int(mode != '?')
                 repmax += 1
             
             repmax = k
-            repmin = k - len([m for m in mode_group if m is '?'])           # subtract the no. of optional '?' characters
+            repmin = k - len([m for m in mode_group if m == '?'])           # subtract the no. of optional '?' characters
 
             # output a single `code` token with appropriate `mode` as obtained from merge
                 
