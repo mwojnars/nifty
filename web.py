@@ -20,7 +20,7 @@ from __future__ import print_function
 import os, sys, subprocess, threading, ssl
 #os.environ['http_proxy'] = ''                       # to fix urllib2 problem:  urllib2.URLError: <urlopen error [Errno -2] Name or service not known> 
 
-import random, time, socket, json, re, gzip, codecs
+import random, time, socket, signal, json, re, gzip, codecs
 from collections import namedtuple, deque
 from copy import deepcopy
 from datetime import datetime
@@ -42,7 +42,31 @@ else:
     from nifty.util import islinux, isint, islist, isnumber, isstring, JsonDict, mnoise, unique, classname, noLogger, defaultLogger, Object, crc32
     from nifty.text import regex, xbasestring, HTML, Plain
     from nifty import util
-    
+
+
+_interrupted = False
+
+def install_interrupt_handler():
+    """Arm SIGINT so Ctrl+C is noticed as soon as control returns to Python."""
+    global _interrupted
+    _interrupted = False
+    def handler(signum, frame):
+        global _interrupted
+        _interrupted = True
+        raise KeyboardInterrupt()
+    signal.signal(signal.SIGINT, handler)
+
+def check_interrupted():
+    if _interrupted:
+        raise KeyboardInterrupt()
+
+def is_user_interrupt(ex):
+    """True for Ctrl+C and curl_cffi failures caused by interrupting an in-flight download."""
+    if isinstance(ex, KeyboardInterrupt):
+        return True
+    msg = str(ex).lower()
+    return 'curl: (23)' in msg or 'failure writing output to destination' in msg
+
 now = time.time                 # shorthand for calling now() function, for process-local time measurement
 
 
@@ -488,10 +512,12 @@ class RetryOnError(WebHandler):
         self.excludeHTTP = [code for code in exclude if isint(code)]
     def handle(self, req):
         for i in range(self.attempts + 1):
+            check_interrupted()
             try:
                 _req = deepcopy(req)                    # we may need original 'req' again in the future, thus copying
                 return self.next.handle(_req)
             except Exception as e:
+                if is_user_interrupt(e): raise KeyboardInterrupt()
                 if not isinstance(e, self.exception): raise
                 for x in self.exclude:
                     if isinstance(e,x): raise
@@ -524,11 +550,13 @@ class RetryCustom(WebHandler):
     def handle(self, req):
         attempt = 0
         while True:
+            check_interrupted()
             try:
                 attempt += 1
                 _req = deepcopy(req)                    # we may need original 'req' again in the future, thus copying
                 return self.next.handle(_req)
             except Exception as e:
+                if is_user_interrupt(e): raise KeyboardInterrupt()
                 delay = self.test(e, attempt)
                 if not delay: raise
                 delay *= mnoise(1.1)
