@@ -950,7 +950,7 @@ class WebClient(Object):
         
     def removeHandler(self, handler):
         """Remove a handler that was added with addHandler(), either to the head or tail of the handlers list.
-           If the same handler has been added multiple times, its first occurence is removed.
+           If the same handler has been added multiple times, its first occurrence is removed.
            ValueError is raised if the handler is not present in the list.
         """
         if handler in self._head:
@@ -1299,7 +1299,7 @@ class XDoc(object):
     
     @staticmethod
     def __contains__(self, s):
-        "Checks for occurence of a given plain text in the document (tags stripped out). Shorthand for 's in x.text()'."
+        "Checks for occurrence of a given plain text in the document (tags stripped out). Shorthand for 's in x.text()'."
         return s in self.text()
     
 
